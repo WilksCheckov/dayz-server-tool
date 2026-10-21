@@ -132,7 +132,8 @@ function enrich(r) {
   const note = (r.id && notes[r.id] && notes[r.id].note) || (steamId && notes[steamId] && notes[steamId].note) || r.notes || '';
   const online = !!load().online[r.key] && server.status().running;
   let steam = null; try { steam = steamId ? require('./steambans').get(steamId) : null; } catch { /* ignore */ }
-  return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online, steam,
+  let account = null; try { account = require('./accounts').summary({ steamId, names: r.names }); } catch { /* ignore */ }
+  return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online, steam, account,
     whitelisted: !!(r.id && lists.has('whitelist', r.id)), banned: !!(r.id && lists.has('ban', r.id)), priority: !!(r.id && lists.has('priority', r.id)) };
 }
 
@@ -141,7 +142,7 @@ function all({ query = '', sort = 'lastSeen', limit = 500 } = {}) {
   const q = query.trim().toLowerCase();
   let rows = Object.values(d.players).map(enrich);
   if (q) rows = rows.filter(r => r.names.some(n => n.toLowerCase().includes(q)) || (r.id || '').toLowerCase().includes(q) || (r.steamId || '').includes(q) || (r.characterName || '').toLowerCase().includes(q));
-  const cmp = { lastSeen: (a, b) => (b.lastSeen || 0) - (a.lastSeen || 0), playtime: (a, b) => b.playtimeSec - a.playtimeSec, kills: (a, b) => b.kills - a.kills, deaths: (a, b) => b.deaths - a.deaths, name: (a, b) => a.name.localeCompare(b.name), firstSeen: (a, b) => (b.firstSeen || 0) - (a.firstSeen || 0) }[sort] || ((a, b) => 0);
+  const cmp = { lastSeen: (a, b) => (b.lastSeen || 0) - (a.lastSeen || 0), playtime: (a, b) => b.playtimeSec - a.playtimeSec, kills: (a, b) => b.kills - a.kills, deaths: (a, b) => b.deaths - a.deaths, name: (a, b) => a.name.localeCompare(b.name), suspicious: (a, b) => ((b.account && b.account.score) || 0) - ((a.account && a.account.score) || 0), firstSeen: (a, b) => (b.firstSeen || 0) - (a.firstSeen || 0) }[sort] || ((a, b) => 0);
   rows.sort((a, b) => (b.online - a.online) || cmp(a, b));
   return rows.slice(0, limit);
 }

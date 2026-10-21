@@ -127,6 +127,7 @@ async function players() {
     if (!m) continue;
     list.push({ num: Number(m[1]), ip: m[2], ping: Number(m[3]), guid: m[4], verified: m[5] === '(OK)', name: m[6], lobby: !!m[7] });
   }
+  try { require('./accounts').record(list); } catch { /* ignore */ }
   return { raw: out, players: list };
 }
 

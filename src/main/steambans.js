@@ -88,6 +88,7 @@ async function checkAll({ silent = false } = {}) {
       prev[id] = r;
     }
     save(); emitRef('steam:changed', { checked: Object.keys(fresh).length, newBans: newBans.length });
+    try { await require('./accounts').checkMany(ids); } catch { /* ignore */ }
     if (newBans.length && !silent) {
       try {
         const alerts = require('./alerts');

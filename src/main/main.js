@@ -20,6 +20,7 @@ const health = require('./health');
 const crashes = require('./crashes');
 const players = require('./players');
 const steambans = require('./steambans');
+const accounts = require('./accounts');
 const economy = require('./economy');
 const mission = require('./mission');
 const tasks = require('./tasks');
@@ -238,6 +239,8 @@ handle('steam:state', () => steambans.state());
 handle('steam:all', () => steambans.all());
 handle('steam:check', (id) => steambans.check(id));
 handle('steam:checkAll', () => steambans.checkAll());
+handle('accounts:check', (id) => accounts.checkSteam(id));
+handle('accounts:stats', () => accounts.stats());
 
 // Economy editor
 handle('economy:files', () => economy.files());
@@ -436,6 +439,7 @@ app.whenReady().then(() => {
   setInterval(refreshTray, 15000);
   players.init(emit);
   steambans.init(emit);
+  accounts.init(emit);
   createWindow();
 });
 
