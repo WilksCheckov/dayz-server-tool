@@ -25,7 +25,7 @@ const log = [];
 function cfg() {
   const s = settings.load();
   return {
-    token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', steamApiKey: '',
+    token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', priorityRoleId: '', bannedRoleId: '', mutedRoleId: '', steamApiKey: '',
     statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
     logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
     ...(s.discord || {})
@@ -51,8 +51,8 @@ let storeCache = null;
 function storeFile() { return path.join(app.getPath('userData'), 'discord-data.json'); }
 function store() {
   if (storeCache) return storeCache;
-  try { storeCache = { applications: {}, bans: [], ...JSON.parse(fs.readFileSync(storeFile(), 'utf8')) }; }
-  catch { storeCache = { applications: {}, bans: [] }; }
+  try { storeCache = { applications: {}, bans: [], mutes: [], ...JSON.parse(fs.readFileSync(storeFile(), 'utf8')) }; }
+  catch { storeCache = { applications: {}, bans: [], mutes: [] }; }
   return storeCache;
 }
 function saveStore() { fs.writeFileSync(storeFile(), JSON.stringify(store(), null, 2)); }
@@ -91,6 +91,10 @@ function buildCommands() {
     new SlashCommandBuilder().setName('application').setDescription('Post the whitelist application button in this channel'),
     listGroup('whitelist', 'Manage whitelist.txt', 'Steam64 ID'),
     listGroup('priority', 'Manage priority.txt (login queue skip)', 'Steam64 ID'),
+    new SlashCommandBuilder().setName('mute').setDescription('Discord mute: gives the muted role for a while')
+      .addSubcommand(s => s.setName('add').setDescription('Mute a member').addUserOption(o => o.setName('discord_user').setDescription('Member').setRequired(true)).addStringOption(o => o.setName('duration').setDescription('e.g. 30m, 2h, 3d (blank = until removed)')).addStringOption(reasonOpt))
+      .addSubcommand(s => s.setName('remove').setDescription('Unmute a member').addUserOption(o => o.setName('discord_user').setDescription('Member').setRequired(true)))
+      .addSubcommand(s => s.setName('list').setDescription('Show active mutes')),
     new SlashCommandBuilder().setName('ban').setDescription('Ban management')
       .addSubcommand(s => s.setName('permanent').setDescription('Permanently ban a player (game ban + Discord ban, whitelist removed)').addStringOption(o => o.setName('steamid64').setDescription("The player's SteamID64")).addUserOption(userOpt))
       .addSubcommand(s => s.setName('temporary').setDescription('Temporarily ban a player (game ban + Discord timeout) until the ban expires').addIntegerOption(o => o.setName('duration_days').setDescription('How many days').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('steamid64').setDescription("The player's SteamID64")).addUserOption(userOpt))
@@ -159,6 +163,64 @@ function resolveTarget(opt) {
   return { steamId, discordId, name: opt.name || (rec && rec.characterName) || '', rec };
 }
 
+// ---------- roles ----------
+async function setRole(discordId, roleId, on) {
+  if (!discordId || !roleId) return;
+  const m = await member(discordId); if (!m) return;
+  const has = m.roles.cache.has(roleId);
+  if (on && !has) await m.roles.add(roleId).catch(e => addLog(`Could not add role ${roleId} to ${discordId}: ${e.message}`));
+  if (!on && has) await m.roles.remove(roleId).catch(e => addLog(`Could not remove role ${roleId} from ${discordId}: ${e.message}`));
+}
+function parseDuration(s) {
+  if (!s) return null;
+  const m = String(s).trim().match(/^(\d+)\s*([mhdw]?)$/i); if (!m) return null;
+  const n = Number(m[1]); const unit = (m[2] || 'm').toLowerCase();
+  return n * { m: 60000, h: 3600000, d: 86400000, w: 604800000 }[unit];
+}
+async function muteUser({ discordId, durationMs, reason, by }) {
+  const c = cfg();
+  if (!c.mutedRoleId) throw new Error('No muted role configured on the Discord Bot page.');
+  const until = durationMs ? Date.now() + durationMs : null;
+  store().mutes = (store().mutes || []).filter(x => x.discordId !== discordId);
+  store().mutes.push({ discordId, until, reason: reason || '', by: by || null, at: Date.now() });
+  saveStore();
+  await setRole(discordId, c.mutedRoleId, true);
+  const m = await member(discordId); if (m) m.send(`You have been muted${until ? ` until <t:${Math.floor(until / 1000)}:F>` : ''}${reason ? `. Reason: ${reason}` : '.'}`).catch(() => {});
+}
+async function unmuteUser({ discordId, by }) {
+  const c = cfg();
+  const had = (store().mutes || []).some(x => x.discordId === discordId);
+  store().mutes = (store().mutes || []).filter(x => x.discordId !== discordId); saveStore();
+  await setRole(discordId, c.mutedRoleId, false);
+  if (had) { const m = await member(discordId); if (m) m.send('You have been unmuted.').catch(() => {}); }
+  return had;
+}
+// Keep Discord roles in step with the lists, wherever a change was made (app, bot, or the files themselves).
+let syncing = false;
+async function syncRoles() {
+  if (syncing || !client || !state.running) return;
+  syncing = true;
+  try {
+    const c = cfg();
+    const now = Date.now();
+    for (const mu of (store().mutes || []).filter(x => x.until && x.until <= now)) { await unmuteUser({ discordId: mu.discordId, by: 'System (Mute expired)' }); addLog(`Mute expired for ${mu.discordId}`); }
+    if (!c.whitelistRoleId && !c.priorityRoleId && !c.bannedRoleId) return;
+    const apps = Object.values(store().applications);
+    const activeBans = store().bans.filter(b => b.status === 'banned');
+    const seen = new Set();
+    for (const a of apps) {
+      if (!a.discordId || seen.has(a.discordId)) continue; seen.add(a.discordId);
+      const banned = activeBans.some(b => b.discordId === a.discordId || b.steamId === a.steamId);
+      if (c.whitelistRoleId) await setRole(a.discordId, c.whitelistRoleId, !banned && lists.has('whitelist', a.steamId));
+      if (c.priorityRoleId) await setRole(a.discordId, c.priorityRoleId, !banned && lists.has('priority', a.steamId));
+      if (c.bannedRoleId) await setRole(a.discordId, c.bannedRoleId, banned);
+    }
+    // bans on people without an application (banned by Steam64 + Discord user)
+    for (const b of activeBans) if (b.discordId && !seen.has(b.discordId) && c.bannedRoleId) { seen.add(b.discordId); await setRole(b.discordId, c.bannedRoleId, true); }
+  } catch (e) { addLog('Role sync error: ' + e.message); }
+  finally { syncing = false; }
+}
+
 // ---------- whitelist application flow ----------
 async function applyWhitelist({ steamId, discordId, name, reviewerId }) {
   lists.add('whitelist', { id: steamId, discordId, name }, { name, note: reviewerId ? `accepted by ${reviewerId}` : '' });
@@ -202,6 +264,7 @@ async function banUser({ steamId, discordId, reason, bannedBy, expiresAt, name }
   if (!steamId) throw new Error('No SteamID64 known for that player.');
   await revokeWhitelist({ steamId, discordId });
   lists.add('ban', { id: steamId, discordId, name, reason }, { name, note: reason });
+  if (discordId) await setRole(discordId, cfg().bannedRoleId, true);
   const m = await member(discordId);
   if (m) m.send(`You have been banned. Reason: ${reason}${expiresAt ? ` (expires <t:${Math.floor(new Date(expiresAt) / 1000)}:F>)` : ''}`).catch(() => {});
   const g = await guild();
@@ -232,6 +295,7 @@ async function unbanUser({ steamId, discordId, unbannedBy }) {
   if (sid) lists.remove('ban', sid);
   if (did) lists.remove('ban', did);
   const g = await guild();
+  if (did) await setRole(did, cfg().bannedRoleId, false);
   if (did && g) {
     if (!ban || !ban.expiresAt) g.members.unban(did, 'Ban lifted').catch(() => {});
     const m = await member(did);
@@ -276,7 +340,8 @@ async function execute(name, sub, opt, user) {
   if (name === 'help') {
     const lines = [
       '**/application** — Post the whitelist application button here. *(Admin)*',
-      '**/whitelist add|remove|list**, **/priority …** — Manage the server lists by Steam64 or Discord user. *(Admin)*',
+      '**/whitelist add|remove|list**, **/priority …** — Manage the server lists by Steam64 or Discord user; roles follow. *(Admin)*',
+      '**/mute add|remove|list** — Give a member the muted role for a duration (30m, 2h, 3d); it is removed when time is up. *(Admin)*',
       '**/ban permanent|temporary** — Ban a player (game + Discord), with a reason prompt. **/ban battleye** for GUID/IP bans, **/ban remove** to lift, **/ban list**. *(Admin)*',
       '**/search** — Player dossier: application, whitelist, bans, notes. *(Admin)*',
       '**/players**, **/kick**, **/say** — Live via RCon. *(Admin)*',
@@ -301,13 +366,19 @@ async function execute(name, sub, opt, user) {
     if (!t.steamId) return { content: '❌ Give a Steam64 ID, or a Discord user who has a whitelist application on file.' };
     if (sub === 'add') {
       if (kind === 'whitelist') await applyWhitelist({ steamId: t.steamId, discordId: t.discordId, name: t.name, reviewerId: by });
-      else lists.add(kind, { id: t.steamId, discordId: t.discordId, name: t.name }, { name: t.name, note: opt.reason || '' });
+      else { lists.add(kind, { id: t.steamId, discordId: t.discordId, name: t.name }, { name: t.name, note: opt.reason || '' }); if (t.discordId) await setRole(t.discordId, cfg().priorityRoleId, true); }
       return { content: `✅ Added \`${t.steamId}\`${t.name ? ` (${t.name})` : ''} to the ${kind}.`, log: `${who}: ${kind} add ${t.steamId}` };
     }
     if (sub === 'remove') {
-      if (kind === 'whitelist') await revokeWhitelist({ steamId: t.steamId, discordId: t.discordId }); else lists.remove(kind, t.steamId);
+      if (kind === 'whitelist') await revokeWhitelist({ steamId: t.steamId, discordId: t.discordId }); else { lists.remove(kind, t.steamId); if (t.discordId) await setRole(t.discordId, cfg().priorityRoleId, false); }
       return { content: `✅ Removed \`${t.steamId}\` from the ${kind}.`, log: `${who}: ${kind} remove ${t.steamId}` };
     }
+  }
+  if (name === 'mute') {
+    if (sub === 'list') return { embeds: [fmtList('Active mutes', store().mutes || [], m => `<@${m.discordId}>  ${m.until ? 'until ' + new Date(m.until).toLocaleString() : 'indefinite'}${m.reason ? ' — ' + m.reason : ''}`)] };
+    if (!opt.discord_user) return { content: '❌ Pick a Discord member.' };
+    if (sub === 'add') { const ms = parseDuration(opt.duration); if (opt.duration && !ms) return { content: '❌ Duration looks wrong. Use 30m, 2h, 3d or 1w.' }; await muteUser({ discordId: opt.discord_user, durationMs: ms, reason: opt.reason, by }); return { content: `✅ Muted <@${opt.discord_user}>${ms ? ` for ${opt.duration}` : ''}.`, log: `${who}: mute ${opt.discord_user} ${opt.duration || ''}` }; }
+    if (sub === 'remove') { const had = await unmuteUser({ discordId: opt.discord_user, by }); return { content: had ? `✅ Unmuted <@${opt.discord_user}>.` : `ℹ️ <@${opt.discord_user}> was not muted (role removed anyway).`, log: `${who}: unmute ${opt.discord_user}` }; }
   }
   if (name === 'ban') {
     if (sub === 'list') {
@@ -652,7 +723,7 @@ async function start() {
         try { const g = await client.guilds.fetch(c.guildId); state.guildName = g.name; } catch { state.guildName = null; state.error = 'Bot is not in that guild yet. Use the invite link.'; }
         addLog(`Bot online as ${state.tag}; ${cmds.length} slash commands registered${state.guildName ? ' in ' + state.guildName : ''}.`);
         startPresence();
-        clearInterval(expiryTimer); expiryTimer = setInterval(() => checkExpiredBans().catch(() => {}), 5 * 60 * 1000); checkExpiredBans().catch(() => {});
+        clearInterval(expiryTimer); expiryTimer = setInterval(() => { checkExpiredBans().catch(() => {}); syncRoles().catch(() => {}); }, 5 * 60 * 1000); checkExpiredBans().catch(() => {}); setTimeout(() => syncRoles().catch(() => {}), 5000);
         if (c.liveLogChannelId) { startTail(); addLog(`Live log streaming to channel ${c.liveLogChannelId} (${(c.liveLogKinds || []).join(', ').toUpperCase() || 'nothing selected'}${c.liveLogErrorsOnly ? ', errors only' : ''}).`); }
         resolve();
       } catch (e) { clearTimeout(timer); reject(e); }
@@ -676,4 +747,4 @@ async function stop(silent = false) {
 function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
 function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
 
-module.exports = { postAlert, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { postAlert, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };

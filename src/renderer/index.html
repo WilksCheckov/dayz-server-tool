@@ -739,7 +739,13 @@
               <label class="field">Server (guild) ID <input id="dcGuild" class="input" placeholder="123456789012345678"></label>
               <label class="field">Admin role IDs allowed to use commands (comma separated; server Administrators are always allowed) <input id="dcRoles" class="input" placeholder="optional"></label>
               <label class="field">Admin channel ID (whitelist applications and ban notices are posted here with Accept / Decline / Unban buttons) <input id="dcAdminChannel" class="input" placeholder="required for /application and bans"></label>
-              <label class="field">Whitelist role ID (given on accept, removed on ban or removal) <input id="dcWhitelistRole" class="input" placeholder="optional"></label>
+              <div class="card-title mt">Roles <span class="muted">kept in sync with the lists every 5 minutes and on every change</span></div>
+              <div class="grid-2 tight">
+                <label class="field">Whitelist role ID (given on accept, removed on ban or removal) <input id="dcWhitelistRole" class="input" placeholder="optional"></label>
+                <label class="field">Priority role ID (follows priority.txt) <input id="dcPriorityRole" class="input" placeholder="optional"></label>
+                <label class="field">Banned role ID (while a ban is active) <input id="dcBannedRole" class="input" placeholder="optional"></label>
+                <label class="field">Muted role ID (/mute, removed when the time is up) <input id="dcMutedRole" class="input" placeholder="optional"></label>
+              </div>
               <label class="field">Steam Web API key (shows VAC / trade bans on applications; steamcommunity.com/dev/apikey) <input id="dcSteamKey" class="input" type="password" autocomplete="off" placeholder="optional"></label>
               <div class="grid-2 tight">
                 <label class="field">Online status text ({count} and {max} are replaced) <input id="dcStatusFormat" class="input" placeholder="Server Online | {count}/{max} Players"></label>

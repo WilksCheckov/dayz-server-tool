@@ -972,7 +972,7 @@ function loadDiscordForm() {
   $('dcGuild').value = c.guildId || '';
   $('dcRoles').value = (c.adminRoleIds || []).join(', ');
   $('dcLog').value = c.logChannelId || '';
-  $('dcAdminChannel').value = c.adminChannelId || ''; $('dcWhitelistRole').value = c.whitelistRoleId || ''; $('dcSteamKey').value = c.steamApiKey || '';
+  $('dcAdminChannel').value = c.adminChannelId || ''; $('dcWhitelistRole').value = c.whitelistRoleId || ''; $('dcPriorityRole').value = c.priorityRoleId || ''; $('dcBannedRole').value = c.bannedRoleId || ''; $('dcMutedRole').value = c.mutedRoleId || ''; $('dcSteamKey').value = c.steamApiKey || '';
   $('dcStatusFormat').value = c.statusFormat || 'Server Online | {count}/{max} Players'; $('dcOfflineStatus').value = c.offlineStatus || 'Server Offline';
   $('dcAuto').checked = !!c.autoStart;
   $('dcLiveChannel').value = c.liveLogChannelId || '';
@@ -980,7 +980,7 @@ function loadDiscordForm() {
   $('dcLiveAdm').checked = kinds.includes('adm'); $('dcLiveRpt').checked = kinds.includes('rpt'); $('dcLiveErrors').checked = !!c.liveLogErrorsOnly;
 }
 function discordForm() {
-  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked };
+  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked };
 }
 $('btnDiscordSave').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); await ipc.invoke('discord:applyLiveLog'); toast('Bot settings saved'); renderDiscord(await ipc.invoke('discord:status')); }, e.target);
 $('btnDiscordStart').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); toast('Starting bot…'); renderDiscord(await ipc.invoke('discord:start')); toast('Bot online'); }, e.target);
