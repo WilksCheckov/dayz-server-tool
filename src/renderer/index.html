@@ -656,10 +656,11 @@
             <span class="muted" id="pdbStats"></span>
             <button class="btn" id="btnPdbRefresh">Refresh</button>
             <button class="btn" id="btnPdbRebuild" title="Re-read the newest admin logs from the beginning">Rebuild</button>
+            <button class="btn" id="btnSteamCheck" title="Ask Steam for VAC / game / trade bans on every known Steam64 (needs the Steam Web API key from the Discord Bot page)">Check Steam bans</button>
           </div>
           <div class="pdb-layout">
             <div class="card list-card">
-              <div class="table-wrap grow"><table class="table" id="pdbTable"><thead><tr><th>Name</th><th>ID</th><th>Last seen</th><th>Playtime</th><th>K / D</th><th>Flags</th></tr></thead><tbody></tbody></table></div>
+              <div class="table-wrap grow"><table class="table" id="pdbTable"><thead><tr><th>Name</th><th>ID</th><th>Last seen</th><th>Playtime</th><th>K / D</th><th>Flags</th><th>Steam</th><th>Discord roles</th></tr></thead><tbody></tbody></table></div>
             </div>
             <div class="card pdb-detail" id="pdbDetail"><div class="empty">Select a player to see their history.</div></div>
           </div>
@@ -679,7 +680,7 @@
             <div class="card list-card">
               <div class="card-title row between"><span id="banLabel">Game bans <span class="muted">ban.txt</span></span><span class="muted" id="banFile"></span></div>
               <p class="muted" id="banHelp"></p>
-              <div class="table-wrap grow"><table class="table" id="banTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+              <div class="table-wrap grow"><table class="table" id="banTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
             </div>
             <div class="card list-card">
               <div class="card-title row between"><span>BattlEye bans <span class="muted">bans.txt</span></span><span class="row gap"><button class="btn small" id="btnBeLoadBans" title="Tell BattlEye to reload bans.txt (needs RCon)">loadBans via RCon</button><span class="muted" id="bebanFile"></span></span></div>
@@ -700,7 +701,7 @@
           <div class="card grow list-card">
             <div class="card-title row between"><span>Whitelist <span class="muted">whitelist.txt</span></span><span class="muted" id="whitelistFile"></span></div>
             <p class="muted" id="whitelistHelp"></p>
-            <div class="table-wrap grow"><table class="table" id="whitelistTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+            <div class="table-wrap grow"><table class="table" id="whitelistTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
           </div>
         </section>
 
@@ -714,7 +715,7 @@
           <div class="card grow list-card">
             <div class="card-title row between"><span>Priority queue <span class="muted">priority.txt</span></span><span class="muted" id="priorityFile"></span></div>
             <p class="muted" id="priorityHelp">Steam64 IDs that skip the login queue when the server is full.</p>
-            <div class="table-wrap grow"><table class="table" id="priorityTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+            <div class="table-wrap grow"><table class="table" id="priorityTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
           </div>
         </section>
 

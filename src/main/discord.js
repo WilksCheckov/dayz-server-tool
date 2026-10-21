@@ -64,6 +64,7 @@ function activeBanFor(discordId, steamId) {
 async function getSteamInfo(steamid64) {
   const key = cfg().steamApiKey;
   if (!key) return null;
+  try { const r = await require('./steambans').check(steamid64); if (r) return r; } catch { /* fall through */ }
   try {
     const [b, s] = await Promise.all([
       fetch(`https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${key}&steamids=${steamid64}`).then(r => r.json()),
@@ -71,7 +72,7 @@ async function getSteamInfo(steamid64) {
     ]);
     const bans = b && b.players && b.players[0], sum = s && s.response && s.response.players && s.response.players[0];
     if (!bans || !sum) return null;
-    return { vacBanned: bans.VACBanned, vacBans: bans.NumberOfVACBans, gameBans: bans.NumberOfGameBans, tradeBanned: bans.EconomyBan !== 'none', isPrivate: sum.communityvisibilitystate !== 3, personaName: sum.personaname };
+    return { vacBanned: bans.VACBanned, vacBans: bans.NumberOfVACBans, gameBans: bans.NumberOfGameBans, tradeBanned: bans.EconomyBan !== 'none', communityBanned: !!bans.CommunityBanned, isPrivate: sum.communityvisibilitystate !== 3, personaName: sum.personaname };
   } catch { return null; }
 }
 
@@ -110,6 +111,7 @@ function buildCommands() {
       .addSubcommand(s => s.setName('start').setDescription('Start the server'))
       .addSubcommand(s => s.setName('stop').setDescription('Stop the server'))
       .addSubcommand(s => s.setName('restart').setDescription('Restart the server (warns players if RCon is connected)')),
+    new SlashCommandBuilder().setName('maintenance').setDescription('Re-check every known player against Steam for VAC / game / trade bans and refresh the application embeds'),
     new SlashCommandBuilder().setName('backup').setDescription('Take a backup now')
   ].map(c => { const j = c.setDMPermission(false).toJSON(); if (j.default_member_permissions === undefined) j.default_member_permissions = String(PermissionFlagsBits.Administrator); return j; });
 }
@@ -237,6 +239,48 @@ async function revokeWhitelist({ steamId, discordId }) {
   if (m && c.whitelistRoleId) m.roles.remove(c.whitelistRoleId).catch(() => {});
 }
 
+function steamFields(steamInfo) {
+  const u = v => v === null || v === undefined ? 'Unknown' : v;
+  return [
+    { name: 'VAC Ban', value: steamInfo ? (steamInfo.vacBanned ? `Yes (${steamInfo.vacBans})` : 'No') : 'Unknown (no Steam API key)', inline: true },
+    { name: 'Trade Ban', value: steamInfo ? (steamInfo.tradeBanned ? 'Yes' : 'No') : u(null), inline: true },
+    { name: 'Ban Count', value: steamInfo ? String((steamInfo.vacBans || 0) + (steamInfo.gameBans || 0)) + (steamInfo.communityBanned ? ' (+community ban)' : '') : u(null), inline: true },
+    { name: 'Profile Privacy', value: steamInfo ? (steamInfo.isPrivate ? 'Private' : 'Public') : u(null), inline: true }];
+}
+// Re-read the stored Steam ban result for every application and update the fields on its embed (the old bot's /maintenance).
+async function refreshApplicationEmbeds() {
+  if (!client || !state.running) return { updated: 0 };
+  const c = cfg(); const ch = await channel(c.adminChannelId); if (!ch) return { updated: 0 };
+  const sb = require('./steambans'); let updated = 0;
+  for (const a of Object.values(store().applications)) {
+    if (!a.messageId) continue;
+    const info = sb.get(a.steamId); if (!info) continue;
+    const msg = await ch.messages.fetch(a.messageId).catch(() => null);
+    if (!msg || !msg.embeds[0]) continue;
+    const map = Object.fromEntries(steamFields(info).map(f => [f.name, f]));
+    const fields = (msg.embeds[0].fields || []).map(f => map[f.name] ? { ...map[f.name], inline: f.inline } : f);
+    for (const f of Object.values(map)) if (!fields.some(x => x.name === f.name)) fields.push(f);
+    const changed = JSON.stringify(fields) !== JSON.stringify(msg.embeds[0].fields || []);
+    if (!changed) continue;
+    const embed = EmbedBuilder.from(msg.embeds[0]).setFields(fields);
+    if (sb.flagged(info) && a.status === 'accepted') embed.setColor(0xf5b942);
+    await msg.edit({ embeds: [embed] }).catch(() => {}); updated++;
+  }
+  if (updated) addLog(`Maintenance: refreshed Steam ban fields on ${updated} application(s)`);
+  return { updated };
+}
+// Which of the configured roles each Discord member currently holds. Used by the player database.
+async function rolesFor(discordIds) {
+  const c = cfg(); const out = {};
+  if (!client || !state.running) return out;
+  for (const id of discordIds) {
+    const m = await member(id);
+    if (!m) { out[id] = { member: false }; continue; }
+    const has = r => !!(r && m.roles.cache.has(r));
+    out[id] = { member: true, whitelist: c.whitelistRoleId ? has(c.whitelistRoleId) : null, priority: c.priorityRoleId ? has(c.priorityRoleId) : null, banned: c.bannedRoleId ? has(c.bannedRoleId) : null, muted: c.mutedRoleId ? has(c.mutedRoleId) : null };
+  }
+  return out;
+}
 function applicationEmbed(interaction, { steamId, character, biography, bansText, rules, steamInfo }) {
   const u = v => v === null || v === undefined ? 'Unknown' : v;
   return new EmbedBuilder().setColor(0x4f8cff)
@@ -248,10 +292,7 @@ function applicationEmbed(interaction, { steamId, character, biography, bansText
       { name: 'Character Name', value: character, inline: true },
       { name: 'User Reported Bans', value: bansText || '-', inline: true },
       { name: 'Accepted Rules', value: rules || '-', inline: true },
-      { name: 'VAC Ban', value: steamInfo ? (steamInfo.vacBanned ? 'Yes' : 'No') : 'Unknown (no Steam API key)', inline: true },
-      { name: 'Trade Ban', value: steamInfo ? (steamInfo.tradeBanned ? 'Yes' : 'No') : u(null), inline: true },
-      { name: 'Ban Count', value: steamInfo ? String(steamInfo.vacBans + steamInfo.gameBans) : u(null), inline: true },
-      { name: 'Profile Privacy', value: steamInfo ? (steamInfo.isPrivate ? 'Private' : 'Public') : u(null), inline: true });
+      ...steamFields(steamInfo));
 }
 const acceptedRow = (steamId, discordId) => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setStyle('Danger').setCustomId(`remove-${steamId}-${discordId}`).setLabel('Remove From Whitelist'),
@@ -340,6 +381,7 @@ async function execute(name, sub, opt, user) {
   if (name === 'help') {
     const lines = [
       '**/application** — Post the whitelist application button here. *(Admin)*',
+      '**/maintenance** — Re-check everyone against Steam for new VAC / game / trade bans and refresh the application embeds. *(Admin)*',
       '**/whitelist add|remove|list**, **/priority …** — Manage the server lists by Steam64 or Discord user; roles follow. *(Admin)*',
       '**/mute add|remove|list** — Give a member the muted role for a duration (30m, 2h, 3d); it is removed when time is up. *(Admin)*',
       '**/ban permanent|temporary** — Ban a player (game + Discord), with a reason prompt. **/ban battleye** for GUID/IP bans, **/ban remove** to lift, **/ban list**. *(Admin)*',
@@ -461,6 +503,11 @@ async function execute(name, sub, opt, user) {
     if (sub === 'start') { server.start(); return { content: '✅ Server starting.', log: `${who}: server start` }; }
     if (sub === 'stop') { await server.stop(); return { content: '✅ Server stopped.', log: `${who}: server stop` }; }
     if (sub === 'restart') { scheduler.restartNow().catch(() => {}); return { content: '✅ Restart started (players are warned if RCon is connected; backup taken if enabled).', log: `${who}: server restart` }; }
+  }
+  if (name === 'maintenance') {
+    const r = await require('./steambans').checkAll();
+    const e = await refreshApplicationEmbeds();
+    return { content: `✅ Checked ${r.checked} Steam account(s). ${r.newBans && r.newBans.length ? `⚠️ New bans: ${r.newBans.map(b => `${b.personaName || b.steamId} (${b.steamId})`).join(', ')}` : 'No new bans.'} Refreshed ${e.updated} application embed(s).`, log: `${who}: maintenance` };
   }
   if (name === 'backup') {
     const r = await backups.create('discord');
@@ -747,4 +794,4 @@ async function stop(silent = false) {
 function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
 function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
 
-module.exports = { postAlert, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { postAlert, refreshApplicationEmbeds, rolesFor, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };

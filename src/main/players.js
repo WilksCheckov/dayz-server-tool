@@ -131,7 +131,8 @@ function enrich(r) {
   } catch { /* bot module not loaded */ }
   const note = (r.id && notes[r.id] && notes[r.id].note) || (steamId && notes[steamId] && notes[steamId].note) || r.notes || '';
   const online = !!load().online[r.key] && server.status().running;
-  return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online,
+  let steam = null; try { steam = steamId ? require('./steambans').get(steamId) : null; } catch { /* ignore */ }
+  return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online, steam,
     whitelisted: !!(r.id && lists.has('whitelist', r.id)), banned: !!(r.id && lists.has('ban', r.id)), priority: !!(r.id && lists.has('priority', r.id)) };
 }
 

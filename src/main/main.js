@@ -19,6 +19,7 @@ const alerts = require('./alerts');
 const health = require('./health');
 const crashes = require('./crashes');
 const players = require('./players');
+const steambans = require('./steambans');
 const economy = require('./economy');
 const mission = require('./mission');
 const tasks = require('./tasks');
@@ -230,6 +231,11 @@ handle('players:remove', (key) => players.remove(key));
 handle('players:stats', () => players.stats());
 handle('players:rebuild', () => players.rebuild());
 handle('players:ingest', () => players.ingest());
+handle('players:discordRoles', (ids) => discord.rolesFor(ids || []));
+handle('steam:state', () => steambans.state());
+handle('steam:all', () => steambans.all());
+handle('steam:check', (id) => steambans.check(id));
+handle('steam:checkAll', () => steambans.checkAll());
 
 // Economy editor
 handle('economy:files', () => economy.files());
@@ -422,6 +428,7 @@ app.whenReady().then(() => {
   if (appPrefs().closeToTray || process.argv.includes('--minimized')) buildTray();
   setInterval(refreshTray, 15000);
   players.init(emit);
+  steambans.init(emit);
   createWindow();
 });
 

@@ -21,6 +21,7 @@ const KINDS = {
   'high-ram': { label: 'High memory use', color: 0xf5b942, cooldownSec: 900 },
   'rcon-lost': { label: 'RCon connection lost', color: 0xf5b942, cooldownSec: 300 },
   'bot-offline': { label: 'Discord bot went offline', color: 0xf5b942, cooldownSec: 300 },
+  'steam-ban': { label: 'Player picked up a Steam ban', color: 0xff5f5f, cooldownSec: 0 },
   'test': { label: 'Test alert', color: 0x4f8cff, cooldownSec: 0 }
 };
 

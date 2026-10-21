@@ -904,9 +904,10 @@ function renderListTable(tableId, entries, kind) {
     tb.innerHTML = entries.map(e => `<tr data-id="${esc(e.id)}"><td class="mono">${esc(e.id)}</td><td>${e.minutes === '0' || e.minutes === 'perm' || e.minutes === '-1' ? 'permanent' : esc(e.minutes)}</td><td>${esc(e.reason || '')}</td><td>${esc(e.name)}</td><td><button class="btn small danger ls-remove">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Empty</td></tr>';
     return;
   }
-  tb.innerHTML = entries.map(e => `<tr data-id="${esc(e.id)}"><td class="mono">${esc(e.id)}</td><td>${esc(e.name)}</td><td class="muted">${esc(e.note)}</td><td class="muted">${e.added ? fmtDate(e.added).split(',')[0] : ''}</td><td><button class="btn small danger ls-remove">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Empty</td></tr>';
+  tb.innerHTML = entries.map(e => `<tr data-id="${esc(e.id)}"><td class="mono">${esc(e.id)}</td><td>${esc(e.name)}</td><td class="muted">${esc(e.note)}</td><td class="muted">${e.added ? fmtDate(e.added).split(',')[0] : ''}</td><td>${e.steamId ? steamBadges(steamMap[e.steamId]) : '<span class="muted">—</span>'}</td><td><button class="btn small danger ls-remove">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Empty</td></tr>';
 }
 async function refreshLists() {
+  await loadSteamMap();
   const all = await ipc.invoke('lists:all');
   for (const kind of ['ban', 'whitelist', 'priority']) {
     const l = all[kind];
@@ -1164,7 +1165,7 @@ $('btnAlertsPage').onclick = () => showPage('alerts');
 let alertsCfg = null;
 async function loadAlertsPage() {
   alertsCfg = await ipc.invoke('alerts:config');
-  const kinds = { crash: 'Server crashed / exited unexpectedly', 'crash-loop': 'Crash loop detected', restart: 'Scheduled restart', 'server-up': 'Server started', 'backup-failed': 'Backup failed', 'update-available': 'Mod updates available', 'update-done': 'Update run finished', 'update-failed': 'Update failed', 'low-fps': 'Low server FPS', 'high-ram': 'High memory use', 'rcon-lost': 'RCon connection lost', 'bot-offline': 'Discord bot went offline' };
+  const kinds = { crash: 'Server crashed / exited unexpectedly', 'crash-loop': 'Crash loop detected', restart: 'Scheduled restart', 'server-up': 'Server started', 'backup-failed': 'Backup failed', 'update-available': 'Mod updates available', 'update-done': 'Update run finished', 'update-failed': 'Update failed', 'low-fps': 'Low server FPS', 'high-ram': 'High memory use', 'rcon-lost': 'RCon connection lost', 'bot-offline': 'Discord bot went offline', 'steam-ban': 'Player picked up a Steam ban (VAC / game / trade)' };
   $('alertKindsTable').querySelector('tbody').innerHTML = Object.entries(kinds).map(([k, label]) => `<tr data-kind="${k}"><td>${esc(label)}</td><td><input type="checkbox" class="al-toast" ${alertsCfg.toast[k] ? 'checked' : ''}></td><td><input type="checkbox" class="al-discord" ${alertsCfg.discord[k] ? 'checked' : ''}></td><td><input type="checkbox" class="al-webhook" ${alertsCfg.webhook[k] ? 'checked' : ''}></td></tr>`).join('');
   $('alertChannel').value = alertsCfg.alertChannelId || ''; $('alertWebhook').value = alertsCfg.webhookUrl || '';
   const t = alertsCfg.thresholds; $('thFps').value = t.fpsBelow; $('thFpsFor').value = t.fpsForSec; $('thRam').value = t.ramAboveMB; $('thLoopCount').value = t.crashLoopCount; $('thLoopMin').value = t.crashLoopMinutes;
@@ -1195,18 +1196,62 @@ $('btnCrashOpenFolder').onclick = () => ipc.invoke('crashes:openFolder');
 ipc.on('crashes:changed', () => { if (logTab === 'crashes') refreshCrashes(); });
 
 
+// ---------- Steam ban badges ----------
+let steamMap = {};
+function steamBadges(r) {
+  if (!r) return '<span class="muted">—</span>';
+  const b = [];
+  if (r.vacBanned) b.push(`<span class="badge bad" title="${r.vacBans} VAC ban(s), last ${r.daysSinceLastBan} days ago">VAC</span>`);
+  if (r.gameBans > 0) b.push(`<span class="badge bad" title="${r.gameBans} game ban(s)">game ban</span>`);
+  if (r.tradeBanned) b.push('<span class="badge warn">trade ban</span>');
+  if (r.communityBanned) b.push('<span class="badge warn">community ban</span>');
+  if (!b.length) b.push('<span class="badge ok" title="No VAC, game, trade or community bans">clean</span>');
+  if (r.isPrivate) b.push('<span class="badge" title="Private Steam profile">private</span>');
+  return b.join(' ');
+}
+async function loadSteamMap() { try { steamMap = await ipc.invoke('steam:all'); } catch { steamMap = {}; } }
+ipc.on('steam:changed', async (d) => { await loadSteamMap(); if (d && d.checked) toast(`Steam check: ${d.checked} account(s)${d.newBans ? ', ' + d.newBans + ' new ban(s)' : ''}`); if (document.querySelector('#page-database.active')) refreshPdb(); else refreshLists().catch(() => {}); });
+
 // ---------- player database ----------
 let pdbRows = [], pdbSelected = null;
 function fmtPlaytime(sec) { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return h ? `${h}h ${m}m` : `${m}m`; }
 async function refreshPdb() {
+  if (!Object.keys(steamMap).length) await loadSteamMap();
   pdbRows = await ipc.invoke('players:all', { query: $('pdbQuery').value.trim(), sort: $('pdbSort').value });
   const st = await ipc.invoke('players:stats');
   $('pdbStats').textContent = `${st.total} players · ${st.today} today · ${st.week} this week · peak today ${st.peakToday} · ${fmtPlaytime(st.totalPlaytimeSec)} total`;
   $('pdbTable').querySelector('tbody').innerHTML = pdbRows.map(r => `<tr data-key="${esc(r.key)}" class="${pdbSelected === r.key ? 'selected' : ''}">
     <td>${r.online ? '<span class="dot ok" style="margin-right:6px"></span>' : ''}${esc(r.name)}${r.characterName && r.characterName !== r.name ? ` <span class="muted">(${esc(r.characterName)})</span>` : ''}</td>
     <td class="mono">${esc(r.steamId || r.id || '?')}</td><td class="muted">${r.lastSeen ? fmtDate(r.lastSeen) : '—'}</td><td>${fmtPlaytime(r.playtimeSec)}</td><td>${r.kills} / ${r.deaths}</td>
-    <td>${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.priority ? '<span class="badge">priority</span> ' : ''}${r.application ? `<span class="badge">app: ${esc(r.application)}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No players recorded yet. The database fills from the admin log (-adminlog) while the server runs.</td></tr>';
+    <td>${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.priority ? '<span class="badge">priority</span> ' : ''}${r.application ? `<span class="badge">app: ${esc(r.application)}</span>` : ''}</td><td>${r.steamId ? steamBadges(r.steam) : '<span class="muted">—</span>'}</td><td class="pdb-roles" data-discord="${esc(r.discordId || '')}">${r.discordId ? '<span class="muted">…</span>' : '<span class="muted">—</span>'}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No players recorded yet. The database fills from the admin log (-adminlog) while the server runs.</td></tr>';
   if (pdbSelected) renderPdbDetail(pdbRows.find(r => r.key === pdbSelected) || await ipc.invoke('players:get', pdbSelected));
+  fillDiscordRoles();
+}
+// Ask the bot which configured roles each listed member holds and compare with the list files.
+let pdbRoles = {};
+function roleCell(r, roles) {
+  if (!roles) return '<span class="muted">bot offline</span>';
+  if (!roles.member) return '<span class="muted" title="Not in the Discord server">not in server</span>';
+  const want = { whitelist: r.whitelisted, priority: r.priority, banned: r.banned };
+  const out = [];
+  for (const k of ['whitelist', 'priority', 'banned', 'muted']) {
+    if (roles[k] === null || roles[k] === undefined) continue; // role not configured
+    const has = roles[k]; const expect = want[k];
+    if (!has && !expect) continue;
+    const mismatch = expect !== undefined && has !== expect;
+    const cls = k === 'banned' || k === 'muted' ? 'bad' : 'ok';
+    const title = mismatch ? (has ? 'Has the role but is not on the list' : 'On the list but missing the role (the next sync adds it)') : 'Role matches the list';
+    out.push(`<span class="badge ${mismatch ? 'warn' : (has ? cls : '')}" title="${title}">${has ? '' : '⚠ no '}${k}${mismatch && has ? ' ⚠' : ''}</span>`);
+  }
+  return out.join(' ') || '<span class="muted">none</span>';
+}
+async function fillDiscordRoles() {
+  const cells = [...$('pdbTable').querySelectorAll('td.pdb-roles[data-discord]')].filter(td => td.dataset.discord);
+  if (!cells.length) return;
+  const ids = [...new Set(cells.map(td => td.dataset.discord))];
+  try { pdbRoles = await ipc.invoke('players:discordRoles', ids); } catch { pdbRoles = {}; }
+  for (const td of cells) { const r = pdbRows.find(x => x.discordId === td.dataset.discord); td.innerHTML = roleCell(r || {}, pdbRoles[td.dataset.discord]); }
+  if (pdbSelected) { const r = pdbRows.find(x => x.key === pdbSelected); const box = $('pdbDetail').querySelector('#pdRoles'); if (r && box) box.innerHTML = r.discordId ? roleCell(r, pdbRoles[r.discordId]) : '—'; }
 }
 function renderPdbDetail(r) {
   const box = $('pdbDetail');
@@ -1220,6 +1265,10 @@ function renderPdbDetail(r) {
       <div><span class="muted">Playtime</span><br>${fmtPlaytime(r.playtimeSec)} over ${r.connects} join(s)</div><div><span class="muted">Kills / deaths</span><br>${r.kills} / ${r.deaths}</div>
       <div><span class="muted">Last position</span><br>${r.lastPos ? `${Math.round(r.lastPos.x)}, ${Math.round(r.lastPos.z)} (${fmtDate(r.lastPos.at)})` : '—'}</div><div><span class="muted">Last death</span><br>${r.lastDeath ? (r.lastDeath.killer ? `killed by ${esc(r.lastDeath.killer)}${r.lastDeath.weapon ? ' with ' + esc(r.lastDeath.weapon) : ''}` : 'died') + ' · ' + fmtDate(r.lastDeath.at) : '—'}</div>
     </div>
+    <div class="grid-2 tight pdb-kv">
+      <div><span class="muted">Steam bans</span><br>${r.steamId ? steamBadges(r.steam) + (r.steam ? ` <span class="muted">checked ${fmtDate(r.steam.checkedAt)}</span>` : ' <button class="btn small" id="pdSteamCheck">Check now</button>') : '<span class="muted">Steam64 unknown</span>'}</div>
+      <div><span class="muted">Discord roles</span><br><span id="pdRoles">${r.discordId ? (pdbRoles[r.discordId] ? roleCell(r, pdbRoles[r.discordId]) : '<span class="muted">…</span>') : '<span class="muted">no Discord account linked</span>'}</span></div>
+    </div>
     ${r.names.length > 1 ? `<div><span class="muted">Names used</span><br>${r.names.map(esc).join(', ')}</div>` : ''}
     <div class="row gap wrap">
       ${r.id ? `<button class="btn small pd-act" data-kind="ban">Ban</button><button class="btn small pd-act" data-kind="whitelist">Whitelist</button><button class="btn small pd-act" data-kind="priority">Priority</button>` : ''}
@@ -1231,6 +1280,7 @@ function renderPdbDetail(r) {
     <div class="card-title mt">Recent sessions</div>
     <div class="table-wrap" style="max-height:220px"><table class="table"><thead><tr><th>Start</th><th>End</th><th>Length</th></tr></thead><tbody>${sessions.map(s => `<tr><td>${fmtDate(s.start)}</td><td>${fmtDate(s.end)}</td><td>${fmtPlaytime((s.end - s.start) / 1000)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No completed sessions.</td></tr>'}</tbody></table></div>`;
   box.querySelectorAll('.pd-act').forEach(b => b.onclick = (e) => run(async () => { const kind = b.dataset.kind; const rr = kind === 'ban' ? await askReason(`Ban ${r.name} (ban.txt)`) : { reason: '' }; if (!rr) return; await ipc.invoke('lists:add', kind, { id: r.steamId || r.id }, { name: r.name, note: rr.reason }); toast(`Added to ${kind}`); refreshPdb(); }, e.target));
+  const sc = box.querySelector('#pdSteamCheck'); if (sc) sc.onclick = (e) => run(async () => { const st = await ipc.invoke('steam:state'); if (!st.hasKey) { toast('Set a Steam Web API key on the Discord Bot page first', true); return; } const res = await ipc.invoke('steam:check', r.steamId); toast(res ? 'Checked' : 'Steam gave no answer', !res); refreshPdb(); }, e.target);
   const sp = box.querySelector('#pdSteam'); if (sp) sp.onclick = () => ipc.invoke('shell:openExternal', `https://steamcommunity.com/profiles/${r.steamId}`);
   box.querySelector('#pdSaveNote').onclick = (e) => run(async () => { await ipc.invoke('players:setNote', r.key, box.querySelector('#pdNotes').value); toast('Note saved'); refreshPdb(); }, e.target);
   box.querySelector('#pdRemove').onclick = (e) => run(async () => { const ok = await showModal(`Delete record for ${r.name}?`, '', [{ label: 'Delete', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('players:remove', r.key); pdbSelected = null; refreshPdb(); });
@@ -1239,6 +1289,14 @@ $('pdbTable').addEventListener('click', e => { const tr = e.target.closest('tr')
 $('pdbQuery').addEventListener('input', () => { clearTimeout(refreshPdb._t); refreshPdb._t = setTimeout(refreshPdb, 250); });
 $('pdbSort').onchange = () => refreshPdb();
 $('btnPdbRefresh').onclick = () => run(async () => { await ipc.invoke('players:ingest'); refreshPdb(); });
+$('btnSteamCheck').onclick = (e) => run(async () => {
+  const st = await ipc.invoke('steam:state');
+  if (!st.hasKey) { toast('Set a Steam Web API key on the Discord Bot page first', true); return; }
+  const r = await ipc.invoke('steam:checkAll');
+  if (r.skipped) { toast('A check is already running'); return; }
+  toast(`Checked ${r.checked} Steam account(s). ${r.newBans.length ? r.newBans.length + ' new ban(s)!' : 'No new bans.'}`, !!r.newBans.length);
+  await loadSteamMap(); refreshPdb();
+}, e.target);
 $('btnPdbRebuild').onclick = (e) => run(async () => { const ok = await showModal('Rebuild the player database?', '<p>Records are re-read from the newest admin logs. Notes stored on the player lists are kept; notes typed only here are lost.</p>', [{ label: 'Rebuild', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('players:rebuild'); toast('Rebuilt'); refreshPdb(); }, e.target);
 ipc.on('players:changed', () => { if (document.querySelector('#page-database.active')) refreshPdb(); });
 
