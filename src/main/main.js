@@ -49,7 +49,7 @@ function refreshTray() {
   const st = server.status();
   let h = null; try { h = health.current(); } catch { /* ignore */ }
   const players = h && h.players !== null && h.players !== undefined ? ` · ${h.players} players` : '';
-  tray.setToolTip(`DayZ Server Tool — ${st.running ? 'server running' + players : 'server stopped'}`);
+  tray.setToolTip(`DayZ Server Tool — ${st.running ? 'server on' + players : 'server off'}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open DayZ Server Tool', click: () => showWindow() },
     { type: 'separator' },
@@ -273,6 +273,9 @@ handle('mission:switch', (name) => mission.switchMission(name));
 handle('mission:wipe', (kind) => mission.wipe(kind));
 handle('mission:gameplay', () => mission.gameplay());
 handle('mission:saveGameplay', (changes) => mission.saveGameplay(changes));
+handle('mission:mapInfo', () => mission.mapInfo());
+handle('mission:setMapImage', (src) => mission.setMapImage(src));
+handle('mission:openMapsDir', () => { const d = mission.mapInfo().mapsDir; fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
 
 // Scheduled tasks
 handle('tasks:all', () => ({ tasks: tasks.all(), next: tasks.nextRuns(), types: tasks.TYPES }));

@@ -13,10 +13,10 @@
   <div class="app">
     <nav class="sidebar">
       <div class="brand">
-        <div class="brand-logo">DZ</div>
+        <img class="brand-logo" src="../assets/icon.png" alt="">
         <div>
           <div class="brand-name">DayZ Server Tool</div>
-          <div class="brand-sub" id="sideStatus">Stopped</div>
+          <div class="brand-sub" id="sideStatus">Server off</div>
         </div>
       </div>
       <div class="nav-scroll" id="nav"></div>
@@ -34,7 +34,7 @@
         </div>
         <div class="topbar-status">
           <select id="profileSelect" class="input profile-select" title="Server profile"></select>
-          <span class="pill" id="pillServer"><span class="dot"></span>Server stopped</span>
+          <span class="pill" id="pillServer"><span class="dot"></span>Server off</span>
           <span class="pill" id="pillRcon"><span class="dot"></span>RCon off</span>
           <span class="pill" id="pillDiscord"><span class="dot"></span>Bot off</span>
           <button class="pill pill-btn" id="pillUpdate" hidden>Update available</button>
@@ -47,7 +47,7 @@
           <div class="grid-4">
             <div class="card">
               <div class="card-title">Server</div>
-              <div class="stat"><span class="dot" id="dotServer"></span><span id="statServer">Stopped</span></div>
+              <div class="stat"><span class="dot" id="dotServer"></span><span id="statServer">Off</span></div>
               <div class="muted" id="statUptime">—</div>
               <div class="row gap mt">
                 <button class="btn primary" id="btnStart">Start</button>
@@ -366,11 +366,10 @@
         <!-- MAP -->
         <section class="page" id="page-map">
           <div class="page-toolbar">
-            <span class="muted">Last known positions from the admin log. Pick a map image (for example a saved iZurvive map) and the world size so points line up.</span>
+            <span class="muted" id="mapDetected">Detecting map from the active mission…</span>
             <span class="grow"></span>
-            <select id="mapWorld" class="input" style="width:200px"><option value="15360">Chernarus (15360 m)</option><option value="12800">Livonia (12800 m)</option><option value="10240">Sakhal (10240 m)</option><option value="custom">Custom size</option></select>
-            <input id="mapSize" class="input" type="number" style="width:110px" placeholder="metres" hidden>
-            <button class="btn" id="btnMapPickImage">Map image…</button>
+            <button class="btn" id="btnMapPickImage">Set map image…</button>
+            <button class="btn" id="btnMapOpenDir">Open maps folder</button>
             <label class="check"><input type="checkbox" id="mapOnlineOnly"> online only</label>
             <button class="btn" id="btnMapRefresh">Refresh</button>
           </div>
@@ -678,26 +677,32 @@
           </div>
         </section>
 
-        <!-- WHITELIST & PRIORITY -->
-        <section class="page" id="page-lists">
+        <!-- WHITELIST -->
+        <section class="page" id="page-whitelist">
           <div class="page-toolbar">
-            <input id="listId" class="input" placeholder="Steam64 ID" style="width:220px">
-            <input id="listName" class="input" placeholder="Name (note)" style="width:160px">
-            <select id="listTarget" class="input" style="width:160px"><option value="whitelist">Whitelist</option><option value="priority">Priority</option></select>
-            <button class="btn primary" id="btnAddList">Add</button>
+            <input id="wlId" class="input" placeholder="Steam64 ID" style="width:220px">
+            <input id="wlName" class="input" placeholder="Name (note)" style="width:160px">
+            <button class="btn primary" id="btnAddWl">Add to whitelist</button>
           </div>
           <div id="whitelistBanner" class="banner" hidden></div>
-          <div class="grid-2 grow">
-            <div class="card list-card">
-              <div class="card-title row between"><span>Whitelist <span class="muted">whitelist.txt</span></span><span class="muted" id="whitelistFile"></span></div>
-              <p class="muted" id="whitelistHelp"></p>
-              <div class="table-wrap grow"><table class="table" id="whitelistTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
-            </div>
-            <div class="card list-card">
-              <div class="card-title row between"><span>Priority queue <span class="muted">priority.txt</span></span><span class="muted" id="priorityFile"></span></div>
-              <p class="muted" id="priorityHelp"></p>
-              <div class="table-wrap grow"><table class="table" id="priorityTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
-            </div>
+          <div class="card grow list-card">
+            <div class="card-title row between"><span>Whitelist <span class="muted">whitelist.txt</span></span><span class="muted" id="whitelistFile"></span></div>
+            <p class="muted" id="whitelistHelp"></p>
+            <div class="table-wrap grow"><table class="table" id="whitelistTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+        </section>
+
+        <!-- PRIORITY -->
+        <section class="page" id="page-priority">
+          <div class="page-toolbar">
+            <input id="prId" class="input" placeholder="Steam64 ID" style="width:220px">
+            <input id="prName" class="input" placeholder="Name (note)" style="width:160px">
+            <button class="btn primary" id="btnAddPr">Add to priority queue</button>
+          </div>
+          <div class="card grow list-card">
+            <div class="card-title row between"><span>Priority queue <span class="muted">priority.txt</span></span><span class="muted" id="priorityFile"></span></div>
+            <p class="muted" id="priorityHelp">Steam64 IDs that skip the login queue when the server is full.</p>
+            <div class="table-wrap grow"><table class="table" id="priorityTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
           </div>
         </section>
 

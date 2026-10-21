@@ -69,6 +69,7 @@ const ICONS = {
   restarts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   players: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 20a5 5 0 015.5-5"/></svg>',
   database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg>',
+  priority: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16M5 11l7-7 7 7"/></svg>',
   bans: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg>',
   lists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>',
   website: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>',
@@ -101,8 +102,9 @@ const NAV = [
     { page: 'players', label: 'Online', sub: 'Live players via RCon: message, kick, ban', icon: 'players' },
     { page: 'database', label: 'Database', sub: 'Every player seen in the admin logs: playtime, kills, sessions, notes', icon: 'database' },
     { page: 'bans', label: 'Bans', sub: 'Game bans and BattlEye bans', icon: 'bans' },
-    { page: 'lists', label: 'Whitelist & Priority', sub: 'whitelist.txt and priority.txt', icon: 'lists' },
-    { page: 'map', label: 'Map', sub: 'Last known player positions on your map image', icon: 'map' }
+    { page: 'whitelist', label: 'Whitelist', sub: 'Who may join when enableWhitelist is on (whitelist.txt)', icon: 'lists' },
+    { page: 'priority', label: 'Priority queue', sub: 'Who skips the login queue (priority.txt)', icon: 'priority' },
+    { page: 'map', label: 'Map', sub: 'Last known player positions on the active mission\'s map', icon: 'map' }
   ] },
   { title: 'Integrations', items: [
     { page: 'discord', label: 'Discord Bot', sub: 'Slash commands, whitelist applications, bans, live logs', icon: 'discord' },
@@ -140,14 +142,14 @@ function showPage(name) {
   if (name === 'updates') { refreshUpdater(); refreshSteam(); }
   if (name === 'launch') refreshLaunchLines();
   if (name === 'players') { loadRconForm(); refreshPlayers(); refreshRecent(); }
-  if (name === 'bans' || name === 'lists') refreshLists();
+  if (name === 'bans' || name === 'whitelist' || name === 'priority') refreshLists();
   if (name === 'website') refreshWebsite();
   if (name === 'alerts') loadAlertsPage();
   if (name === 'settings') { loadSettingsPage(); refreshProfiles(); }
   if (name === 'mission') refreshMission();
   if (name === 'tasks') refreshTasks();
   if (name === 'network') refreshNetwork();
-  if (name === 'map') { loadMapPrefs(); setTimeout(drawMap, 50); }
+  if (name === 'map') { loadMapInfo().then(() => drawMap()); }
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
   if (name === 'dashboard') { refreshHealth(); refreshAlertList(); }
@@ -251,9 +253,9 @@ function renderServer(st) {
   state.server = st;
   const running = st.running;
   $('dotServer').className = 'dot ' + (running ? 'ok' : st.restartPending ? 'warn' : '');
-  $('statServer').textContent = running ? `Running (pid ${st.pid})` : st.restartPending ? 'Restarting…' : 'Stopped';
-  $('sideStatus').textContent = running ? 'Running' : 'Stopped';
-  const ps = $('pillServer'); ps.className = 'pill ' + (running ? 'ok' : st.restartPending ? 'warn' : ''); ps.innerHTML = `<span class="dot ${running ? 'ok' : st.restartPending ? 'warn' : ''}"></span>${running ? 'Server running' : st.restartPending ? 'Restarting' : 'Server stopped'}`;
+  $('statServer').textContent = running ? `On (pid ${st.pid})` : st.restartPending ? 'Restarting…' : 'Off';
+  $('sideStatus').textContent = running ? 'Server on' : 'Server off';
+  const ps = $('pillServer'); ps.className = 'pill ' + (running ? 'ok' : st.restartPending ? 'warn' : ''); ps.innerHTML = `<span class="dot ${running ? 'ok' : st.restartPending ? 'warn' : ''}"></span>${running ? 'Server on' : st.restartPending ? 'Restarting' : 'Server off'}`;
   $('btnQuickStart').hidden = running; $('btnQuickStop').hidden = !running;
   $('btnStart').disabled = running; $('btnStop').disabled = !running && !st.restartPending; $('btnRestart').disabled = !running;
   updateUptime();
@@ -910,11 +912,13 @@ $('btnAddBan').onclick = (e) => run(async () => {
   refreshLists();
 }, e.target);
 $('btnBeLoadBans').onclick = (e) => run(async () => { const out = await ipc.invoke('rcon:command', 'loadBans'); toast(out || 'Bans reloaded'); }, e.target);
-$('btnAddList').onclick = (e) => run(async () => {
-  const id = $('listId').value.trim(); if (!id) return toast('Enter an ID', true);
-  await ipc.invoke('lists:add', $('listTarget').value, { id }, { name: $('listName').value.trim() });
-  toast('Added'); $('listId').value = ''; $('listName').value = ''; refreshLists();
+const addListEntry = (kind, idEl, nameEl) => (e) => run(async () => {
+  const id = $(idEl).value.trim(); if (!id) return toast('Enter a Steam64 ID', true);
+  await ipc.invoke('lists:add', kind, { id }, { name: $(nameEl).value.trim() });
+  toast(kind === 'whitelist' ? 'Added to the whitelist' : 'Added to the priority queue'); $(idEl).value = ''; $(nameEl).value = ''; refreshLists();
 }, e.target);
+$('btnAddWl').onclick = addListEntry('whitelist', 'wlId', 'wlName');
+$('btnAddPr').onclick = addListEntry('priority', 'prId', 'prName');
 
 
 // ---------- discord bot ----------
@@ -1483,22 +1487,30 @@ $('btnNetAddRules').onclick = (e) => run(async () => { toast('Windows will ask f
 $('btnNetRemoveRules').onclick = (e) => run(async () => { await ipc.invoke('network:removeRules'); toast('Rules removed'); refreshNetwork(); }, e.target);
 
 // ---------- player map ----------
-const mapState = { img: null, imgPath: '', size: 15360 };
-function loadMapPrefs() { const p = (state.settings && state.settings.map) || {}; mapState.size = p.size || 15360; mapState.imgPath = p.image || ''; $('mapWorld').value = [15360, 12800, 10240].includes(mapState.size) ? String(mapState.size) : 'custom'; $('mapSize').hidden = $('mapWorld').value !== 'custom'; $('mapSize').value = mapState.size; if (mapState.imgPath) { const im = new Image(); im.onload = () => { mapState.img = im; drawMap(); }; im.onerror = () => { mapState.img = null; drawMap(); }; im.src = 'file:///' + mapState.imgPath.replace(/\\/g, '/'); } else { mapState.img = null; } }
+const mapState = { img: null, info: null };
+async function loadMapInfo() {
+  mapState.info = await ipc.invoke('mission:mapInfo');
+  const i = mapState.info;
+  $('mapDetected').textContent = !i.map ? 'No active mission: install the server and set the template in serverDZ.cfg.'
+    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.image ? ' · image: ' + i.image.split(/[\\/]/).pop() : ' · no image yet: add ' + i.map + '.png to the maps folder or use Set map image'}`;
+  mapState.img = null;
+  if (i.image) { await new Promise(res => { const im = new Image(); im.onload = () => { mapState.img = im; res(); }; im.onerror = () => res(); im.src = 'file:///' + i.image.replace(/\\/g, '/') + '?t=' + Date.now(); }); }
+}
 async function drawMap() {
+  if (!mapState.info) await loadMapInfo();
+  const size = (mapState.info && mapState.info.size) || 15360;
   const c = $('mapCanvas'); const card = c.parentElement; const W = card.clientWidth - 36, H = card.clientHeight - 60; const sz = Math.max(200, Math.min(W, H)); c.width = sz; c.height = sz;
   const ctx = c.getContext('2d'); ctx.clearRect(0, 0, sz, sz);
-  if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz); else { ctx.fillStyle = '#121620'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#242a38'; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
+  if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz); else { ctx.fillStyle = '#1a1d22'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#2b3036'; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
   const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 });
   const pts = rows.filter(r => r.lastPos && (!$('mapOnlineOnly').checked || r.online));
-  for (const r of pts) { const x = (r.lastPos.x / mapState.size) * sz, y = sz - (r.lastPos.z / mapState.size) * sz; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#3ddc84' : '#f5b942'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = '11px Segoe UI'; ctx.fillText(r.name, x + 8, y + 4); }
-  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · world ${mapState.size} m${mapState.imgPath ? '' : ' · no map image set (grid only)'}`;
+  for (const r of pts) { const x = (r.lastPos.x / size) * sz, y = sz - (r.lastPos.z / size) * sz; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = '11px Segoe UI'; ctx.fillText(r.name, x + 8, y + 4); }
+  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · world ${size} m`;
 }
-$('mapWorld').onchange = () => { $('mapSize').hidden = $('mapWorld').value !== 'custom'; mapState.size = $('mapWorld').value === 'custom' ? Number($('mapSize').value) || 15360 : Number($('mapWorld').value); saveSettings({ map: { size: mapState.size, image: mapState.imgPath } }); drawMap(); };
-$('mapSize').onchange = () => { mapState.size = Number($('mapSize').value) || 15360; saveSettings({ map: { size: mapState.size, image: mapState.imgPath } }); drawMap(); };
-$('btnMapPickImage').onclick = () => run(async () => { const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (!f) return; mapState.imgPath = f; await saveSettings({ map: { size: mapState.size, image: f } }); loadMapPrefs(); });
-$('btnMapRefresh').onclick = () => drawMap(); $('mapOnlineOnly').onchange = () => drawMap();
-window.addEventListener('resize', () => { if (document.querySelector('#page-map.active')) drawMap(); });
+$('btnMapPickImage').onclick = () => run(async () => { const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (!f) return; await ipc.invoke('mission:setMapImage', f); await loadMapInfo(); drawMap(); toast('Map image saved for ' + mapState.info.label); });
+$('btnMapOpenDir').onclick = () => ipc.invoke('mission:openMapsDir');
+$('btnMapRefresh').onclick = () => run(async () => { await loadMapInfo(); drawMap(); }); $('mapOnlineOnly').onchange = () => drawMap();
+window.addEventListener('resize', () => { if (document.querySelector('#page-map.active') && mapState.info) drawMap(); });
 
 // ---------- mod safety check ----------
 $('btnModCheck').onclick = (e) => run(async () => {

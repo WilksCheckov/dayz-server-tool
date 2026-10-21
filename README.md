@@ -20,7 +20,7 @@ A small Windows desktop app (Electron) for running a DayZ Standalone dedicated s
 
 - **Players & RCon**: a built-in BattlEye RCon client. Connect with the password/port from `battleye\BEServer_x64.cfg`, see online players (name, GUID, IP, ping, lobby/in-game), message, kick or ban them, broadcast to everyone, run raw RCon commands, and watch server messages live. A "Recent players" table is parsed from the admin logs (`-adminlog`) with one-click ban / whitelist / priority.
 - **Bans**: manage `profiles\ban.txt` (game bans by Steam64 or DayZ ID) and `battleye\bans.txt` (GUID/IP bans with duration and reason), with names and notes kept by the tool. "loadBans via RCon" reloads BattlEye bans without a restart.
-- **Whitelist & Priority**: manage `whitelist.txt` and `priority.txt`, with a banner showing whether `enableWhitelist` is on in serverDZ.cfg.
+- **Whitelist** and **Priority queue**: manage `whitelist.txt` and `priority.txt` on their own pages, with a banner showing whether `enableWhitelist` is on in serverDZ.cfg.
 - **Discord Bot**: a built-in bot (discord.js) you add to your own Discord server, modelled on the standalone whitelist bot. Paste a bot token, server ID and admin channel ID, start it, and it registers slash commands:
   - `/application` posts a Whitelist Application button. Applicants fill in SteamID64, character name, biography, bans and rules; the bot checks VAC/trade bans via the Steam API (optional key) and posts an embed in the admin channel with Accept / Decline / Steam Profile. Accept whitelists them (DayZ ID written to whitelist.txt with a `//SteamID64 … - DiscordID …` comment), gives the whitelist role and nicknames them after their character; Decline asks for a reason and DMs them.
   - `/ban permanent|temporary` (by Steam64 or Discord user) prompts for a reason, removes the whitelist, writes ban.txt, bans or times out the Discord account, and posts a ban notice with an Unban button. Temporary bans expire automatically. `/ban battleye`, `/ban remove`, `/ban list`, `/bantime` (players check their own ban).
@@ -49,12 +49,12 @@ A small Windows desktop app (Electron) for running a DayZ Standalone dedicated s
 - **Check mods** (Installed page): duplicate PBOs across mods, missing or uncopied keys, unlinked folders, verifySignatures, plus a ready-to-paste "players need these mods" list with workshop links.
 - **Server profiles** (top bar + Settings): separate settings per server instance; switching restarts the tool.
 - **Remote admin panel**: enable `/admin` on the Website page with a password to start, stop, restart, back up, broadcast and kick from a phone.
-- **Map** (Players → Map): last known player positions from the admin log on your own map image (set the world size for Chernarus, Livonia, Sakhal or custom).
+- **Map** (Players → Map): last known player positions from the admin log. The map and world size are detected from the active mission template (Chernarus, Livonia, Sakhal, Namalsk, Deer Isle and others). Put an image named after the map, e.g. `chernarusplus.png`, in `<install dir>\maps\` (or use "Set map image") and positions are drawn on it.
 - **Themes and shortcuts**: dark or light theme in Settings; Ctrl+1…9 jump to pages, F5 refreshes the page, Ctrl+K goes to a page by name.
 
 ## Layout
 
-Sidebar: **Dashboard**, then **Server** (Installation, Launch, Config Editor, Logs), **Mods** (Workshop, Installed), **Maintenance** (Updates, Backups, Restarts), **Players** (Online, Bans, Whitelist & Priority) and **Integrations** (Discord Bot). The top bar shows the page title and live pills for the server, RCon and the Discord bot.
+Sidebar: **Dashboard**, then **Server** (Installation, Launch, Config Editor, Logs), **Mods** (Workshop, Installed), **Maintenance** (Updates, Backups, Restarts), **Players** (Online, Bans, Whitelist, Priority queue) and **Integrations** (Discord Bot). The top bar shows the page title and live pills for the server, RCon and the Discord bot.
 
 ## Run from source
 

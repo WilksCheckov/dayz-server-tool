@@ -84,5 +84,30 @@ function saveGameplay(changes) {
   return configs.validate(file);
 }
 
+// World sizes in metres, keyed by the map name at the end of the mission template (dayzOffline.<map>).
+const WORLDS = { chernarusplus: 15360, enoch: 12800, sakhal: 10240, namalsk: 12800, deerisle: 16384, esseker: 12800, takistanplus: 12800, banov: 10240, chiemsee: 10240, iztek: 12800, melkart: 15360, valning: 10240 };
+const MAP_LABELS = { chernarusplus: 'Chernarus', enoch: 'Livonia', sakhal: 'Sakhal', namalsk: 'Namalsk', deerisle: 'Deer Isle', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', iztek: 'Iztek', melkart: 'Melkart', valning: 'Valning' };
+function mapsDir() { return path.join(settings.load().installDir, 'maps'); }
+// Which map the active mission uses, its size, and the image for it if one has been added to <installDir>\maps\<map>.(png|jpg).
+function mapInfo() {
+  const md = configs.missionDir();
+  const name = md ? path.basename(md) : null;
+  const map = name ? (name.match(/\.([A-Za-z0-9_]+)$/) || [])[1] || null : null;
+  const key = map ? map.toLowerCase() : null;
+  let image = null;
+  try { fs.mkdirSync(mapsDir(), { recursive: true }); for (const ext of ['png', 'jpg', 'jpeg', 'webp']) { const f = path.join(mapsDir(), key + '.' + ext); if (key && fs.existsSync(f)) { image = f; break; } } } catch { /* ignore */ }
+  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, mapsDir: mapsDir() };
+}
+function setMapImage(src) {
+  const info = mapInfo();
+  if (!info.map) throw new Error('No active mission, so the map is unknown.');
+  const ext = (path.extname(src).toLowerCase().replace('.', '') || 'png');
+  const dest = path.join(mapsDir(), info.map + '.' + ext);
+  fs.mkdirSync(mapsDir(), { recursive: true });
+  for (const e of ['png', 'jpg', 'jpeg', 'webp']) { try { fs.unlinkSync(path.join(mapsDir(), info.map + '.' + e)); } catch { /* none */ } }
+  fs.copyFileSync(src, dest);
+  return mapInfo();
+}
+
 function init(emit) { emitRef = emit; }
-module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay };
+module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage };

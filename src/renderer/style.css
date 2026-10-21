@@ -382,3 +382,5 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 
 .pill { white-space: nowrap; }
 .topbar-status { flex-shrink: 0; }
+
+.brand-logo { object-fit: cover; }
