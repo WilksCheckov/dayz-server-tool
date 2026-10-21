@@ -33,7 +33,7 @@ let tray = null;
 let quitting = false;
 const ICON = path.join(__dirname, '..', 'assets', 'icon.png');
 
-function appPrefs() { return { closeToTray: true, startMinimized: false, launchAtLogin: false, autoUpdate: true, autoStartServer: false, autoStartDelaySec: 10, theme: 'dark', ...(settings.load().app || {}) }; }
+function appPrefs() { return { closeToTray: true, startMinimized: false, launchAtLogin: false, autoUpdate: true, autoStartServer: false, autoStartDelaySec: 10, theme: 'dark', autoFirewall: true, ...(settings.load().app || {}) }; }
 
 // ----- system tray -----
 function buildTray() {
@@ -81,10 +81,24 @@ function initUpdater() {
   } catch (e) { updateState.error = e.message; }
 }
 
+let firewallChecked = false;
+// When the server comes up, make sure the Windows firewall allows its ports (one elevation prompt per session at most).
+async function ensureFirewall() {
+  if (firewallChecked || !appPrefs().autoFirewall) return;
+  firewallChecked = true;
+  try {
+    const have = await network.rules();
+    const need = network.ports().filter(p => !have.some(r => String(r.port) === String(p.port) && r.proto === p.proto && r.enabled));
+    if (!need.length) return;
+    emit('console', { source: 'network', line: 'Adding firewall rules for ' + need.map(p => p.proto + ' ' + p.port).join(', ') + ' (Windows asks for permission)...' });
+    await network.addRules();
+    emit('console', { source: 'network', line: 'Firewall rules added.' });
+  } catch (e) { emit('console', { source: 'network', line: 'Firewall rules not added: ' + e.message + '. Add them on the Network page.' }); }
+}
 function emit(channel, data) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
-  if (channel === 'server:status') refreshTray();
+  if (channel === 'server:status') { refreshTray(); if (data && data.running) ensureFirewall(); }
 }
 
 function createWindow() {

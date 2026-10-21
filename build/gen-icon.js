@@ -20,9 +20,19 @@ function pngToIco(png) {
   return Buffer.concat([header, entry, png]);
 }
 
+// Pass DZ_ICON_SRC=<image path> to use your own artwork (scaled to 256x256, square-cropped, rounded corners).
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 256, height: 256, transparent: true, frame: false, webPreferences: { offscreen: true } });
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<html><body style="margin:0;background:transparent">${SVG}</body></html>`));
+  const src = process.env.DZ_ICON_SRC;
+  // A file:// page may load file:// images, so render through a temporary HTML file next to this script.
+  const body = src
+    ? `<div style="width:256px;height:256px;border-radius:40px;overflow:hidden"><img src="file:///${src.replace(/\\/g, '/')}" style="width:256px;height:256px;object-fit:cover;display:block"></div>`
+    : SVG;
+  const tmp = path.join(__dirname, '_icon.html');
+  fs.writeFileSync(tmp, `<html><body style="margin:0;background:transparent">${body}</body></html>`);
+  await win.loadFile(tmp);
+  await new Promise(r => setTimeout(r, 800));
+  try { fs.unlinkSync(tmp); } catch { /* ignore */ }
   await new Promise(r => setTimeout(r, 500));
   const img = await win.webContents.capturePage({ x: 0, y: 0, width: 256, height: 256 });
   const png = img.toPNG();

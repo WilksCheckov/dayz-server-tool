@@ -1407,11 +1407,11 @@ $('btnEcoOpenEditor').onclick = () => { const st = ecoState(); if (!st) return; 
 async function loadSettingsPage() {
   const p = await ipc.invoke('app:prefs');
   $('prefCloseToTray').checked = !!p.closeToTray; $('prefStartMinimized').checked = !!p.startMinimized; $('prefLaunchAtLogin').checked = !!p.launchAtLogin;   $('prefAutoUpdate').checked = p.autoUpdate !== false;
-  $('prefAutoStartServer').checked = !!p.autoStartServer; $('prefAutoStartDelay').value = p.autoStartDelaySec || 10; $('prefTheme').value = p.theme || 'dark';
+  $('prefAutoStartServer').checked = !!p.autoStartServer; $('prefAutoFirewall').checked = p.autoFirewall !== false; $('prefAutoStartDelay').value = p.autoStartDelaySec || 10; $('prefTheme').value = p.theme || 'dark';
   $('dataDir').textContent = p.dataDir;
   renderUpdate(await ipc.invoke('update:state'), p);
 }
-$('btnPrefsSave').onclick = (e) => run(async () => { await ipc.invoke('app:setPrefs', { closeToTray: $('prefCloseToTray').checked, startMinimized: $('prefStartMinimized').checked, launchAtLogin: $('prefLaunchAtLogin').checked, autoUpdate: $('prefAutoUpdate').checked, autoStartServer: $('prefAutoStartServer').checked, autoStartDelaySec: Number($('prefAutoStartDelay').value) || 10, theme: $('prefTheme').value }); applyTheme($('prefTheme').value); try { localStorage.setItem('theme', $('prefTheme').value); } catch {} toast('Preferences saved'); }, e.target);
+$('btnPrefsSave').onclick = (e) => run(async () => { await ipc.invoke('app:setPrefs', { closeToTray: $('prefCloseToTray').checked, startMinimized: $('prefStartMinimized').checked, launchAtLogin: $('prefLaunchAtLogin').checked, autoUpdate: $('prefAutoUpdate').checked, autoStartServer: $('prefAutoStartServer').checked, autoFirewall: $('prefAutoFirewall').checked, autoStartDelaySec: Number($('prefAutoStartDelay').value) || 10, theme: $('prefTheme').value }); applyTheme($('prefTheme').value); try { localStorage.setItem('theme', $('prefTheme').value); } catch {} toast('Preferences saved'); }, e.target);
 $('btnOpenDataDir').onclick = () => ipc.invoke('app:openDataDir');
 $('btnExportSettings').onclick = (e) => run(async () => { const f = await ipc.invoke('app:exportSettings'); if (f) toast('Exported to ' + f); }, e.target);
 $('btnImportSettings').onclick = (e) => run(async () => { const ok = await ipc.invoke('app:importSettings'); if (ok) { toast('Settings imported'); await loadSettings(); } }, e.target);

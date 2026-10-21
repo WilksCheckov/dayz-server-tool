@@ -8,7 +8,8 @@ cd /d "%~dp0"
 set BUMP=%1
 if "%BUMP%"=="" set BUMP=patch
 
-for /f "delims=" %%t in ('"C:\Program Files\GitHub CLI\gh.exe" auth token 2^>nul') do set GH_TOKEN=%%t
+set "PATH=%PATH%;C:\Program Files\GitHub CLI"
+for /f "delims=" %%t in ('gh auth token') do set "GH_TOKEN=%%t"
 if "%GH_TOKEN%"=="" (
   echo Not logged in to GitHub CLI. Run: gh auth login
   exit /b 1
