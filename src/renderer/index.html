@@ -1,0 +1,895 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; script-src 'self'">
+  <title>DayZ Server Tool</title>
+  <link rel="stylesheet" href="../../node_modules/codemirror/lib/codemirror.css">
+  <link rel="stylesheet" href="../../node_modules/codemirror/theme/material-darker.css">
+  <link rel="stylesheet" href="../../node_modules/codemirror/addon/dialog/dialog.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">DZ</div>
+        <div>
+          <div class="brand-name">DayZ Server Tool</div>
+          <div class="brand-sub" id="sideStatus">Stopped</div>
+        </div>
+      </div>
+      <div class="nav-scroll" id="nav"></div>
+      <div class="sidebar-footer">
+        <button id="btnQuickStart" class="btn primary wide">Start server</button>
+        <button id="btnQuickStop" class="btn danger wide" hidden>Stop server</button>
+      </div>
+    </nav>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="pageTitle">Dashboard</h1>
+          <span class="topbar-sub" id="pageSubtitle"></span>
+        </div>
+        <div class="topbar-status">
+          <select id="profileSelect" class="input profile-select" title="Server profile"></select>
+          <span class="pill" id="pillServer"><span class="dot"></span>Server stopped</span>
+          <span class="pill" id="pillRcon"><span class="dot"></span>RCon off</span>
+          <span class="pill" id="pillDiscord"><span class="dot"></span>Bot off</span>
+          <button class="pill pill-btn" id="pillUpdate" hidden>Update available</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- DASHBOARD -->
+        <section class="page active" id="page-dashboard">
+          <div class="grid-4">
+            <div class="card">
+              <div class="card-title">Server</div>
+              <div class="stat"><span class="dot" id="dotServer"></span><span id="statServer">Stopped</span></div>
+              <div class="muted" id="statUptime">—</div>
+              <div class="row gap mt">
+                <button class="btn primary" id="btnStart">Start</button>
+                <button class="btn" id="btnRestart">Restart</button>
+                <button class="btn danger" id="btnStop">Stop</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Installation</div>
+              <div id="statInstall" class="muted">—</div>
+              <div class="muted" id="statBuild">—</div>
+              <div class="row gap mt">
+                <button class="btn" id="btnDashUpdate">Update server</button>
+                <button class="btn" id="btnOpenServerDir">Open folder</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Mods &amp; schedule</div>
+              <div id="statMods" class="muted">—</div>
+              <div class="muted" id="statAutoUpdate">—</div>
+              <div class="muted" id="statNextRestart">—</div>
+              <div class="muted" id="statNextBackup">—</div>
+              <div class="row gap mt">
+                <button class="btn" id="btnDashCheckMods">Check mod updates</button>
+                <button class="btn" id="btnDashBackup">Backup now</button>
+              </div>
+            </div>
+            <div class="card health-card">
+              <div class="card-title row between"><span>Health</span><select id="healthRange" class="input" style="width:110px;padding:3px 24px 3px 8px;font-size:12px"><option value="60">1 hour</option><option value="180" selected>3 hours</option><option value="720">12 hours</option><option value="1440">24 hours</option></select></div>
+              <div class="spark-row"><span class="spark-label">CPU</span><canvas class="spark" id="sparkCpu" width="220" height="34"></canvas><span class="spark-val" id="valCpu">—</span></div>
+              <div class="spark-row"><span class="spark-label">RAM</span><canvas class="spark" id="sparkRam" width="220" height="34"></canvas><span class="spark-val" id="valRam">—</span></div>
+              <div class="spark-row"><span class="spark-label">FPS</span><canvas class="spark" id="sparkFps" width="220" height="34"></canvas><span class="spark-val" id="valFps">—</span></div>
+              <div class="spark-row"><span class="spark-label">Players</span><canvas class="spark" id="sparkPlayers" width="220" height="34"></canvas><span class="spark-val" id="valPlayers">—</span></div>
+            </div>
+          </div>
+          <div class="dash-bottom">
+          <div class="card grow">
+            <div class="card-title row between">
+              <span>Console</span>
+              <span class="row gap">
+                <label class="check"><input type="checkbox" id="consoleAutoscroll" checked> Autoscroll</label>
+                <button class="btn small" id="btnClearConsole">Clear</button>
+              </span>
+            </div>
+            <pre class="console" id="console"></pre>
+          </div>
+          <div class="card alerts-card">
+            <div class="card-title row between"><span>Recent alerts</span><button class="btn small" id="btnAlertsPage">Configure</button></div>
+            <div id="alertList" class="alert-list"><div class="muted">No alerts yet.</div></div>
+          </div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="page" id="page-settings">
+          <div id="updateBanner" class="banner info" hidden></div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Application</div>
+              <label class="check"><input type="checkbox" id="prefCloseToTray"> Keep running in the system tray when the window is closed</label>
+              <label class="check"><input type="checkbox" id="prefStartMinimized"> Start minimised to the tray</label>
+              <label class="check"><input type="checkbox" id="prefLaunchAtLogin"> Launch when Windows starts</label>
+              <label class="check"><input type="checkbox" id="prefAutoUpdate"> Check for updates automatically</label>
+              <label class="check"><input type="checkbox" id="prefAutoStartServer"> Start the DayZ server automatically when the tool starts</label>
+              <label class="field inline">…after <input id="prefAutoStartDelay" class="input short" type="number" min="3"> seconds</label>
+              <label class="field">Theme <select id="prefTheme" class="input" style="width:160px"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+              <div class="row gap mt"><button class="btn primary" id="btnPrefsSave">Save</button></div>
+              <p class="muted">The tray icon shows the server state and lets you start, stop, restart and back up without opening the window. The game server keeps running whether or not the tool is open.</p>
+            </div>
+            <div class="col gap">
+              <div class="card">
+                <div class="card-title">Updates</div>
+                <div class="muted" id="updateInfo">—</div>
+                <div class="row gap mt">
+                  <button class="btn" id="btnUpdateCheck">Check for updates</button>
+                  <button class="btn primary" id="btnUpdateDownload" hidden>Download</button>
+                  <button class="btn primary" id="btnUpdateInstall" hidden>Restart and install</button>
+                </div>
+                <p class="muted">Updates come from the project's GitHub Releases. The installed version is replaced in place; your settings and data are kept.</p>
+              </div>
+              <div class="card">
+                <div class="card-title row between"><span>Server profiles</span><button class="btn small" id="btnProfileNew">New profile</button></div>
+                <p class="muted">Each profile is a separate set of settings (install folder, port, mods, bot…). Switching restarts the tool. Shortcuts: Ctrl+1…9 jump to pages, F5 refreshes the page, Ctrl+K go to a page by name.</p>
+                <div id="profileList"></div>
+              </div>
+              <div class="card">
+                <div class="card-title">Data</div>
+                <div class="muted" id="dataDir">—</div>
+                <div class="row gap wrap mt">
+                  <button class="btn" id="btnOpenDataDir">Open data folder</button>
+                  <button class="btn" id="btnExportSettings">Export settings…</button>
+                  <button class="btn" id="btnImportSettings">Import settings…</button>
+                </div>
+                <p class="muted">The export leaves out the Discord bot token and RCon password.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- INSTALLATION -->
+        <section class="page" id="page-install">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Install location</div>
+              <p class="muted">SteamCMD and the server are placed in <code>steamcmd\</code> and <code>server\</code> inside this folder.</p>
+              <div class="row gap">
+                <input id="installDir" class="input grow" placeholder="C:\DayZServer">
+                <button class="btn" id="btnPickInstall">Browse…</button>
+              </div>
+              <label class="field">Server app
+                <select id="serverAppId" class="input">
+                  <option value="223350">DayZ Server (stable, 223350)</option>
+                  <option value="1042420">DayZ Server Experimental (1042420)</option>
+                </select>
+              </label>
+              <div class="row gap mt"><button class="btn" id="btnSaveInstall">Save</button></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Steam login <span class="muted">for Workshop mods</span></div>
+              <p class="muted">The server itself installs anonymously. Workshop mods need a Steam account that owns DayZ. The password is kept in memory only and never saved.</p>
+              <label class="field">Username <input id="steamUser" class="input" autocomplete="off"></label>
+              <label class="field">Password <input id="steamPass" class="input" type="password" autocomplete="off"></label>
+              <label class="field">Steam Guard code (if asked) <input id="steamGuard" class="input" autocomplete="off" placeholder="optional"></label>
+              <div class="row gap mt">
+                <button class="btn" id="btnSaveCreds">Use these credentials</button>
+                <span class="muted" id="credStatus"></span>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Server install / update</div>
+            <div class="muted" id="installStatus">—</div>
+            <label class="check mt"><input type="checkbox" id="validateInstall"> Validate files (slower, repairs corrupt files)</label>
+            <div class="row gap mt">
+              <button class="btn primary" id="btnInstallServer">Install / Update server</button>
+              <button class="btn" id="btnInstallSteamcmd">Install SteamCMD only</button>
+              <button class="btn danger" id="btnCancelSteam">Cancel</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- LAUNCH -->
+        <section class="page" id="page-launch">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Launch parameters</div>
+              <div class="grid-2 tight">
+                <label class="field">Port <input id="port" class="input" type="number"></label>
+                <label class="field">CPU count (0 = auto) <input id="cpuCount" class="input" type="number" min="0"></label>
+                <label class="field">Config file <input id="configFile" class="input"></label>
+                <label class="field">Profiles folder <input id="profilesDir" class="input"></label>
+              </div>
+              <label class="field">Other parameters <input id="extraParams" class="input"></label>
+              <label class="check"><input type="checkbox" id="autoRestart"> Auto-restart the server if it crashes or closes</label>
+              <div class="row gap mt"><button class="btn primary" id="btnSaveLaunch">Save</button></div>
+            </div>
+            <div class="card launch-card">
+              <div class="card-title row between"><span>Mod lines</span><button class="btn small" id="btnCopyFullLine" title="Copy the full launch parameter line">Copy all</button></div>
+              <div class="launch-line"><span class="ll-label" title="Generated from the enabled mods, in list order">-mod (auto, list order)</span><code id="llMod">—</code><button class="btn small ll-copy" data-for="llMod">Copy</button></div>
+              <div class="launch-line"><span class="ll-label">-serverMod (manual + flagged)</span><code id="llServerMod">—</code><span class="row gap"><button class="btn small" id="btnEditServerMod" title="Type folder names by hand; mods flagged server-only in the list are appended">Edit</button><button class="btn small ll-copy" data-for="llServerMod">Copy</button></span></div>
+              <div class="launch-line"><span class="ll-label">Local mods</span><code id="llLocal">—</code></div>
+              <div class="launch-line"><span class="ll-label">Other params</span><code id="llOther">—</code><button class="btn small" id="btnEditOther">Edit</button></div>
+              <div class="muted" id="llSummary"></div>
+              <div class="muted" id="llSaved"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Resulting command line</div>
+            <pre class="cmdline" id="cmdline">—</pre>
+          </div>
+        </section>
+
+        <!-- CONFIG EDITOR -->
+        <section class="page" id="page-server">
+          <div class="editor-layout">
+            <div class="card file-tree-card">
+              <div class="card-title row between"><span>Files</span><span class="row gap"><button class="btn small" id="btnNewConfigFile" title="Create a new file in the mission folder">New</button><button class="btn small" id="btnRefreshFiles" title="Refresh">↻</button></span></div>
+              <div id="configTree" class="file-tree"></div>
+              <div class="row gap mt"><button class="btn wide" id="btnValidateAll">Check all files</button></div>
+            </div>
+            <div class="card editor-card">
+              <div class="row gap editor-toolbar">
+                <span class="file-label" id="editorFile">No file open</span>
+                <span class="badge warn" id="editorDirty" hidden>unsaved</span>
+                <span class="grow"></span>
+                <button class="btn small" id="btnEditorFind" title="Ctrl+F">Find</button>
+                <button class="btn small" id="btnEditorReload">Reload</button>
+                <button class="btn small" id="btnEditorValidate">Check for errors</button>
+                <button class="btn small primary" id="btnEditorSave" title="Ctrl+S">Save</button>
+              </div>
+              <div id="editorHost" class="editor-host"></div>
+              <div class="problems-head row between">
+                <span id="problemsTitle">Problems</span>
+                <span class="row gap"><label class="check"><input type="checkbox" id="validateOnSave" checked> check on save</label><button class="btn small" id="btnClearProblems">Clear</button></span>
+              </div>
+              <div id="problems" class="problems"></div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- ECONOMY EDITOR -->
+        <section class="page" id="page-economy">
+          <div class="page-toolbar">
+            <div class="tabs">
+              <button class="tab etab active" data-etab="types">Types</button>
+              <button class="tab etab" data-etab="events">Events</button>
+              <button class="tab etab" data-etab="spawnable">Spawnable types</button>
+            </div>
+            <select id="ecoFile" class="input" style="width:280px"></select>
+            <span class="muted" id="ecoInfo"></span>
+            <span class="grow"></span>
+            <button class="btn" id="btnEcoOpenEditor">Open in Config Editor</button>
+            <button class="btn" id="btnEcoRevert">Revert</button>
+            <button class="btn primary" id="btnEcoSave">Save</button>
+          </div>
+          <div id="ecoBanner" class="banner" hidden></div>
+
+          <div class="eco-pane" id="eco-types">
+            <div class="row gap wrap eco-filters">
+              <input id="tfSearch" class="input" placeholder="Name contains…" style="width:200px">
+              <select id="tfCategory" class="input eco-sel"><option value="">Any category</option></select>
+              <select id="tfUsage" class="input eco-sel"><option value="">Any usage</option></select>
+              <select id="tfValue" class="input eco-sel"><option value="">Any tier</option></select>
+              <select id="tfTag" class="input eco-sel"><option value="">Any tag</option></select>
+              <label class="check"><input type="checkbox" id="tfZero"> nominal = 0</label>
+              <label class="check"><input type="checkbox" id="tfModified"> modified only</label>
+              <span class="muted" id="tfCount"></span>
+            </div>
+            <div class="row gap wrap eco-bulk" id="ecoBulk">
+              <b id="bulkCount">0 selected</b>
+              <select id="bulkField" class="input eco-sel"><option value="nominal">nominal</option><option value="min">min</option><option value="lifetime">lifetime</option><option value="restock">restock</option><option value="quantmin">quantmin</option><option value="quantmax">quantmax</option><option value="cost">cost</option></select>
+              <select id="bulkOp" class="input eco-sel" style="width:110px"><option value="set">set to</option><option value="mul">multiply by</option><option value="add">add</option></select>
+              <input id="bulkValue" class="input" type="number" step="any" style="width:100px">
+              <button class="btn small" id="btnBulkApply">Apply</button>
+              <span class="muted">·</span>
+              <select id="bulkFlagKind" class="input eco-sel" style="width:110px"><option value="usage">usage</option><option value="value">tier</option><option value="tag">tag</option><option value="category">category</option></select>
+              <select id="bulkFlagName" class="input eco-sel"></select>
+              <button class="btn small" id="btnBulkFlagAdd">Add flag</button>
+              <button class="btn small" id="btnBulkFlagRemove">Remove flag</button>
+              <span class="muted">·</span>
+              <button class="btn small" id="btnBulkSelectFiltered">Select all filtered</button>
+              <button class="btn small" id="btnBulkClear">Clear selection</button>
+            </div>
+            <div class="vtable">
+              <div class="vhead vrow"><span><input type="checkbox" id="tfSelAll" title="Select all filtered"></span><span>Name</span><span>Nominal</span><span>Min</span><span>Lifetime</span><span>Restock</span><span>Qmin</span><span>Qmax</span><span>Cost</span><span>Category</span><span>Usage</span><span>Tier</span><span>Tags</span></div>
+              <div class="vbody" id="tBody"><div class="vspacer" id="tSpacer"></div><div class="vrows" id="tRows"></div></div>
+            </div>
+          </div>
+
+          <div class="eco-pane" id="eco-events" hidden>
+            <div class="row gap wrap eco-filters"><input id="efSearch" class="input" placeholder="Event name contains…" style="width:240px"><span class="muted" id="efCount"></span><span class="grow"></span><button class="btn small" id="btnEventAdd">New event</button></div>
+            <div class="table-wrap grow"><table class="table eco-table" id="evTable"><thead><tr><th>Event</th><th>Nominal</th><th>Min</th><th>Max</th><th>Lifetime</th><th>Restock</th><th>Safe r.</th><th>Dist r.</th><th>Cleanup r.</th><th>Pos</th><th>Limit</th><th>Active</th><th>Children</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+
+          <div class="eco-pane" id="eco-spawnable" hidden>
+            <div class="row gap wrap eco-filters"><input id="sfSearch" class="input" placeholder="Type name contains…" style="width:240px"><span class="muted" id="sfCount"></span></div>
+            <div id="spList" class="sp-list"></div>
+          </div>
+
+          <div class="problems-head row between"><span id="ecoProblemsTitle">Problems</span><span class="muted">Saving validates the file; problems are listed here and highlighted in the Config Editor.</span></div>
+          <div id="ecoProblems" class="problems" style="height:110px"></div>
+        </section>
+
+        <!-- MISSION -->
+        <section class="page" id="page-mission">
+          <div class="page-toolbar"><span class="muted">Missions live in <code>mpmissions\</code>. Switching and wiping need the server stopped; wipes take a backup first.</span><span class="grow"></span><button class="btn" id="btnMissionRefresh">Refresh</button></div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Missions</div>
+              <div class="table-wrap"><table class="table" id="missionTable"><thead><tr><th>Mission</th><th>Map</th><th>Storage</th><th>Characters</th><th></th></tr></thead><tbody></tbody></table></div>
+            </div>
+            <div class="col gap">
+              <div class="card">
+                <div class="card-title">Wipe active mission</div>
+                <p class="muted">A full wipe deletes <code>storage_1</code>: all characters, bases, vehicles and loot state. A character wipe only deletes <code>players.db</code> so bases and vehicles stay.</p>
+                <div class="row gap wrap"><button class="btn danger" id="btnWipeAll">Full wipe</button><button class="btn danger" id="btnWipePlayers">Wipe characters only</button></div>
+                <div class="muted mt" id="wipeInfo"></div>
+              </div>
+              <div class="card">
+                <div class="card-title row between"><span>cfggameplay.json</span><span class="row gap"><input id="gpFilter" class="input small" placeholder="filter…"><button class="btn small primary" id="btnGpSave">Save</button></span></div>
+                <div class="muted" id="gpInfo"></div>
+                <div class="table-wrap" style="max-height:380px"><table class="table" id="gpTable"><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody></tbody></table></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TASKS -->
+        <section class="page" id="page-tasks">
+          <div class="page-toolbar"><span class="muted">Anything that should happen on a schedule: in-game messages, RCon commands, backups, updates, restarts or a command line.</span><span class="grow"></span><button class="btn primary" id="btnTaskNew">New task</button></div>
+          <div class="card grow list-card">
+            <div class="table-wrap grow"><table class="table" id="taskTable"><thead><tr><th>Task</th><th>Type</th><th>Schedule</th><th>Next run</th><th>Last run</th><th>On</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+        </section>
+
+        <!-- NETWORK -->
+        <section class="page" id="page-network">
+          <div class="page-toolbar"><span class="muted">Ports the server uses, whether something is listening on them, and Windows firewall rules. Router port forwarding must still be done on the router.</span><span class="grow"></span><button class="btn" id="btnNetRefresh">Refresh</button></div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title row between"><span>Ports</span><span class="muted" id="netPublicIp"></span></div>
+              <div class="table-wrap"><table class="table" id="netPorts"><thead><tr><th>Use</th><th>Port</th><th>Proto</th><th>Listening</th><th>Why</th></tr></thead><tbody></tbody></table></div>
+              <div class="muted" id="netWeb"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Windows firewall</div>
+              <p class="muted">Creates inbound allow rules for the ports above, named "DayZ Server Tool …". Windows asks for administrator approval.</p>
+              <div class="row gap"><button class="btn primary" id="btnNetAddRules">Add firewall rules</button><button class="btn danger" id="btnNetRemoveRules">Remove them</button></div>
+              <div class="table-wrap mt"><table class="table" id="netRules"><thead><tr><th>Rule</th><th>Proto</th><th>Port</th><th>Enabled</th></tr></thead><tbody></tbody></table></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- MAP -->
+        <section class="page" id="page-map">
+          <div class="page-toolbar">
+            <span class="muted">Last known positions from the admin log. Pick a map image (for example a saved iZurvive map) and the world size so points line up.</span>
+            <span class="grow"></span>
+            <select id="mapWorld" class="input" style="width:200px"><option value="15360">Chernarus (15360 m)</option><option value="12800">Livonia (12800 m)</option><option value="10240">Sakhal (10240 m)</option><option value="custom">Custom size</option></select>
+            <input id="mapSize" class="input" type="number" style="width:110px" placeholder="metres" hidden>
+            <button class="btn" id="btnMapPickImage">Map image…</button>
+            <label class="check"><input type="checkbox" id="mapOnlineOnly"> online only</label>
+            <button class="btn" id="btnMapRefresh">Refresh</button>
+          </div>
+          <div class="card grow map-card"><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
+        </section>
+        <!-- LOGS -->
+        <section class="page" id="page-logs">
+          <div class="page-toolbar">
+            <label class="check"><input type="checkbox" id="logFollow" checked> Follow (refresh every 3s)</label>
+            <span class="grow"></span>
+            <button class="btn" id="btnRefreshLogs">Refresh list</button>
+            <button class="btn" id="btnOpenProfiles">Open folder</button>
+          </div>
+          <div class="logs-layout">
+            <div class="card log-files">
+              <div class="card-title">Files</div>
+              <div id="logFileList" class="file-list"></div>
+            </div>
+            <div class="card log-view">
+              <div class="tabs">
+                <button class="tab active" data-tab="raw">Log</button>
+                <button class="tab" data-tab="summary">Error summary</button>
+                <button class="tab" data-tab="crashes">Crash reports</button>
+                <span class="muted grow right" id="logInfo"></span>
+                <input id="logFilter" class="input small" placeholder="filter…">
+              </div>
+              <pre id="logRaw" class="console log-raw"></pre>
+              <div id="logSummary" class="summary" hidden></div>
+              <div id="logCrashes" class="summary" hidden>
+                <div class="row gap"><button class="btn small" id="btnCrashOpenFolder">Open crashes folder</button><span class="muted" id="crashDir"></span></div>
+                <div id="crashList" class="col gap"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- WORKSHOP -->
+        <section class="page" id="page-workshop">
+          <div class="card browser-card grow">
+            <div class="row gap browser-bar">
+              <input id="wsQuery" class="input grow" placeholder="Search the DayZ workshop…">
+              <select id="wsSort" class="input" style="width:170px">
+                <option value="trend">Trending</option>
+                <option value="subscribers">Most subscribed</option>
+                <option value="updated">Recently updated</option>
+                <option value="recent">Newest</option>
+                <option value="top">Top rated</option>
+              </select>
+              <button class="btn primary" id="wsSearch">Search</button>
+            </div>
+            <div class="chips" id="wsTags"></div>
+            <div class="row between ws-status">
+              <span class="muted" id="wsInfo">Search the workshop or browse by tag. Click a card for details, tick cards to add several at once.</span>
+              <span class="row gap">
+                <button class="btn small" id="wsSelectNone" hidden>Clear selection</button>
+                <button class="btn primary small" id="wsAddSelected" disabled>Add selected</button>
+              </span>
+            </div>
+            <div class="ws-body">
+              <div id="wsGrid" class="ws-grid"></div>
+              <div id="wsDetails" class="ws-details" hidden></div>
+            </div>
+            <div class="row gap ws-paging">
+              <button class="btn small" id="wsPrev" disabled>◀ Prev</button>
+              <span class="muted" id="wsPage">Page 1</span>
+              <button class="btn small" id="wsNext" disabled>Next ▶</button>
+              <span class="grow"></span>
+              <button class="btn small" id="wsOpenSteam" disabled>Open on Steam</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- INSTALLED MODS -->
+        <section class="page" id="page-mods">
+          <div class="page-toolbar">
+            <input id="modIdInput" class="input" placeholder="Workshop ID, URL or collection" style="width:280px">
+            <button class="btn primary" id="btnAddMod">Add</button>
+            <span class="grow"></span>
+            <button class="btn" id="btnAutoOrganize" title="Frameworks first (CF, Dabs, COT, Expansion…), then dependency order">Auto-organize</button>
+            <button class="btn" id="btnImportMods" title="Find mods already in the server or workshop folder">Import found</button>
+            <button class="btn" id="btnCheckMods">Check updates</button>
+            <button class="btn" id="btnUpdateAllMods">Update outdated</button>
+            <button class="btn" id="btnModCheck" title="Duplicate PBOs, missing keys, broken links, and the list players need">Check mods</button>
+          </div>
+          <div id="modsBanner" class="banner" hidden></div>
+          <div class="card grow mods-list-card">
+            <div class="card-title">Installed mods <span class="muted">drag to reorder · drag between sections to move between -mod and -serverMod</span></div>
+            <div id="modList" class="mod-list"></div>
+          </div>
+        </section>
+
+        <!-- UPDATES -->
+        <section class="page" id="page-updates">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Automatic updates</div>
+              <p class="muted">On each run the tool stops the server, updates it and any outdated mods, then starts it again.</p>
+              <label class="check"><input type="checkbox" id="autoUpdateEnabled"> Enable scheduled updates</label>
+              <label class="field inline">Every <input id="autoUpdateHours" class="input short" type="number" min="0.25" step="0.25"> hours</label>
+              <div class="row gap mt">
+                <button class="btn" id="btnSaveAutoUpdate">Save schedule</button>
+                <button class="btn primary" id="btnRunUpdateNow">Update everything now</button>
+              </div>
+              <div class="muted mt" id="updaterStatus">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- BACKUPS -->
+        <section class="page" id="page-backups">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Automatic backups</div>
+              <label class="check"><input type="checkbox" id="bkEnabled"> Enable scheduled backups</label>
+              <label class="field inline">Every <input id="bkInterval" class="input short" type="number" min="0.25" step="0.25"> hours · keep the newest <input id="bkKeep" class="input short" type="number" min="1"> backups</label>
+              <div class="row gap wrap">
+                <label class="check"><input type="checkbox" id="bkMission"> mpmissions (player data, storage, loot)</label>
+                <label class="check"><input type="checkbox" id="bkProfiles"> profiles (logs, bans, settings)</label>
+                <label class="check"><input type="checkbox" id="bkConfig"> server config</label>
+                <label class="check"><input type="checkbox" id="bkKeys"> keys</label>
+              </div>
+              <label class="field">Backup folder (blank = &lt;install dir&gt;\backups)
+                <div class="row gap"><input id="bkDir" class="input grow"><button class="btn" id="btnPickBackupDir">Browse…</button></div>
+              </label>
+              <div class="row gap mt">
+                <button class="btn primary" id="btnSaveBackups">Save</button>
+                <button class="btn" id="btnBackupNow">Backup now</button>
+                <button class="btn" id="btnOpenBackupDir">Open folder</button>
+              </div>
+              <div class="muted mt" id="bkStatus">—</div>
+            </div>
+            <div class="col gap">
+            <div class="card">
+              <div class="card-title">Off-site copies</div>
+              <label class="check"><input type="checkbox" id="osEnabled"> After each backup, also copy it off this machine</label>
+              <label class="field">Copy to folder (a OneDrive / Dropbox / NAS path) <div class="row gap"><input id="osFolder" class="input grow" placeholder="optional"><button class="btn" id="btnOsPick">Browse…</button></div></label>
+              <label class="check"><input type="checkbox" id="osFtpEnabled"> Upload by FTP / FTPS</label>
+              <div class="grid-2 tight">
+                <label class="field">Host <input id="osHost" class="input"></label><label class="field">Port <input id="osPort" class="input" type="number" value="21"></label>
+                <label class="field">User <input id="osUser" class="input"></label><label class="field">Password <input id="osPass" class="input" type="password" autocomplete="off"></label>
+                <label class="field">Remote folder <input id="osDir" class="input" value="/backups"></label><label class="field">Keep newest (remote) <input id="osKeep" class="input" type="number" min="1" value="10"></label>
+              </div>
+              <label class="check"><input type="checkbox" id="osSecure"> Use FTPS (TLS)</label>
+              <div class="row gap mt"><button class="btn primary" id="btnOsSave">Save</button><button class="btn" id="btnOsTest">Test FTP</button></div>
+            </div>
+            <div class="card">
+              <div class="card-title row between"><span>Backups</span><span class="muted" id="bkDirLabel"></span></div>
+              <div id="backupList" class="backup-list"></div>
+            </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ALERTS -->
+        <section class="page" id="page-alerts">
+          <div class="page-toolbar">
+            <span class="muted">Where each kind of event is sent. Desktop notifications are the Windows pop-ups in the bottom-right corner (notifications must be allowed for the app); Discord needs the bot online or a webhook URL.</span>
+            <span class="grow"></span>
+            <button class="btn" id="btnAlertTest">Send a test alert</button>
+            <button class="btn primary" id="btnAlertsSave">Save</button>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Channels</div>
+              <div class="table-wrap"><table class="table" id="alertKindsTable"><thead><tr><th>Event</th><th>Desktop notification</th><th>Discord bot</th><th>Webhook</th></tr></thead><tbody></tbody></table></div>
+            </div>
+            <div class="col gap">
+              <div class="card">
+                <div class="card-title">Destinations</div>
+                <label class="field">Discord alert channel ID (bot posts here; blank = the bot's log channel) <input id="alertChannel" class="input" placeholder="optional"></label>
+                <label class="field">Discord webhook URL (works without the bot) <input id="alertWebhook" class="input" placeholder="https://discord.com/api/webhooks/…"></label>
+              </div>
+              <div class="card">
+                <div class="card-title">Thresholds</div>
+                <div class="grid-2 tight">
+                  <label class="field">Low FPS below <input id="thFps" class="input" type="number" min="1"></label>
+                  <label class="field">…for at least (seconds) <input id="thFpsFor" class="input" type="number" min="10"></label>
+                  <label class="field">High memory above (MB) <input id="thRam" class="input" type="number" min="512"></label>
+                  <label class="field">Crash loop: exits <input id="thLoopCount" class="input" type="number" min="2"></label>
+                  <label class="field">…within (minutes) <input id="thLoopMin" class="input" type="number" min="1"></label>
+                </div>
+                <p class="muted">When a crash loop is detected, auto-restart pauses until you start the server by hand, so a broken mod cannot bounce the server all night.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- RESTARTS -->
+        <section class="page" id="page-restarts">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Scheduled restarts</div>
+              <label class="check"><input type="checkbox" id="rsEnabled"> Enable scheduled restarts</label>
+              <label class="field">Mode
+                <select id="rsMode" class="input">
+                  <option value="times">At fixed times every day</option>
+                  <option value="interval">Every N hours of uptime</option>
+                  <option value="both">Both</option>
+                </select>
+              </label>
+              <label class="field">Daily times (24h, comma separated, e.g. 04:00, 10:00, 16:00, 22:00)
+                <input id="rsTimes" class="input" placeholder="04:00, 16:00">
+              </label>
+              <label class="field inline">Interval <input id="rsInterval" class="input short" type="number" min="0.25" step="0.25"> hours of uptime</label>
+              <label class="check"><input type="checkbox" id="rsBackupBefore"> Take a backup before each scheduled restart</label>
+              <label class="check"><input type="checkbox" id="rsOnlyRunning"> Only restart when the server is running (otherwise it starts it)</label>
+              <div class="row gap mt">
+                <button class="btn primary" id="btnSaveRestarts">Save</button>
+                <button class="btn" id="btnRestartNowSched">Restart now (with backup)</button>
+              </div>
+              <div class="muted mt" id="rsStatus">—</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Player warnings</div>
+              <p class="muted">Warnings are sent through BattlEye RCon, so connect RCon on the Online page (or enable auto-connect) for players to see them.</p>
+              <label class="field">Warn at these minutes before a restart (comma separated) <input id="rsWarn" class="input" placeholder="15, 5, 1"></label>
+              <label class="field">Warning message ({min} = minutes left) <input id="rsWarnMsg" class="input"></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- ONLINE PLAYERS (RCON) -->
+        <section class="page" id="page-players">
+          <div class="page-toolbar">
+            <span class="dot" id="dotRcon"></span><span class="muted" id="rconStatusText">RCon disconnected</span>
+            <span class="grow"></span>
+            <button class="btn primary" id="btnRconConnect">Connect</button>
+            <button class="btn" id="btnRconDisconnect" hidden>Disconnect</button>
+            <button class="btn" id="btnRconRefresh">Refresh</button>
+          </div>
+          <div class="grid-3">
+            <div class="card">
+              <div class="card-title">RCon connection</div>
+              <p class="muted">Uses BattlEye RCon. Set <code>RConPassword</code> and <code>RConPort</code> in <code>battleye\BEServer_x64.cfg</code> (Config Editor), then enter the same values here.</p>
+              <div class="grid-2 tight">
+                <label class="field">Host <input id="rconHost" class="input" placeholder="127.0.0.1"></label>
+                <label class="field">Port <input id="rconPort" class="input" type="number" placeholder="2306"></label>
+              </div>
+              <label class="field">Password <input id="rconPass" class="input" type="password" autocomplete="off"></label>
+              <label class="check"><input type="checkbox" id="rconAuto"> Connect automatically when the tool starts</label>
+              <div class="row gap mt"><button class="btn" id="btnRconSave">Save</button><button class="btn small" id="btnRconFromBe" title="Read RConPort/RConPassword from BEServer_x64.cfg">Read from BEServer_x64.cfg</button></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Broadcast</div>
+              <textarea id="rconSayText" class="input" rows="3" placeholder="Message to all players"></textarea>
+              <div class="row gap mt"><button class="btn primary" id="btnRconSay">Send to everyone</button></div>
+              <div class="card-title mt">Raw command</div>
+              <div class="row gap"><input id="rconCmd" class="input grow" placeholder="players, bans, loadBans, kick 3 reason, say -1 hi…"><button class="btn" id="btnRconCmd">Run</button></div>
+              <pre class="cmdline" id="rconOut" style="max-height:120px;overflow:auto">—</pre>
+            </div>
+            <div class="card">
+              <div class="card-title">Server messages</div>
+              <pre class="console" id="rconMessages" style="min-height:120px;max-height:260px"></pre>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title row between"><span>Online players</span><span class="muted" id="playersCount">—</span></div>
+            <div class="table-wrap"><table class="table" id="playersTable"><thead><tr><th>#</th><th>Name</th><th>GUID</th><th>IP</th><th>Ping</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+          <div class="card grow">
+            <div class="card-title row between"><span>Recent players <span class="muted">from the admin log</span></span><button class="btn small" id="btnRecentRefresh">Refresh</button></div>
+            <div class="table-wrap"><table class="table" id="recentTable"><thead><tr><th>Name</th><th>ID</th><th>Last seen</th><th>Event</th><th>Joins</th><th>Note</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+        </section>
+
+        <!-- PLAYER DATABASE -->
+        <section class="page" id="page-database">
+          <div class="page-toolbar">
+            <input id="pdbQuery" class="input" placeholder="Search name, DayZ ID, Steam64 or character" style="width:300px">
+            <select id="pdbSort" class="input" style="width:170px"><option value="lastSeen">Last seen</option><option value="playtime">Playtime</option><option value="kills">Kills</option><option value="deaths">Deaths</option><option value="firstSeen">First seen</option><option value="name">Name</option></select>
+            <span class="grow"></span>
+            <span class="muted" id="pdbStats"></span>
+            <button class="btn" id="btnPdbRefresh">Refresh</button>
+            <button class="btn" id="btnPdbRebuild" title="Re-read the newest admin logs from the beginning">Rebuild</button>
+          </div>
+          <div class="pdb-layout">
+            <div class="card list-card">
+              <div class="table-wrap grow"><table class="table" id="pdbTable"><thead><tr><th>Name</th><th>ID</th><th>Last seen</th><th>Playtime</th><th>K / D</th><th>Flags</th></tr></thead><tbody></tbody></table></div>
+            </div>
+            <div class="card pdb-detail" id="pdbDetail"><div class="empty">Select a player to see their history.</div></div>
+          </div>
+        </section>
+
+        <!-- BANS -->
+        <section class="page" id="page-bans">
+          <div class="page-toolbar">
+            <input id="banId" class="input" placeholder="Steam64 ID / DayZ ID / GUID" style="width:240px">
+            <input id="banName" class="input" placeholder="Name (note)" style="width:140px">
+            <input id="banReason" class="input" placeholder="Reason" style="width:160px">
+            <select id="banTarget" class="input" style="width:170px"><option value="ban">Game ban (ban.txt)</option><option value="bebans">BattlEye ban</option></select>
+            <input id="banMinutes" class="input" type="number" placeholder="min (0=perm)" style="width:120px" title="BattlEye only: minutes, 0 = permanent">
+            <button class="btn primary" id="btnAddBan">Add ban</button>
+          </div>
+          <div class="grid-2 grow">
+            <div class="card list-card">
+              <div class="card-title row between"><span id="banLabel">Game bans <span class="muted">ban.txt</span></span><span class="muted" id="banFile"></span></div>
+              <p class="muted" id="banHelp"></p>
+              <div class="table-wrap grow"><table class="table" id="banTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+            </div>
+            <div class="card list-card">
+              <div class="card-title row between"><span>BattlEye bans <span class="muted">bans.txt</span></span><span class="row gap"><button class="btn small" id="btnBeLoadBans" title="Tell BattlEye to reload bans.txt (needs RCon)">loadBans via RCon</button><span class="muted" id="bebanFile"></span></span></div>
+              <p class="muted" id="bebanHelp"></p>
+              <div class="table-wrap grow"><table class="table" id="bebanTable"><thead><tr><th>GUID / IP</th><th>Minutes</th><th>Reason</th><th>Name</th><th></th></tr></thead><tbody></tbody></table></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- WHITELIST & PRIORITY -->
+        <section class="page" id="page-lists">
+          <div class="page-toolbar">
+            <input id="listId" class="input" placeholder="Steam64 ID" style="width:220px">
+            <input id="listName" class="input" placeholder="Name (note)" style="width:160px">
+            <select id="listTarget" class="input" style="width:160px"><option value="whitelist">Whitelist</option><option value="priority">Priority</option></select>
+            <button class="btn primary" id="btnAddList">Add</button>
+          </div>
+          <div id="whitelistBanner" class="banner" hidden></div>
+          <div class="grid-2 grow">
+            <div class="card list-card">
+              <div class="card-title row between"><span>Whitelist <span class="muted">whitelist.txt</span></span><span class="muted" id="whitelistFile"></span></div>
+              <p class="muted" id="whitelistHelp"></p>
+              <div class="table-wrap grow"><table class="table" id="whitelistTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+            </div>
+            <div class="card list-card">
+              <div class="card-title row between"><span>Priority queue <span class="muted">priority.txt</span></span><span class="muted" id="priorityFile"></span></div>
+              <p class="muted" id="priorityHelp"></p>
+              <div class="table-wrap grow"><table class="table" id="priorityTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- MUTES -->
+        <section class="page" id="page-mutes">
+          <div class="page-toolbar">
+            <input id="muteId" class="input" placeholder="Steam64 ID / DayZ ID" style="width:220px">
+            <input id="muteName" class="input" placeholder="Name" style="width:140px">
+            <input id="muteReason" class="input" placeholder="Reason" style="width:180px">
+            <input id="muteUntil" class="input" type="datetime-local" style="width:200px" title="Until (optional)">
+            <button class="btn primary" id="btnAddMute">Add mute</button>
+          </div>
+          <div class="banner info">Vanilla DayZ has no server-side voice or text mute. This list is kept by the tool so your admin team can track who is muted and why; enforce it with an admin mod (for example VPP Admin Tools) or by kicking from the Online page.</div>
+          <div class="card grow list-card">
+            <div class="table-wrap grow"><table class="table" id="muteTable"><thead><tr><th>Name</th><th>ID</th><th>Reason</th><th>Until</th><th>Added</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+        </section>
+
+        <!-- DISCORD BOT -->
+        <section class="page" id="page-discord">
+          <div class="page-toolbar">
+            <span class="dot" id="dotDiscord"></span><span class="muted" id="discordStatusText">Bot offline</span>
+            <span class="grow"></span>
+            <button class="btn primary" id="btnDiscordStart">Start bot</button>
+            <button class="btn" id="btnDiscordStop" hidden>Stop bot</button>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Bot settings</div>
+              <ol class="muted steps">
+                <li>Go to <a href="#" class="ext" data-url="https://discord.com/developers/applications">discord.com/developers/applications</a>, create an application, open <b>Bot</b>, click <b>Reset Token</b> and paste it below.</li>
+                <li>In Discord, enable <b>Developer Mode</b> (Settings → Advanced), right-click your server → <b>Copy Server ID</b>.</li>
+                <li>On the Bot page also enable <b>Server Members Intent</b> under Privileged Gateway Intents (needed for roles, nicknames and timeouts).</li>
+                <li>Save, start the bot, then use the invite link to add it to your server. Slash commands appear within a minute.</li>
+              </ol>
+              <label class="field">Bot token <input id="dcToken" class="input" type="password" autocomplete="off" placeholder="paste token"></label>
+              <label class="field">Server (guild) ID <input id="dcGuild" class="input" placeholder="123456789012345678"></label>
+              <label class="field">Admin role IDs allowed to use commands (comma separated; server Administrators are always allowed) <input id="dcRoles" class="input" placeholder="optional"></label>
+              <label class="field">Admin channel ID (whitelist applications and ban notices are posted here with Accept / Decline / Unban buttons) <input id="dcAdminChannel" class="input" placeholder="required for /application and bans"></label>
+              <label class="field">Whitelist role ID (given on accept, removed on ban or removal) <input id="dcWhitelistRole" class="input" placeholder="optional"></label>
+              <label class="field">Steam Web API key (shows VAC / trade bans on applications; steamcommunity.com/dev/apikey) <input id="dcSteamKey" class="input" type="password" autocomplete="off" placeholder="optional"></label>
+              <div class="grid-2 tight">
+                <label class="field">Online status text ({count} and {max} are replaced) <input id="dcStatusFormat" class="input" placeholder="Server Online | {count}/{max} Players"></label>
+                <label class="field">Offline status text <input id="dcOfflineStatus" class="input" placeholder="Server Offline"></label>
+              </div>
+              <label class="field">Log channel ID (bot posts every action here) <input id="dcLog" class="input" placeholder="optional"></label>
+              <label class="check"><input type="checkbox" id="dcAuto"> Start the bot automatically when the tool starts</label>
+              <div class="card-title mt">Live log to Discord</div>
+              <label class="field">Live log channel ID (new log lines are posted here as they happen, batched every few seconds) <input id="dcLiveChannel" class="input" placeholder="optional"></label>
+              <div class="row gap wrap"><label class="check"><input type="checkbox" id="dcLiveAdm" checked> Admin log (.ADM: connects, kills, placements)</label><label class="check"><input type="checkbox" id="dcLiveRpt"> Server log (.RPT: engine output, very chatty)</label><label class="check"><input type="checkbox" id="dcLiveErrors"> Errors and admin events only</label></div>
+              <div class="row gap mt">
+                <button class="btn primary" id="btnDiscordSave">Save</button>
+                <button class="btn" id="btnDiscordInvite" disabled>Copy invite link</button>
+              </div>
+              <div class="muted mt" id="discordInfo">—</div>
+            </div>
+            <div class="col gap">
+              <div class="card">
+                <div class="card-title">Slash commands</div>
+                <div class="table-wrap" style="max-height:380px"><table class="table" id="discordCmdTable"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody></tbody></table></div>
+                <p class="muted">Replies are only visible to the person who ran the command, except /status, /players and /say. Whitelist applications: users click the button posted by /application, fill in a form, and admins get an embed with Accept / Decline; accepted players are whitelisted, given the role and nicknamed after their character. Bans remove the whitelist, write ban.txt, and ban or time out the Discord account until the ban expires.</p>
+                <div class="muted" id="discordStore"></div>
+              </div>
+              <div class="card grow">
+                <div class="card-title">Bot activity</div>
+                <pre class="console" id="discordLog" style="min-height:160px"></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- WEBSITE -->
+        <section class="page" id="page-website">
+          <div class="page-toolbar">
+            <span class="dot" id="dotWeb"></span><span class="muted" id="webStatusText">Website stopped</span>
+            <span class="grow"></span>
+            <button class="btn" id="btnWebOpen" disabled>Open in browser</button>
+            <button class="btn primary" id="btnWebStart">Start website</button>
+            <button class="btn" id="btnWebStop" hidden>Stop website</button>
+          </div>
+          <div class="grid-2">
+            <div class="col gap">
+              <div class="card">
+                <div class="card-title">Site settings</div>
+                <div class="grid-2 tight">
+                  <label class="field">Site title <input id="webTitle" class="input"></label>
+                  <label class="field">Tagline <input id="webTagline" class="input"></label>
+                  <label class="field">Port <input id="webPort" class="input" type="number" min="1" max="65535"></label>
+                  <label class="field">Accent colour <input id="webAccent" class="input" type="color" style="height:34px;padding:2px 4px"></label>
+                  <label class="field">Server address shown to players (ip:port) <input id="webAddress" class="input" placeholder="123.45.67.89:2302"></label>
+                  <label class="field">Discord invite link <input id="webDiscord" class="input" placeholder="https://discord.gg/…"></label>
+                  <label class="field">Banner image (URL or a file in the website folder, e.g. /banner.jpg) <input id="webBanner" class="input" placeholder="/banner.jpg"></label>
+                </div>
+                <label class="field">Home page text (Markdown) <textarea id="webDescription" class="input" rows="5"></textarea></label>
+                <div class="row gap wrap">
+                  <label class="check"><input type="checkbox" id="webShowMods"> Show mod list</label>
+                  <label class="check"><input type="checkbox" id="webShowPlayers"> Show player count</label>
+                  <label class="check"><input type="checkbox" id="webShowSchedule"> Show restart schedule</label>
+                  <label class="check"><input type="checkbox" id="webEnabled"> Start automatically with the tool</label>
+                </div>
+                <label class="field">Extra CSS (appended to the generated stylesheet) <textarea id="webCss" class="input" rows="3" placeholder=".hero h1 { font-size: 48px }"></textarea></label>
+                <div class="card-title mt">Remote admin panel (/admin)</div>
+                <div class="row gap wrap"><label class="check"><input type="checkbox" id="webAdminEnabled"> Enable /admin (start, stop, restart, backup, broadcast, kick from a phone)</label></div>
+                <label class="field">Admin password <input id="webAdminPass" class="input" type="password" autocomplete="off" placeholder="required to enable"></label>
+                <div class="row gap mt"><button class="btn primary" id="btnWebSave">Save</button><span class="muted" id="webUrls"></span></div>
+              </div>
+              <div class="card">
+                <div class="card-title row between"><span>Pages</span><button class="btn small" id="btnWebAddPage">New page</button></div>
+                <p class="muted">Pages appear in the site navigation. Write them in Markdown (headings with #, lists, **bold**, links) or raw HTML.</p>
+                <div id="webPageList" class="file-list"></div>
+                <div id="webPageEditor" hidden>
+                  <div class="grid-2 tight">
+                    <label class="field">Title <input id="webPageTitle" class="input"></label>
+                    <label class="field">URL slug (/slug) <input id="webPageSlug" class="input" placeholder="rules"></label>
+                  </div>
+                  <label class="field">Format
+                    <select id="webPageType" class="input"><option value="markdown">Markdown</option><option value="html">Raw HTML</option></select>
+                  </label>
+                  <label class="field">Content <textarea id="webPageContent" class="input" rows="12" spellcheck="false"></textarea></label>
+                  <div class="row gap mt">
+                    <button class="btn primary" id="btnWebPageSave">Save page</button>
+                    <button class="btn" id="btnWebPagePreview">Preview</button>
+                    <button class="btn danger" id="btnWebPageDelete">Delete page</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col gap">
+              <div class="card">
+                <div class="card-title row between"><span>Your own website</span><span class="row gap"><button class="btn small" id="btnSitePickFolder">Choose folder…</button><button class="btn small" id="btnSitePickZip">Choose .zip…</button></span></div>
+                <div id="siteDrop" class="dropzone">
+                  <div class="dz-icon">&#8681;</div>
+                  <div><b>Drag a website folder or .zip here</b></div>
+                  <div class="muted">Any static site with an <code>index.html</code> (hand-written, or a built React / Vue / Hugo / Astro output). It replaces the generated pages; anything it does not define still falls back to them and to the API.</div>
+                </div>
+                <div id="siteInfo" class="muted"></div>
+                <div class="row gap" id="siteActions" hidden>
+                  <button class="btn" id="btnSiteOpenFolder">Open site folder</button>
+                  <button class="btn danger" id="btnSiteRemove">Remove site</button>
+                </div>
+                <details class="muted"><summary>Show live server data in your site</summary>
+                  <p>Add <code>&lt;script src="/dayz-status.js"&gt;&lt;/script&gt;</code> to your page, then put <code>data-dayz="…"</code> on any element: <code>online</code>, <code>players</code>, <code>max</code>, <code>uptime</code>, <code>next-restart</code>, <code>restart-times</code>, <code>mods-count</code>. Use <code>data-dayz-list="mods"</code> or <code>"players"</code> on a <code>&lt;ul&gt;</code> for lists. It refreshes every 30 seconds, and raw JSON is at <code>/api/status.json</code>.</p>
+                </details>
+              </div>
+              <div class="card">
+                <div class="card-title row between"><span>Custom files</span><span class="row gap"><button class="btn small" id="btnWebAddFiles">Add files…</button><button class="btn small" id="btnWebOpenFolder">Open folder</button></span></div>
+                <p class="muted">Anything in this folder is served by the site: images, fonts, extra HTML pages. Reference them as <code>/name.ext</code>. Special files take over parts of the site:</p>
+                <ul class="muted steps">
+                  <li><code>template.html</code> replaces the layout. Placeholders: <code>{{site}}</code>, <code>{{title}}</code>, <code>{{nav}}</code>, <code>{{content}}</code>, <code>{{year}}</code>.</li>
+                  <li><code>index.html</code> replaces the home page entirely. Live data is at <code>/api/status.json</code> and <code>/api/mods.json</code>.</li>
+                  <li><code>site.css</code> replaces the generated stylesheet; <code>mods.html</code> or <code>&lt;slug&gt;.html</code> replace a single page.</li>
+                </ul>
+                <div class="row gap wrap">
+                  <button class="btn small" id="btnWebStarterTemplate">Create template.html</button>
+                  <button class="btn small" id="btnWebStarterCss">Create site.css</button>
+                  <button class="btn small" id="btnWebStarterIndex">Create index.html</button>
+                </div>
+                <div class="muted" id="webFilesDir"></div>
+                <div class="table-wrap" style="max-height:300px"><table class="table" id="webFilesTable"><thead><tr><th>File</th><th>Size</th><th>URL</th><th></th></tr></thead><tbody></tbody></table></div>
+              </div>
+              <div class="card grow">
+                <div class="card-title row between"><span>Preview</span><span class="row gap"><select id="webPreviewPage" class="input" style="width:160px"><option value="/">Home</option><option value="mods">Mods</option></select><button class="btn small" id="btnWebPreviewRefresh">Refresh</button></span></div>
+                <iframe id="webPreview" class="web-preview" sandbox="allow-same-origin"></iframe>
+                <div class="muted">Opening the site on the internet needs the port forwarded on your router and allowed through the Windows firewall.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-title" id="modalTitle"></div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="row gap right-align" id="modalActions"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="../../node_modules/codemirror/lib/codemirror.js"></script>
+  <script src="../../node_modules/codemirror/mode/xml/xml.js"></script>
+  <script src="../../node_modules/codemirror/mode/javascript/javascript.js"></script>
+  <script src="../../node_modules/codemirror/mode/clike/clike.js"></script>
+  <script src="../../node_modules/codemirror/addon/edit/matchbrackets.js"></script>
+  <script src="../../node_modules/codemirror/addon/edit/closetag.js"></script>
+  <script src="../../node_modules/codemirror/addon/selection/active-line.js"></script>
+  <script src="../../node_modules/codemirror/addon/dialog/dialog.js"></script>
+  <script src="../../node_modules/codemirror/addon/search/searchcursor.js"></script>
+  <script src="../../node_modules/codemirror/addon/search/search.js"></script>
+  <script src="../../node_modules/codemirror/addon/search/jump-to-line.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

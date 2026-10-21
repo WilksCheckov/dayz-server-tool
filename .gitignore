@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+*.exe
+*.blockmap
+latest.yml
+build/icon.png

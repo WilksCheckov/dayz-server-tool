@@ -1,0 +1,65 @@
+{
+  "name": "dayz-server-tool",
+  "productName": "DayZ Server Tool",
+  "version": "0.1.0",
+  "description": "Desktop app to install, update, run and monitor a DayZ Standalone dedicated server with Steam Workshop mod management.",
+  "main": "src/main/main.js",
+  "author": "chris",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "release": "electron-builder --win --publish always",
+    "icon": "electron build/gen-icon.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.chris.dayzservertool",
+    "productName": "DayZ Server Tool",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "DayZ-Server-Tool-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "DayZ-Server-Tool-Setup-${version}.${ext}",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "DayZ-Server-Tool-${version}-portable.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "CHANGE-ME",
+      "repo": "dayz-server-tool"
+    }
+  },
+  "dependencies": {
+    "basic-ftp": "^6.2.3",
+    "codemirror": "^5.65.21",
+    "discord.js": "^14.27.0",
+    "electron-updater": "^6.8.9",
+    "fast-xml-parser": "^5.11.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CHANGE-ME/dayz-server-tool.git"
+  }
+}

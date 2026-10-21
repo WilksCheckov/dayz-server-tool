@@ -1,0 +1,689 @@
+'use strict';
+// Built-in Discord bot, modelled on the standalone DayZ whitelist bot:
+//  - whitelist applications (button -> modal -> admin embed with Accept/Decline, Steam VAC check, role + nickname)
+//  - permanent/temporary bans with reasons, Discord ban/timeout, auto-expiry, Unban button
+//  - slash commands for whitelist/priority/mute/ban lists, players, kick, say, status, server control, backups
+//  - presence showing online/offline and the live player count, optional action log and live log streaming
+const fs = require('fs');
+const path = require('path');
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder,
+  ButtonBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActivityType } = require('discord.js');
+const { app } = require('electron');
+const settings = require('./settings');
+const lists = require('./lists');
+const rcon = require('./rcon');
+const server = require('./server');
+const backups = require('./backups');
+const scheduler = require('./scheduler');
+const mods = require('./mods');
+
+let emitRef = () => {};
+let client = null;
+let state = { running: false, tag: null, appId: null, guildName: null, error: null, commands: 0, startedAt: null, presence: null, playersOnline: null, liveLogPosted: 0 };
+const log = [];
+
+function cfg() {
+  const s = settings.load();
+  return {
+    token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', steamApiKey: '',
+    statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
+    logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
+    ...(s.discord || {})
+  };
+}
+
+function status() {
+  const c = cfg();
+  return { ...state, log: log.slice(-60), config: { ...c, token: c.token ? '••••' + c.token.slice(-4) : '' }, hasToken: !!c.token,
+    inviteUrl: state.appId ? `https://discord.com/oauth2/authorize?client_id=${state.appId}&scope=bot%20applications.commands&permissions=1101659225094` : null,
+    store: { applications: Object.keys(store().applications).length, bans: store().bans.filter(b => b.status === 'banned').length } };
+}
+
+function addLog(line) {
+  log.push({ at: Date.now(), line });
+  if (log.length > 300) log.shift();
+  emitRef('console', { source: 'discord', line });
+  emitRef('discord:state', status());
+}
+
+// ---------- local data store (replaces the old bot's MySQL tables) ----------
+let storeCache = null;
+function storeFile() { return path.join(app.getPath('userData'), 'discord-data.json'); }
+function store() {
+  if (storeCache) return storeCache;
+  try { storeCache = { applications: {}, bans: [], ...JSON.parse(fs.readFileSync(storeFile(), 'utf8')) }; }
+  catch { storeCache = { applications: {}, bans: [] }; }
+  return storeCache;
+}
+function saveStore() { fs.writeFileSync(storeFile(), JSON.stringify(store(), null, 2)); }
+function activeBanFor(discordId, steamId) {
+  return store().bans.find(b => b.status === 'banned' && ((discordId && b.discordId === discordId) || (steamId && b.steamId === steamId)));
+}
+
+// ---------- Steam lookups (VAC / trade bans, profile privacy) ----------
+async function getSteamInfo(steamid64) {
+  const key = cfg().steamApiKey;
+  if (!key) return null;
+  try {
+    const [b, s] = await Promise.all([
+      fetch(`https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${key}&steamids=${steamid64}`).then(r => r.json()),
+      fetch(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${key}&steamids=${steamid64}`).then(r => r.json())
+    ]);
+    const bans = b && b.players && b.players[0], sum = s && s.response && s.response.players && s.response.players[0];
+    if (!bans || !sum) return null;
+    return { vacBanned: bans.VACBanned, vacBans: bans.NumberOfVACBans, gameBans: bans.NumberOfGameBans, tradeBanned: bans.EconomyBan !== 'none', isPrivate: sum.communityvisibilitystate !== 3, personaName: sum.personaname };
+  } catch { return null; }
+}
+
+// ---------- command definitions ----------
+function buildCommands() {
+  const idOpt = (o, d = 'Steam64 ID or DayZ ID') => o.setName('id').setDescription(d);
+  const userOpt = o => o.setName('discord_user').setDescription('Discord member (uses their whitelist application to find the Steam64)');
+  const nameOpt = o => o.setName('name').setDescription('Player name (for your records)');
+  const reasonOpt = o => o.setName('reason').setDescription('Reason');
+  const listGroup = (name, desc, idDesc) => new SlashCommandBuilder().setName(name).setDescription(desc)
+    .addSubcommand(s => s.setName('add').setDescription(`Add to the ${name}`).addStringOption(o => idOpt(o, idDesc)).addUserOption(userOpt).addStringOption(nameOpt).addStringOption(reasonOpt))
+    .addSubcommand(s => s.setName('remove').setDescription(`Remove from the ${name}`).addStringOption(o => idOpt(o, idDesc)).addUserOption(userOpt))
+    .addSubcommand(s => s.setName('list').setDescription(`Show the ${name}`));
+  return [
+    new SlashCommandBuilder().setName('help').setDescription('Show the available commands').setDefaultMemberPermissions(null),
+    new SlashCommandBuilder().setName('bantime').setDescription('Check the time remaining on your own ban').setDefaultMemberPermissions(null),
+    new SlashCommandBuilder().setName('application').setDescription('Post the whitelist application button in this channel'),
+    listGroup('whitelist', 'Manage whitelist.txt', 'Steam64 ID'),
+    listGroup('priority', 'Manage priority.txt (login queue skip)', 'Steam64 ID'),
+    listGroup('mute', 'Manage the tracked mute list', 'Steam64 ID or DayZ ID'),
+    new SlashCommandBuilder().setName('ban').setDescription('Ban management')
+      .addSubcommand(s => s.setName('permanent').setDescription('Permanently ban a player (game ban + Discord ban, whitelist removed)').addStringOption(o => o.setName('steamid64').setDescription("The player's SteamID64")).addUserOption(userOpt))
+      .addSubcommand(s => s.setName('temporary').setDescription('Temporarily ban a player (game ban + Discord timeout) until the ban expires').addIntegerOption(o => o.setName('duration_days').setDescription('How many days').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('steamid64').setDescription("The player's SteamID64")).addUserOption(userOpt))
+      .addSubcommand(s => s.setName('battleye').setDescription('BattlEye ban by GUID or IP (live via RCon when connected)').addStringOption(o => o.setName('guid').setDescription('BE GUID or IP').setRequired(true)).addIntegerOption(o => o.setName('minutes').setDescription('0 = permanent').setMinValue(0)).addStringOption(reasonOpt))
+      .addSubcommand(s => s.setName('remove').setDescription('Lift a ban and restore whitelist access').addStringOption(o => o.setName('steamid64').setDescription('SteamID64 / DayZ ID / BE GUID')).addUserOption(userOpt))
+      .addSubcommand(s => s.setName('list').setDescription('Show current bans')),
+    new SlashCommandBuilder().setName('search').setDescription('Everything the bot knows about a player').addUserOption(userOpt).addStringOption(o => o.setName('steamid64').setDescription('SteamID64')).addStringOption(o => o.setName('character_name').setDescription('Character name')),
+    new SlashCommandBuilder().setName('players').setDescription('Show online players (needs RCon)'),
+    new SlashCommandBuilder().setName('kick').setDescription('Kick an online player (needs RCon)').addStringOption(o => o.setName('player').setDescription('Player number or name').setRequired(true)).addStringOption(reasonOpt),
+    new SlashCommandBuilder().setName('say').setDescription('Broadcast a message in-game (needs RCon)').addStringOption(o => o.setName('message').setDescription('Message').setRequired(true)),
+    new SlashCommandBuilder().setName('status').setDescription('Server status').setDefaultMemberPermissions(null),
+    new SlashCommandBuilder().setName('server').setDescription('Control the server')
+      .addSubcommand(s => s.setName('start').setDescription('Start the server'))
+      .addSubcommand(s => s.setName('stop').setDescription('Stop the server'))
+      .addSubcommand(s => s.setName('restart').setDescription('Restart the server (warns players if RCon is connected)')),
+    new SlashCommandBuilder().setName('backup').setDescription('Take a backup now')
+  ].map(c => { const j = c.setDMPermission(false).toJSON(); if (j.default_member_permissions === undefined) j.default_member_permissions = String(PermissionFlagsBits.Administrator); return j; });
+}
+
+const PUBLIC_COMMANDS = ['help', 'bantime', 'status'];
+
+// ---------- helpers ----------
+function isAllowed(interaction) {
+  const c = cfg();
+  const m = interaction.member;
+  if (!m) return false;
+  if (m.permissions && m.permissions.has && m.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  const roles = m.roles && m.roles.cache ? [...m.roles.cache.keys()] : (Array.isArray(m.roles) ? m.roles : []);
+  return (c.adminRoleIds || []).some(r => roles.includes(String(r).trim()));
+}
+
+function fmtList(title, entries, mapper) {
+  const lines = entries.map(mapper);
+  const text = lines.length ? lines.slice(0, 40).join('\n') + (lines.length > 40 ? `\n…and ${lines.length - 40} more` : '') : '(empty)';
+  return new EmbedBuilder().setTitle(`${title} (${entries.length})`).setDescription('```\n' + text + '\n```').setColor(0x4f8cff);
+}
+
+async function resolvePlayer(ref) {
+  const { players } = await rcon.players();
+  const byNum = /^\d+$/.test(ref) ? players.find(p => p.num === Number(ref)) : null;
+  return byNum || players.find(p => p.name.toLowerCase() === ref.toLowerCase()) || players.find(p => p.name.toLowerCase().includes(ref.toLowerCase())) || null;
+}
+
+async function channel(id) {
+  if (!client || !id) return null;
+  try { const ch = await client.channels.fetch(id); return ch && ch.isTextBased() ? ch : null; } catch { return null; }
+}
+async function postAlert({ title, description, color, channelId }) {
+  const ch = await channel(channelId || cfg().logChannelId);
+  if (!ch) throw new Error('no channel');
+  await ch.send({ embeds: [new EmbedBuilder().setTitle(title).setDescription(String(description || '-').slice(0, 4000)).setColor(color || 0x4f8cff).setTimestamp(new Date())] });
+}
+async function postLog(text) { const ch = await channel(cfg().logChannelId); if (ch) ch.send(text).catch(() => {}); }
+async function guild() { try { return client ? await client.guilds.fetch(cfg().guildId) : null; } catch { return null; } }
+async function member(discordId) { const g = await guild(); if (!g || !discordId) return null; return g.members.fetch(discordId).catch(() => null); }
+
+// Resolve a {steamId, discordId, name} from whatever the caller gave: id/steamid64 string or a Discord user.
+function resolveTarget(opt) {
+  const apps = store().applications;
+  let steamId = (opt.steamid64 || opt.id || '').trim() || null;
+  let discordId = opt.discord_user || null;
+  let rec = null;
+  if (discordId && apps[discordId]) rec = apps[discordId];
+  else if (steamId) rec = Object.values(apps).find(a => a.steamId === steamId) || null;
+  if (rec) { steamId = steamId || rec.steamId; discordId = discordId || rec.discordId; }
+  return { steamId, discordId, name: opt.name || (rec && rec.characterName) || '', rec };
+}
+
+// ---------- whitelist application flow ----------
+async function applyWhitelist({ steamId, discordId, name, reviewerId }) {
+  lists.add('whitelist', { id: steamId, discordId, name }, { name, note: reviewerId ? `accepted by ${reviewerId}` : '' });
+  const m = await member(discordId);
+  const c = cfg();
+  if (m && c.whitelistRoleId) m.roles.add(c.whitelistRoleId).catch(e => addLog(`Could not add whitelist role: ${e.message}`));
+  if (m && name) m.setNickname(name).catch(() => {});
+}
+async function revokeWhitelist({ steamId, discordId }) {
+  if (steamId) lists.remove('whitelist', steamId);
+  if (discordId) lists.remove('whitelist', discordId);
+  const m = await member(discordId);
+  const c = cfg();
+  if (m && c.whitelistRoleId) m.roles.remove(c.whitelistRoleId).catch(() => {});
+}
+
+function applicationEmbed(interaction, { steamId, character, biography, bansText, rules, steamInfo }) {
+  const u = v => v === null || v === undefined ? 'Unknown' : v;
+  return new EmbedBuilder().setColor(0x4f8cff)
+    .setAuthor({ name: `${interaction.member.displayName}'s Application`, iconURL: interaction.member.displayAvatarURL() })
+    .setDescription(`**Biography:**\n${biography}`)
+    .addFields(
+      { name: 'Discord User', value: `<@${interaction.user.id}>`, inline: true },
+      { name: 'SteamID64', value: steamId, inline: true },
+      { name: 'Character Name', value: character, inline: true },
+      { name: 'User Reported Bans', value: bansText || '-', inline: true },
+      { name: 'Accepted Rules', value: rules || '-', inline: true },
+      { name: 'VAC Ban', value: steamInfo ? (steamInfo.vacBanned ? 'Yes' : 'No') : 'Unknown (no Steam API key)', inline: true },
+      { name: 'Trade Ban', value: steamInfo ? (steamInfo.tradeBanned ? 'Yes' : 'No') : u(null), inline: true },
+      { name: 'Ban Count', value: steamInfo ? String(steamInfo.vacBans + steamInfo.gameBans) : u(null), inline: true },
+      { name: 'Profile Privacy', value: steamInfo ? (steamInfo.isPrivate ? 'Private' : 'Public') : u(null), inline: true });
+}
+const acceptedRow = (steamId, discordId) => new ActionRowBuilder().addComponents(
+  new ButtonBuilder().setStyle('Danger').setCustomId(`remove-${steamId}-${discordId}`).setLabel('Remove From Whitelist'),
+  new ButtonBuilder().setStyle('Danger').setCustomId(`banperm-${steamId}-${discordId}`).setLabel('Ban (Permanent)'),
+  new ButtonBuilder().setStyle('Danger').setCustomId(`bantemp-${steamId}-${discordId}`).setLabel('Ban (Temporary)'),
+  new ButtonBuilder().setStyle('Link').setLabel('Steam Profile').setURL(`https://steamcommunity.com/profiles/${steamId}`));
+
+// ---------- ban flow ----------
+async function banUser({ steamId, discordId, reason, bannedBy, expiresAt, name }) {
+  if (!steamId) throw new Error('No SteamID64 known for that player.');
+  await revokeWhitelist({ steamId, discordId });
+  lists.add('ban', { id: steamId, discordId, name, reason }, { name, note: reason });
+  const m = await member(discordId);
+  if (m) m.send(`You have been banned. Reason: ${reason}${expiresAt ? ` (expires <t:${Math.floor(new Date(expiresAt) / 1000)}:F>)` : ''}`).catch(() => {});
+  const g = await guild();
+  if (discordId && g) {
+    if (!expiresAt) g.members.ban(discordId, { reason: `Permanently banned: ${reason}` }).catch(e => addLog(`Discord ban failed: ${e.message}`));
+    else if (m) { const ms = Math.min(new Date(expiresAt) - Date.now(), 28 * 86400000); if (ms > 0) m.timeout(ms, `Temporarily banned: ${reason}`).catch(() => {}); }
+  }
+  const embed = new EmbedBuilder().setColor(0x8b0000).setTitle('Player Banned').addFields(
+    { name: 'Discord User', value: discordId ? `<@${discordId}>` : 'Unknown', inline: true },
+    { name: 'SteamID64', value: steamId, inline: true },
+    { name: 'Banned By', value: bannedBy ? `<@${bannedBy}>` : 'Admin tool', inline: true },
+    { name: 'Reason', value: reason || '-' },
+    { name: 'Expires', value: expiresAt ? `<t:${Math.floor(new Date(expiresAt) / 1000)}:F>` : 'Never (permanent)', inline: true });
+  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Success').setCustomId(`unban-${steamId}-${discordId || '0'}`).setLabel('Unban'));
+  const ch = await channel(cfg().adminChannelId);
+  let msg = null;
+  if (ch) msg = await ch.send({ embeds: [embed], components: [row] }).catch(() => null);
+  store().bans.push({ messageId: msg ? msg.id : null, steamId, discordId: discordId || null, reason, bannedBy: bannedBy || null, bannedAt: new Date().toISOString(), expiresAt: expiresAt || null, status: 'banned', name: name || '' });
+  if (discordId && store().applications[discordId]) store().applications[discordId].status = 'banned';
+  saveStore();
+  emitRef('discord:state', status());
+}
+
+async function unbanUser({ steamId, discordId, unbannedBy }) {
+  const ban = store().bans.find(b => b.status === 'banned' && ((steamId && b.steamId === steamId) || (discordId && discordId !== '0' && b.discordId === discordId)));
+  const sid = steamId || (ban && ban.steamId);
+  const did = (discordId && discordId !== '0') ? discordId : (ban && ban.discordId);
+  if (sid) lists.remove('ban', sid);
+  if (did) lists.remove('ban', did);
+  const g = await guild();
+  if (did && g) {
+    if (!ban || !ban.expiresAt) g.members.unban(did, 'Ban lifted').catch(() => {});
+    const m = await member(did);
+    if (m) { m.timeout(null, 'Ban lifted').catch(() => {}); m.send('You have been unbanned and your whitelist access has been restored.').catch(() => {}); }
+  }
+  const appRec = did && store().applications[did];
+  if (appRec && appRec.status === 'banned') { appRec.status = 'accepted'; await applyWhitelist({ steamId: appRec.steamId, discordId: did, name: appRec.characterName }); }
+  if (ban) {
+    ban.status = 'unbanned'; ban.unbannedBy = unbannedBy || 'Admin tool'; ban.unbannedAt = new Date().toISOString();
+    const ch = await channel(cfg().adminChannelId);
+    if (ch && ban.messageId) {
+      const msg = await ch.messages.fetch(ban.messageId).catch(() => null);
+      if (msg && msg.embeds[0]) msg.edit({ embeds: [EmbedBuilder.from(msg.embeds[0]).setColor(0x3ddc84).addFields({ name: 'Unbanned By', value: /^\d+$/.test(String(ban.unbannedBy)) ? `<@${ban.unbannedBy}>` : String(ban.unbannedBy), inline: true })], components: [] }).catch(() => {});
+    }
+  }
+  saveStore();
+  emitRef('discord:state', status());
+  return !!(ban || sid);
+}
+
+let expiryTimer = null;
+async function checkExpiredBans() {
+  const now = Date.now();
+  for (const b of store().bans.filter(b => b.status === 'banned' && b.expiresAt && new Date(b.expiresAt).getTime() <= now)) {
+    try { await unbanUser({ steamId: b.steamId, discordId: b.discordId, unbannedBy: 'System (Ban Expired)' }); addLog(`Ban expired for ${b.steamId}`); } catch (e) { addLog(`Auto-unban failed: ${e.message}`); }
+  }
+  // Discord timeouts cap at 28 days: renew them for longer temp bans.
+  const g = await guild();
+  if (!g) return;
+  for (const b of store().bans.filter(b => b.status === 'banned' && b.expiresAt && b.discordId)) {
+    const m = await g.members.fetch(b.discordId).catch(() => null);
+    if (!m || (m.communicationDisabledUntilTimestamp && m.communicationDisabledUntilTimestamp > now)) continue;
+    const ms = Math.min(new Date(b.expiresAt) - now, 28 * 86400000);
+    if (ms > 0) m.timeout(ms, 'Renewing temporary ban').catch(() => {});
+  }
+}
+
+// ---------- slash command execution (pure enough to unit test) ----------
+async function execute(name, sub, opt, user) {
+  const who = user ? `${user.tag || user} via Discord` : 'Discord';
+  const by = user && user.id ? user.id : null;
+  if (name === 'help') {
+    const lines = [
+      '**/application** — Post the whitelist application button here. *(Admin)*',
+      '**/whitelist add|remove|list**, **/priority …**, **/mute …** — Manage the server lists by Steam64 or Discord user. *(Admin)*',
+      '**/ban permanent|temporary** — Ban a player (game + Discord), with a reason prompt. **/ban battleye** for GUID/IP bans, **/ban remove** to lift, **/ban list**. *(Admin)*',
+      '**/search** — Player dossier: application, whitelist, bans, notes. *(Admin)*',
+      '**/players**, **/kick**, **/say** — Live via RCon. *(Admin)*',
+      '**/server start|stop|restart**, **/backup** — Control the server. *(Admin)*',
+      '**/status** — Server status and player count.',
+      '**/bantime** — Check your own ban.'
+    ];
+    return { embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle('Available Commands').setDescription(lines.join('\n'))] };
+  }
+  if (name === 'bantime') {
+    const b = activeBanFor(by, null);
+    if (!b) return { content: 'You are not currently banned.' };
+    if (!b.expiresAt) return { content: `You are permanently banned. Reason: ${b.reason}` };
+    const ms = new Date(b.expiresAt) - Date.now();
+    return { content: ms <= 0 ? 'Your ban has expired and will be lifted shortly.' : `You are banned. Reason: ${b.reason}\nExpires <t:${Math.floor(new Date(b.expiresAt) / 1000)}:R>.` };
+  }
+  const listKindFor = { whitelist: 'whitelist', priority: 'priority' };
+  if (name in listKindFor) {
+    const kind = listKindFor[name];
+    if (sub === 'list') return { embeds: [fmtList(lists.KINDS[kind].label, lists.read(kind).entries, e => `${e.steamId || e.id}  ${e.name || ''}${e.discordId ? ' <' + e.discordId + '>' : ''}${e.note ? ' — ' + e.note : ''}`)] };
+    const t = resolveTarget(opt);
+    if (!t.steamId) return { content: '❌ Give a Steam64 ID, or a Discord user who has a whitelist application on file.' };
+    if (sub === 'add') {
+      if (kind === 'whitelist') await applyWhitelist({ steamId: t.steamId, discordId: t.discordId, name: t.name, reviewerId: by });
+      else lists.add(kind, { id: t.steamId, discordId: t.discordId, name: t.name }, { name: t.name, note: opt.reason || '' });
+      return { content: `✅ Added \`${t.steamId}\`${t.name ? ` (${t.name})` : ''} to the ${kind}.`, log: `${who}: ${kind} add ${t.steamId}` };
+    }
+    if (sub === 'remove') {
+      if (kind === 'whitelist') await revokeWhitelist({ steamId: t.steamId, discordId: t.discordId }); else lists.remove(kind, t.steamId);
+      return { content: `✅ Removed \`${t.steamId}\` from the ${kind}.`, log: `${who}: ${kind} remove ${t.steamId}` };
+    }
+  }
+  if (name === 'mute') {
+    if (sub === 'list') return { embeds: [fmtList('Mutes', lists.mutes(), m => `${m.id}  ${m.name || ''}${m.reason ? ' — ' + m.reason : ''}`)] };
+    const t = resolveTarget(opt);
+    const id = t.steamId || opt.id;
+    if (!id) return { content: '❌ Give a Steam64 ID / DayZ ID or a Discord user with an application on file.' };
+    if (sub === 'add') { lists.addMute({ id, name: t.name, reason: opt.reason ? `${opt.reason} (${who})` : who }); return { content: `✅ Muted \`${id}\` in the tracked list.`, log: `${who}: mute ${id}` }; }
+    if (sub === 'remove') { lists.removeMute(id); return { content: `✅ Unmuted \`${id}\`.`, log: `${who}: unmute ${id}` }; }
+  }
+  if (name === 'ban') {
+    if (sub === 'list') {
+      const g = lists.read('ban').entries, b = lists.read('bebans').entries;
+      return { embeds: [fmtList('Game bans (ban.txt)', g, e => `${e.steamId || e.id}  ${e.name || ''}${e.note ? ' — ' + e.note : ''}`), fmtList('BattlEye bans (bans.txt)', b, e => `${e.id}  ${e.minutes === '0' ? 'perm' : e.minutes + 'm'}  ${e.reason || ''}`)] };
+    }
+    if (sub === 'battleye') {
+      if (rcon.status().connected) { await rcon.addBan(opt.guid, opt.minutes || 0, opt.reason || ''); lists.saveNote(opt.guid, { note: opt.reason || '' }); return { content: `✅ BattlEye ban added live via RCon for \`${opt.guid}\`.`, log: `${who}: BE ban ${opt.guid}` }; }
+      lists.add('bebans', { id: opt.guid, minutes: opt.minutes || 0, reason: opt.reason || '' });
+      return { content: `✅ Added \`${opt.guid}\` to bans.txt (run loadBans or restart).`, log: `${who}: BE ban ${opt.guid}` };
+    }
+    if (sub === 'remove') {
+      const t = resolveTarget(opt);
+      const id = t.steamId || opt.steamid64;
+      if (lists.has('bebans', id)) { lists.remove('bebans', id); return { content: `✅ Removed \`${id}\` from bans.txt.`, log: `${who}: BE unban ${id}` }; }
+      const ok = await unbanUser({ steamId: t.steamId, discordId: t.discordId, unbannedBy: by || who });
+      return { content: ok ? `✅ Ban lifted for \`${id}\`${t.discordId ? ' and whitelist access restored' : ''}.` : `❌ No ban found for \`${id}\`.`, log: `${who}: unban ${id}` };
+    }
+    // permanent / temporary: handled interactively with a reason modal in onInteraction; direct call bans with opt.reason
+    const t = resolveTarget(opt);
+    if (!t.steamId) return { content: '❌ Give a Steam64 ID, or a Discord user who has a whitelist application on file.' };
+    if (activeBanFor(t.discordId, t.steamId)) return { content: '⚠️ That player is already banned.' };
+    const expiresAt = sub === 'temporary' ? new Date(Date.now() + (opt.duration_days || 1) * 86400000).toISOString() : null;
+    await banUser({ steamId: t.steamId, discordId: t.discordId, reason: opt.reason || 'No reason given', bannedBy: by, expiresAt, name: t.name });
+    return { content: `✅ ${sub === 'temporary' ? `Banned for ${opt.duration_days} day(s)` : 'Permanently banned'}: \`${t.steamId}\`.`, log: `${who}: ban ${sub} ${t.steamId} (${opt.reason || '-'})` };
+  }
+  if (name === 'search') {
+    const t = resolveTarget(opt);
+    let rec = t.rec;
+    if (!rec && opt.character_name) rec = Object.values(store().applications).find(a => (a.characterName || '').toLowerCase().includes(opt.character_name.toLowerCase())) || null;
+    const steamId = t.steamId || (rec && rec.steamId), discordId = t.discordId || (rec && rec.discordId);
+    if (!steamId && !discordId) return { content: 'No information found for that player.' };
+    const ban = store().bans.filter(b => (steamId && b.steamId === steamId) || (discordId && b.discordId === discordId)).slice(-1)[0];
+    const notes = settings.load().playerNotes || {};
+    const note = (steamId && notes[steamId]) || {};
+    const e = new EmbedBuilder().setColor(0x5865F2).setTitle('Player Dossier').addFields(
+      { name: 'Discord User', value: discordId ? `<@${discordId}>` : 'Unknown', inline: true },
+      { name: 'SteamID64', value: steamId || 'Unknown', inline: true },
+      { name: 'Character Name', value: (rec && rec.characterName) || note.name || 'Unknown', inline: true },
+      { name: 'Application', value: rec ? `${rec.status}${rec.reviewerId ? ` (by <@${rec.reviewerId}>)` : ''}${rec.reason ? ` — ${rec.reason}` : ''}` : 'None on file', inline: true },
+      { name: 'Whitelist', value: steamId && lists.has('whitelist', steamId) ? 'Yes' : 'No', inline: true },
+      { name: 'Priority', value: steamId && lists.has('priority', steamId) ? 'Yes' : 'No', inline: true },
+      { name: 'Ban', value: ban ? `${ban.status === 'banned' ? 'Currently banned' : 'Previously banned'} — ${ban.reason}${ban.expiresAt ? ` (expires <t:${Math.floor(new Date(ban.expiresAt) / 1000)}:R>)` : ''}` : 'None' },
+      { name: 'Muted', value: lists.mutes().some(m => m.id === steamId || (discordId && m.id === discordId)) ? 'Yes' : 'No', inline: true });
+    if (note.note) e.addFields({ name: 'Notes', value: note.note });
+    try { const pr = require('./players').all({ query: steamId || (rec && rec.characterName) || '', limit: 1 })[0]; if (pr) e.addFields({ name: 'Playtime', value: `${Math.floor(pr.playtimeSec / 3600)}h ${Math.floor((pr.playtimeSec % 3600) / 60)}m over ${pr.connects} joins`, inline: true }, { name: 'Last seen', value: pr.lastSeen ? `<t:${Math.floor(pr.lastSeen / 1000)}:R>` : '-', inline: true }, { name: 'K / D', value: `${pr.kills} / ${pr.deaths}`, inline: true }); } catch { /* ignore */ }
+    return { embeds: [e] };
+  }
+  if (name === 'players') {
+    if (!rcon.status().connected) return { content: '⚠️ RCon is not connected in the admin tool.' };
+    const { players } = await rcon.players();
+    return { embeds: [fmtList('Online players', players, p => `#${p.num}  ${p.name}${p.lobby ? ' (lobby)' : ''}  ping ${p.ping}`)], ephemeral: false };
+  }
+  if (name === 'kick') {
+    if (!rcon.status().connected) return { content: '⚠️ RCon is not connected in the admin tool.' };
+    const p = await resolvePlayer(opt.player);
+    if (!p) return { content: `❌ No online player matches "${opt.player}".` };
+    await rcon.kick(p.num, opt.reason || '');
+    return { content: `✅ Kicked **${p.name}** (#${p.num}).`, log: `${who}: kick ${p.name}` };
+  }
+  if (name === 'say') {
+    if (!rcon.status().connected) return { content: '⚠️ RCon is not connected in the admin tool.' };
+    await rcon.say(opt.message);
+    return { content: `📢 Sent: ${opt.message}`, ephemeral: false, log: `${who}: say ${opt.message}` };
+  }
+  if (name === 'status') {
+    const st = server.status(), sc = scheduler.state();
+    let online = 'RCon not connected';
+    if (rcon.status().connected) { try { online = `${(await rcon.players()).players.length}${maxPlayers() ? ' / ' + maxPlayers() : ''}`; } catch { online = '?'; } }
+    const up = st.running ? Math.round((Date.now() - st.startedAt) / 60000) : 0;
+    const e = new EmbedBuilder().setTitle('DayZ server status').setColor(st.running ? 0x3ddc84 : 0xff5f5f).addFields(
+      { name: 'State', value: st.running ? `🟢 Online (${Math.floor(up / 60)}h ${up % 60}m)` : '🔴 Offline', inline: true },
+      { name: 'Players', value: online, inline: true },
+      { name: 'Mods', value: String(mods.list().filter(m => m.enabled).length), inline: true },
+      ...(function(){ try { const h = require('./health').current(); return st.running && h.at ? [{ name: 'CPU / RAM / FPS', value: `${h.cpu === null ? '?' : h.cpu + '%'} / ${h.ramMB ? (h.ramMB / 1024).toFixed(1) + ' GB' : '?'} / ${h.fps === null ? '?' : h.fps}`, inline: true }] : []; } catch { return []; } })(),
+      { name: 'Next restart', value: sc.nextRestart ? `<t:${Math.floor(sc.nextRestart / 1000)}:R>` : 'none', inline: true },
+      { name: 'Next backup', value: sc.nextBackup ? `<t:${Math.floor(sc.nextBackup / 1000)}:R>` : 'none', inline: true });
+    return { embeds: [e], ephemeral: false };
+  }
+  if (name === 'server') {
+    if (sub === 'start') { server.start(); return { content: '✅ Server starting.', log: `${who}: server start` }; }
+    if (sub === 'stop') { await server.stop(); return { content: '✅ Server stopped.', log: `${who}: server stop` }; }
+    if (sub === 'restart') { scheduler.restartNow().catch(() => {}); return { content: '✅ Restart started (players are warned if RCon is connected; backup taken if enabled).', log: `${who}: server restart` }; }
+  }
+  if (name === 'backup') {
+    const r = await backups.create('discord');
+    return { content: `✅ Backup saved: \`${r.name}\` (${(r.size / 1048576).toFixed(1)} MB).`, log: `${who}: backup` };
+  }
+  return { content: '❌ Unknown command.' };
+}
+
+function optionsOf(interaction) {
+  const out = {};
+  const walk = arr => { for (const o of arr || []) { if (o.options) walk(o.options); else out[o.name] = o.type === 6 && o.user ? o.user.id : o.value; } };
+  walk(interaction.options && interaction.options.data);
+  return out;
+}
+
+const reasonModal = (id, title, withDuration = false) => {
+  const m = new ModalBuilder().setCustomId(id).setTitle(title);
+  if (withDuration) m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duration').setStyle(TextInputStyle.Short).setLabel('Duration in days').setRequired(true).setPlaceholder('e.g. 7')));
+  m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setStyle(TextInputStyle.Paragraph).setLabel('Reason').setPlaceholder('Enter the reason').setRequired(true)));
+  return m;
+};
+
+async function onInteraction(interaction) {
+  const c = cfg();
+  const ephemeralErr = (content) => (interaction.deferred || interaction.replied ? interaction.editReply({ content }) : interaction.reply({ content, ephemeral: true })).catch(() => {});
+  try {
+    // ----- slash commands -----
+    if (interaction.isChatInputCommand()) {
+      const name = interaction.commandName;
+      let sub = null; try { sub = interaction.options.getSubcommand(false); } catch { /* none */ }
+      if (!PUBLIC_COMMANDS.includes(name) && !isAllowed(interaction)) return ephemeralErr('⛔ You need Administrator or one of the configured admin roles.');
+      const opt = optionsOf(interaction);
+      if (name === 'application') {
+        const embed = new EmbedBuilder().setColor(0x3ddc84).setAuthor({ name: `${interaction.guild.name} Whitelist Application` }).setThumbnail(interaction.guild.iconURL()).setDescription('Interested in joining the server? Click the button below to begin your whitelist application.');
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Success').setCustomId('application').setLabel('Whitelist Application'));
+        return interaction.reply({ embeds: [embed], components: [row] });
+      }
+      if (name === 'ban' && (sub === 'permanent' || sub === 'temporary')) {
+        const t = resolveTarget(opt);
+        if (!t.steamId) return ephemeralErr('❌ Give a Steam64 ID, or a Discord user who has a whitelist application on file.');
+        if (activeBanFor(t.discordId, t.steamId)) return ephemeralErr('⚠️ That player is already banned.');
+        const days = sub === 'temporary' ? opt.duration_days : 0;
+        return interaction.showModal(reasonModal(`modal-ban-${t.steamId}-${t.discordId || '0'}-${days}`, sub === 'temporary' ? `Ban for ${days} day(s)` : 'Permanently Ban Player'));
+      }
+      await interaction.deferReply({ ephemeral: true });
+      const r = await execute(name, sub, opt, interaction.user);
+      const payload = { content: r.content, embeds: r.embeds };
+      if (r.ephemeral === false) { await interaction.deleteReply().catch(() => {}); await interaction.followUp({ ...payload, ephemeral: false }); }
+      else await interaction.editReply(payload);
+      if (r.log) { addLog(r.log); postLog(`📝 ${r.log}`); }
+      return;
+    }
+    // ----- buttons -----
+    if (interaction.isButton()) {
+      const [req, a, b] = interaction.customId.split('-');
+      if (req === 'application') {
+        if (activeBanFor(interaction.user.id, null)) return ephemeralErr('You are currently banned and cannot apply.');
+        const rec = store().applications[interaction.user.id];
+        if (rec && rec.status === 'pending') return ephemeralErr('Your whitelist application is already pending.');
+        if (rec && rec.status === 'accepted') return ephemeralErr('You are already on the whitelist.');
+        const m = new ModalBuilder().setCustomId('modal-application').setTitle('Whitelist Application');
+        const f = (id, label, style, extra = {}) => { const t = new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(style).setRequired(true); if (extra.min) t.setMinLength(extra.min); if (extra.max) t.setMaxLength(extra.max); if (extra.ph) t.setPlaceholder(extra.ph); return new ActionRowBuilder().addComponents(t); };
+        m.addComponents(f('steamid64', "What's your SteamID64?", TextInputStyle.Short, { min: 17, max: 17, ph: '7656119...' }), f('character', 'Character name', TextInputStyle.Short, { ph: 'John Doe' }), f('biography', "Your character's biography", TextInputStyle.Paragraph, { min: 50, ph: '50 characters minimum' }), f('bans', 'Any bans on record? If so, why?', TextInputStyle.Short), f('rules', 'Do you agree to follow the rules? (Yes / No)', TextInputStyle.Short));
+        return interaction.showModal(m);
+      }
+      if (!isAllowed(interaction)) return ephemeralErr('⛔ Admins only.');
+      if (req === 'accept') {
+        await interaction.deferReply({ ephemeral: true });
+        const steamId = a, discordId = b;
+        const rec = store().applications[discordId];
+        await applyWhitelist({ steamId, discordId, name: rec && rec.characterName, reviewerId: interaction.user.id });
+        if (rec) { rec.status = 'accepted'; rec.reviewerId = interaction.user.id; rec.reviewedAt = new Date().toISOString(); saveStore(); }
+        await interaction.message.edit({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x3ddc84).addFields({ name: 'Reviewed By', value: `<@${interaction.user.id}> (Accepted)`, inline: true })], components: [acceptedRow(steamId, discordId)] }).catch(() => {});
+        const m = await member(discordId); if (m) m.send('Your whitelist application has been accepted.').catch(() => {});
+        addLog(`${interaction.user.tag}: accepted application ${steamId}`); postLog(`✅ <@${interaction.user.id}> accepted the whitelist application of <@${discordId}> (${steamId})`);
+        emitRef('discord:state', status());
+        return interaction.editReply({ content: 'Added to the whitelist.' });
+      }
+      if (req === 'decline') return interaction.showModal(reasonModal(`modal-decline-${a}`, 'Decline Application'));
+      if (req === 'remove') {
+        await interaction.deferReply({ ephemeral: true });
+        await revokeWhitelist({ steamId: a, discordId: b });
+        delete store().applications[b]; saveStore();
+        await interaction.message.edit({ components: [] }).catch(() => {});
+        addLog(`${interaction.user.tag}: removed ${a} from whitelist`); postLog(`🚫 <@${interaction.user.id}> removed <@${b}> (${a}) from the whitelist`);
+        return interaction.editReply({ content: 'Removed from the whitelist.' });
+      }
+      if (req === 'banperm' || req === 'bantemp') {
+        if (activeBanFor(b, a)) return ephemeralErr('This player is already banned.');
+        return interaction.showModal(reasonModal(`modal-ban-${a}-${b}-0`, req === 'banperm' ? 'Permanently Ban Player' : 'Temporarily Ban Player', req === 'bantemp'));
+      }
+      if (req === 'unban') {
+        await interaction.deferReply({ ephemeral: true });
+        const ok = await unbanUser({ steamId: a, discordId: b, unbannedBy: interaction.user.id });
+        addLog(`${interaction.user.tag}: unban ${a}`); postLog(`♻️ <@${interaction.user.id}> lifted the ban on ${a}`);
+        return interaction.editReply({ content: ok ? 'Ban lifted and whitelist access restored.' : 'No active ban found.' });
+      }
+      return;
+    }
+    // ----- modals -----
+    if (interaction.isModalSubmit()) {
+      const id = interaction.customId;
+      if (id === 'modal-application') {
+        const steamId = interaction.fields.getTextInputValue('steamid64').trim();
+        if (!lists.isSteam64(steamId)) return ephemeralErr('Please enter a valid SteamID64 (17 digits starting with 7656119).');
+        await interaction.deferReply({ ephemeral: true });
+        const character = interaction.fields.getTextInputValue('character').trim();
+        const steamInfo = await getSteamInfo(steamId);
+        const embed = applicationEmbed(interaction, { steamId, character, biography: interaction.fields.getTextInputValue('biography'), bansText: interaction.fields.getTextInputValue('bans'), rules: interaction.fields.getTextInputValue('rules'), steamInfo });
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setStyle('Success').setCustomId(`accept-${steamId}-${interaction.user.id}`).setLabel('Accept'),
+          new ButtonBuilder().setStyle('Danger').setCustomId(`decline-${interaction.user.id}`).setLabel('Decline'),
+          new ButtonBuilder().setStyle('Link').setLabel('Steam Profile').setURL(`https://steamcommunity.com/profiles/${steamId}`));
+        const ch = await channel(c.adminChannelId);
+        if (!ch) return interaction.editReply({ content: 'The admin channel is not configured. Tell the server staff.' });
+        const msg = await ch.send({ embeds: [embed], components: [row] });
+        store().applications[interaction.user.id] = { messageId: msg.id, steamId, discordId: interaction.user.id, status: 'pending', characterName: character, submittedAt: new Date().toISOString() };
+        saveStore(); emitRef('discord:state', status());
+        addLog(`Application submitted by ${interaction.user.tag} (${steamId})`);
+        return interaction.editReply({ content: 'Your application was submitted. You will be notified once it is reviewed.' });
+      }
+      if (id.startsWith('modal-decline-')) {
+        const discordId = id.split('-')[2];
+        const reason = interaction.fields.getTextInputValue('reason');
+        const rec = store().applications[discordId];
+        if (rec) { rec.status = 'declined'; rec.reviewerId = interaction.user.id; rec.reviewedAt = new Date().toISOString(); rec.reason = reason; saveStore(); }
+        if (interaction.message && interaction.message.embeds[0]) await interaction.message.edit({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xff5f5f).addFields({ name: 'Reviewed By', value: `<@${interaction.user.id}> (Declined)`, inline: true }, { name: 'Reason', value: reason })], components: [] }).catch(() => {});
+        const m = await member(discordId); if (m) m.send(`Your whitelist application has been declined. ${reason}`).catch(() => {});
+        addLog(`${interaction.user.tag}: declined application of ${discordId}`);
+        return interaction.reply({ content: 'Application declined.', ephemeral: true });
+      }
+      if (id.startsWith('modal-ban-')) {
+        const [, , steamId, discordId, presetDays] = id.split('-');
+        let days = Number(presetDays) || 0;
+        if (!days) { try { days = parseInt(interaction.fields.getTextInputValue('duration'), 10) || 0; } catch { days = 0; } }
+        const reason = interaction.fields.getTextInputValue('reason');
+        await interaction.deferReply({ ephemeral: true });
+        const rec = discordId !== '0' ? store().applications[discordId] : null;
+        const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null;
+        await banUser({ steamId, discordId: discordId !== '0' ? discordId : null, reason, bannedBy: interaction.user.id, expiresAt, name: rec && rec.characterName });
+        const appMsg = rec && rec.messageId ? await (await channel(c.adminChannelId))?.messages.fetch(rec.messageId).catch(() => null) : null;
+        if (appMsg) appMsg.edit({ components: [] }).catch(() => {});
+        addLog(`${interaction.user.tag}: ban ${days ? days + 'd' : 'permanent'} ${steamId} (${reason})`); postLog(`🔨 <@${interaction.user.id}> banned ${discordId !== '0' ? `<@${discordId}>` : steamId} ${days ? `for ${days} day(s)` : 'permanently'}: ${reason}`);
+        return interaction.editReply({ content: days ? `Banned for ${days} day(s).` : 'Permanently banned.' });
+      }
+    }
+  } catch (e) {
+    addLog(`Interaction failed: ${e.message}`);
+    await ephemeralErr(`❌ ${e.message}`);
+  }
+}
+
+// ---------- presence: online/offline + player count ----------
+let presenceTimer = null;
+let lastPresence = '';
+function maxPlayers() {
+  try { const m = fs.readFileSync(settings.paths().configPath, 'utf8').match(/maxPlayers\s*=\s*(\d+)/); return m ? Number(m[1]) : null; } catch { return null; }
+}
+async function updatePresence() {
+  if (!client || !state.running || !client.user) return;
+  const c = cfg();
+  const st = server.status();
+  let text, presence;
+  if (st.running) {
+    let count = null;
+    if (rcon.status().connected) { try { count = (await rcon.players()).players.length; } catch { count = null; } }
+    const max = maxPlayers();
+    text = (c.statusFormat || 'Server Online | {count}/{max} Players').replace('{count}', count === null ? '?' : String(count)).replace('{max}', max ? String(max) : '?');
+    presence = 'online';
+    state.playersOnline = count;
+  } else {
+    text = st.restartPending ? 'Server restarting…' : (c.offlineStatus || 'Server Offline');
+    presence = st.restartPending ? 'idle' : 'dnd';
+    state.playersOnline = null;
+  }
+  const key = presence + '|' + text;
+  if (key === lastPresence) return;
+  lastPresence = key;
+  try { client.user.setPresence({ status: presence, activities: [{ name: text, type: ActivityType.Playing }] }); state.presence = text; emitRef('discord:state', status()); } catch { /* ignore */ }
+}
+function startPresence() { stopPresence(); lastPresence = ''; updatePresence().catch(() => {}); presenceTimer = setInterval(() => updatePresence().catch(() => {}), 20000); }
+function stopPresence() { clearInterval(presenceTimer); presenceTimer = null; }
+
+// ---------- live log streaming ----------
+const tail = { timer: null, flush: null, files: {}, queue: [], paused: false, posted: 0 };
+const ERR_RE = /SCRIPT\s+\(E\)|ERROR|Error|Can't|Cannot|failed|Failed|Access violation|Warning Message|kicked|banned|BattlEye/;
+function newestFile(kind) {
+  const p = settings.paths();
+  try {
+    const re = kind === 'adm' ? /\.adm$/i : /\.rpt$/i;
+    const files = fs.readdirSync(p.profilesDir).filter(f => re.test(f)).map(f => ({ f: path.join(p.profilesDir, f), m: fs.statSync(path.join(p.profilesDir, f)).mtimeMs }));
+    files.sort((a, b) => b.m - a.m);
+    return files[0] ? files[0].f : null;
+  } catch { return null; }
+}
+function pollLogs() {
+  const c = cfg();
+  if (!client || !state.running || !c.liveLogChannelId) return;
+  for (const kind of (c.liveLogKinds || [])) {
+    const file = newestFile(kind);
+    if (!file) continue;
+    let size = 0; try { size = fs.statSync(file).size; } catch { continue; }
+    const cur = tail.files[kind];
+    if (!cur || cur.file !== file) { tail.files[kind] = { file, offset: size, rest: '' }; continue; }
+    if (size < cur.offset) cur.offset = 0;
+    if (size === cur.offset) continue;
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(Math.min(size - cur.offset, 256 * 1024));
+      const n = fs.readSync(fd, buf, 0, buf.length, cur.offset);
+      cur.offset += n;
+      const lines = (cur.rest + buf.toString('utf8', 0, n)).split(/\r?\n/);
+      cur.rest = lines.pop() || '';
+      for (const l of lines) { const line = l.trim(); if (!line) continue; if (c.liveLogErrorsOnly && !ERR_RE.test(line)) continue; tail.queue.push(`[${kind.toUpperCase()}] ${line}`); }
+    } finally { fs.closeSync(fd); }
+  }
+  if (tail.queue.length > 400) tail.queue.splice(0, tail.queue.length - 400);
+}
+async function flushLogs() {
+  const c = cfg();
+  if (!client || !state.running || !c.liveLogChannelId || !tail.queue.length || tail.paused) return;
+  const lines = tail.queue.splice(0, tail.queue.length);
+  const chunks = []; let cur = '';
+  for (const l of lines) { const piece = l.length > 1800 ? l.slice(0, 1800) + '…' : l; if ((cur + '\n' + piece).length > 1850) { chunks.push(cur); cur = piece; } else cur = cur ? cur + '\n' + piece : piece; }
+  if (cur) chunks.push(cur);
+  try {
+    const ch = await client.channels.fetch(c.liveLogChannelId);
+    if (!ch || !ch.isTextBased()) throw new Error('Live log channel is not a text channel.');
+    for (const chunk of chunks.slice(0, 4)) { await ch.send('```\n' + chunk.replace(/```/g, "'''") + '\n```'); tail.posted++; }
+    if (chunks.length > 4) await ch.send(`⚠️ ${chunks.length - 4} more chunk(s) skipped to respect Discord rate limits.`);
+    state.liveLogPosted = tail.posted;
+  } catch (e) { tail.paused = true; addLog(`Live log posting paused: ${e.message}`); setTimeout(() => { tail.paused = false; }, 60000); }
+}
+function startTail() { stopTail(); tail.files = {}; tail.queue = []; tail.posted = 0; tail.timer = setInterval(() => { try { pollLogs(); } catch (e) { addLog(`Log tail error: ${e.message}`); } }, 2000); tail.flush = setInterval(() => flushLogs().catch(() => {}), 4000); }
+function stopTail() { clearInterval(tail.timer); clearInterval(tail.flush); tail.timer = tail.flush = null; }
+function applyLiveLog() { if (!state.running) return; if (cfg().liveLogChannelId) startTail(); else stopTail(); }
+
+// ---------- lifecycle ----------
+async function start() {
+  const c = cfg();
+  if (!c.token) throw new Error('Bot token is empty. Create a bot at discord.com/developers and paste its token.');
+  if (!c.guildId) throw new Error('Guild (server) ID is empty. Enable Developer Mode in Discord, right-click your server, Copy Server ID.');
+  await stop(true);
+  client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers], partials: [Partials.Channel, Partials.GuildMember, Partials.User] });
+  state = { ...state, running: false, tag: null, appId: null, guildName: null, error: null, commands: 0, startedAt: null, presence: null };
+  client.on('interactionCreate', onInteraction);
+  client.on('error', e => addLog(`Client error: ${e.message}`));
+  client.on('shardDisconnect', () => { if (state.running) require('./alerts').alert('bot-offline', 'Discord bot disconnected', 'The gateway connection dropped; discord.js will try to reconnect.'); });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Login timed out. Check the token and your internet connection.')), 20000);
+    client.once('ready', async () => {
+      clearTimeout(timer);
+      try {
+        state.tag = client.user.tag; state.appId = client.application.id; state.running = true; state.startedAt = Date.now();
+        const rest = new REST({ version: '10' }).setToken(c.token);
+        const cmds = buildCommands();
+        await rest.put(Routes.applicationGuildCommands(state.appId, c.guildId), { body: cmds });
+        await rest.put(Routes.applicationCommands(state.appId), { body: [] }).catch(() => {}); // clear stray global commands
+        state.commands = cmds.length;
+        try { const g = await client.guilds.fetch(c.guildId); state.guildName = g.name; } catch { state.guildName = null; state.error = 'Bot is not in that guild yet. Use the invite link.'; }
+        addLog(`Bot online as ${state.tag}; ${cmds.length} slash commands registered${state.guildName ? ' in ' + state.guildName : ''}.`);
+        startPresence();
+        clearInterval(expiryTimer); expiryTimer = setInterval(() => checkExpiredBans().catch(() => {}), 5 * 60 * 1000); checkExpiredBans().catch(() => {});
+        if (c.liveLogChannelId) { startTail(); addLog(`Live log streaming to channel ${c.liveLogChannelId} (${(c.liveLogKinds || []).join(', ').toUpperCase() || 'nothing selected'}${c.liveLogErrorsOnly ? ', errors only' : ''}).`); }
+        resolve();
+      } catch (e) { clearTimeout(timer); reject(e); }
+    });
+    client.login(c.token).catch(e => { clearTimeout(timer); reject(new Error(/token/i.test(e.message) ? 'Invalid bot token.' : /intents/i.test(e.message) ? 'Enable "Server Members Intent" for the bot in the Discord developer portal (Bot → Privileged Gateway Intents).' : e.message)); });
+  }).catch(async e => { state.error = e.message; addLog(`Start failed: ${e.message}`); await stop(true); throw e; });
+  emitRef('discord:state', status());
+  return status();
+}
+
+async function stop(silent = false) {
+  stopTail(); stopPresence(); clearInterval(expiryTimer); expiryTimer = null;
+  if (client) { try { client.removeAllListeners(); await client.destroy(); } catch { /* ignore */ } client = null; }
+  const was = state.running;
+  state.running = false; state.startedAt = null; state.presence = null;
+  if (!silent && was) addLog('Bot stopped.');
+  emitRef('discord:state', status());
+  return status();
+}
+
+function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
+function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
+
+module.exports = { postAlert, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
