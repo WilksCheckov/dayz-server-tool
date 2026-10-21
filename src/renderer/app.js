@@ -152,7 +152,7 @@ function showPage(name) {
   if (name === 'map') { loadMapInfo().then(() => drawMap()); }
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
-  if (name === 'dashboard') { refreshHealth(); refreshAlertList(); }
+  if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); }
   if (name === 'discord') { loadDiscordForm(); refreshDiscordCommands(); ipc.invoke('discord:status').then(renderDiscord); }
   if (name === 'mods') refreshMods();
   if (name === 'workshop') { refreshMods(); wsEnsureStarted(); }
@@ -174,8 +174,8 @@ async function loadSettings() {
   $('profilesDir').value = s.profilesDir;
   $('extraParams').value = s.extraParams;
   $('autoRestart').checked = !!s.autoRestart;
-  $('autoUpdateEnabled').checked = !!(s.autoUpdate && s.autoUpdate.enabled);
-  $('autoUpdateHours').value = (s.autoUpdate && s.autoUpdate.intervalHours) || 6;
+  const au = { enabled: false, intervalHours: 6, mode: 'times', times: [], onlyIfUpdates: true, checkEveryMinutes: 60, ...(s.autoUpdate || {}) };
+  $('autoUpdateEnabled').checked = !!au.enabled; $('autoUpdateHours').value = au.intervalHours; $('autoUpdateMode').value = au.mode; $('autoUpdateTimes').value = (au.times || []).join(', '); $('autoUpdateOnlyIf').checked = au.onlyIfUpdates !== false; $('autoUpdateCheckMin').value = au.checkEveryMinutes;
   $('statAutoUpdate').textContent = s.autoUpdate && s.autoUpdate.enabled ? `Auto-update every ${s.autoUpdate.intervalHours}h` : 'Auto-update off';
 }
 async function saveSettings(partial) {
@@ -203,7 +203,9 @@ $('btnSaveLaunch').onclick = () => run(async () => {
   toast('Launch settings saved'); refreshCmdline(); refreshConfigTree();
 });
 $('btnSaveAutoUpdate').onclick = () => run(async () => {
-  await saveSettings({ autoUpdate: { enabled: $('autoUpdateEnabled').checked, intervalHours: Number($('autoUpdateHours').value) || 6 } });
+  const times = $('autoUpdateTimes').value.split(/[,\s]+/).map(t => t.trim()).filter(Boolean).map(t => t.padStart(5, '0'));
+  const bad = times.filter(t => !/^\d{2}:\d{2}$/.test(t)); if (bad.length) return toast(`Invalid time: ${bad.join(', ')} (use HH:MM)`, true);
+  await saveSettings({ autoUpdate: { enabled: $('autoUpdateEnabled').checked, mode: $('autoUpdateMode').value, times, intervalHours: Number($('autoUpdateHours').value) || 6, onlyIfUpdates: $('autoUpdateOnlyIf').checked, checkEveryMinutes: Number($('autoUpdateCheckMin').value) || 60 } });
   toast('Schedule saved'); refreshUpdater();
 });
 
@@ -238,13 +240,29 @@ $('btnOpenServerDir').onclick = () => ipc.invoke('shell:openPath', state.paths.s
 ipc.on('steam:guardNeeded', () => { toast('Steam Guard code required. Enter it on the Install page and retry.', true); showPage('install'); $('steamGuard').focus(); });
 
 // ---------- updater ----------
+function renderUpdateCheck(u) {
+  const c = u.lastCheck;
+  const banner = $('updatesBanner');
+  if (!c) { $('updateCheckBox').textContent = u.checking ? 'Checking…' : 'Not checked yet.'; banner.hidden = true; return; }
+  const parts = [];
+  if (c.server.available) parts.push(`Server update available (build ${c.server.installed} → ${c.server.latest})`);
+  if (c.mods.length) parts.push(`${c.mods.length} mod update${c.mods.length > 1 ? 's' : ''}: ${c.mods.map(m => m.title).join(', ')}`);
+  const when = ' · checked ' + fmtDate(c.at);
+  $('updateCheckBox').innerHTML = parts.length ? parts.map(esc).join('<br>') + `<div class="muted">${when}</div>` : `Server build ${esc(c.server.installed || '?')}${c.server.latest ? ' (latest ' + esc(c.server.latest) + ')' : ''} and all mods are up to date.${when}`;
+  banner.hidden = !parts.length;
+  if (parts.length) banner.innerHTML = `<span>${parts.map(esc).join(' · ')}</span><span class="row gap"><button class="btn small" id="btnBannerUpdates">Open Updates</button><button class="btn small primary" id="btnBannerUpdateNow">Update now</button></span>`;
+  const b1 = $('btnBannerUpdates'); if (b1) b1.onclick = () => showPage('updates');
+  const b2 = $('btnBannerUpdateNow'); if (b2) b2.onclick = (e) => run(async () => { const ok = await showModal('Update now?', '<p>The server is stopped (players are warned if RCon is connected), the server and outdated mods are installed, then it starts again.</p>', [{ label: 'Update now', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('updater:runNow', { force: true }); }, e.target);
+}
 async function refreshUpdater() {
   const u = await ipc.invoke('updater:state');
+  renderUpdateCheck(u);
   const lr = u.lastRun;
   $('updaterStatus').textContent = (u.running ? 'Update running… ' : '') +
     (lr ? `Last run ${fmtDate(lr.at)}: server ${lr.result.server ? 'ok' : 'failed'}, ${lr.result.mods.length} mod(s) updated, ${lr.result.failed.length} failed.` : 'Never run.') +
     (u.lastUpdateCheck ? ` Last mod check ${fmtDate(u.lastUpdateCheck)}.` : '');
 }
+$('btnCheckUpdatesNow').onclick = (e) => run(async () => { toast('Checking Steam…'); await ipc.invoke('updater:check'); refreshUpdater(); }, e.target);
 $('btnRunUpdateNow').onclick = (e) => run(async () => { showPage('dashboard'); await ipc.invoke('updater:runNow', { force: true }); refreshUpdater(); refreshSteam(); }, e.target);
 ipc.on('updater:state', refreshUpdater);
 
@@ -504,14 +522,18 @@ $('modList').addEventListener('click', (e) => {
   const row = e.target.closest('.mod'); if (!row) return;
   const id = row.dataset.id;
   const m = state.mods.find(x => x.id === id);
-  if (e.target.classList.contains('mod-enabled')) return run(async () => { await ipc.invoke('mods:setFlags', id, { enabled: e.target.checked }); });
-  if (e.target.classList.contains('mod-update')) return run(async () => { if (!m.local && !(await ensureSteamLogin())) return; await ipc.invoke('mods:update', id); toast(`${m.title} updated`); }, e.target);
+  if (e.target.classList.contains('mod-enabled')) return run(async () => {
+    if (!e.target.checked) { const deps = await ipc.invoke('mods:dependents', id); if (deps.length) { const ok = await showModal(`Disable ${m.title}?`, `<p>These mods require it and will fail to load: <b>${esc(deps.join(', '))}</b></p>`, [{ label: 'Disable anyway', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) { e.target.checked = true; return; } } }
+    await ipc.invoke('mods:setFlags', id, { enabled: e.target.checked });
+  });
+  if (e.target.classList.contains('mod-update')) return run(async () => { if (!m.local && !(await confirmWhileRunning('Updating ' + m.title))) return; if (!m.local && !(await ensureSteamLogin())) return; await ipc.invoke('mods:update', id); toast(`${m.title} updated`); }, e.target);
   if (e.target.classList.contains('mod-deps')) return addMod(id, e.target);
   if (e.target.classList.contains('mod-side')) return run(async () => { await ipc.invoke('mods:setFlags', id, { serverSide: !m.serverSide }); });
   if (e.target.classList.contains('mod-open')) return ipc.invoke('shell:openExternal', `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`);
   if (e.target.classList.contains('mod-remove')) {
     return run(async () => {
-      const choice = await showModal(`Remove ${m.title}?`, '<p class="muted">Removing unlinks it from the server and deletes its keys (unless shared with another mod).</p>',
+      const deps = await ipc.invoke('mods:dependents', id);
+      const choice = await showModal(`Remove ${m.title}?`, `${deps.length ? `<p><b>Warning:</b> ${esc(deps.join(', '))} require this mod and will fail to load without it.</p>` : ''}<p class="muted">Removing unlinks it from the server and deletes its keys (unless shared with another mod).</p>`,
         m.local ? [{ label: 'Remove from list', value: 'keep', primary: true }, { label: 'Cancel', value: null }]
           : [{ label: 'Remove and delete files', value: 'delete', primary: true }, { label: 'Remove, keep download', value: 'keep' }, { label: 'Cancel', value: null }]);
       if (!choice) return;
@@ -545,9 +567,15 @@ $('modList').addEventListener('drop', e => {
   });
 });
 
+// Downloading into a mod folder the running server has loaded can corrupt the download or crash the server.
+async function confirmWhileRunning(what) {
+  if (!state.server || !state.server.running) return true;
+  return showModal('Server is running', `<p>${what} replaces files the running server has loaded. SteamCMD may fail on locked files, and the change only applies after a restart.</p><p>Stop the server first, or continue anyway?</p>`, [{ label: 'Continue anyway', value: true, primary: true }, { label: 'Cancel', value: false }]);
+}
 async function addMod(id, btn) {
   if (!id) return toast('Could not find a workshop ID', true);
   return run(async () => {
+    if (!(await confirmWhileRunning('Adding a mod'))) return;
     if (!(await ensureSteamLogin())) return;
     toast('Checking mod and its dependencies…');
     const plan = await ipc.invoke('mods:plan', id);
@@ -589,7 +617,7 @@ $('btnAddMod').onclick = (e) => run(async () => {
 $('modIdInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnAddMod').click(); });
 $('btnCheckMods').onclick = (e) => run(async () => { const out = await ipc.invoke('mods:checkUpdates'); toast(out.length ? `${out.length} mod(s) have updates` : 'All mods up to date'); }, e.target);
 $('btnDashCheckMods').onclick = $('btnCheckMods').onclick;
-$('btnUpdateAllMods').onclick = (e) => run(async () => { if (!(await ensureSteamLogin())) return; const r = await ipc.invoke('mods:updateAll', true); toast(`${r.updated} updated, ${r.failed.length} failed`); }, e.target);
+$('btnUpdateAllMods').onclick = (e) => run(async () => { if (!(await confirmWhileRunning('Updating mods'))) return; if (!(await ensureSteamLogin())) return; const r = await ipc.invoke('mods:updateAll', true); toast(`${r.updated} updated, ${r.failed.length} failed`); }, e.target);
 $('btnAutoOrganize').onclick = (e) => run(async () => { await ipc.invoke('mods:autoOrganize'); toast('Organized: frameworks first, then dependency order'); }, e.target);
 $('btnImportMods').onclick = (e) => run(async () => {
   const found = await ipc.invoke('mods:scanUnmanaged');

@@ -74,6 +74,7 @@ function runScript(lines, emit, opts = {}) {
       windowsHide: true
     });
     current = proc;
+    proc.on('error', err => { current = null; try { fs.unlinkSync(scriptPath); } catch { /* ignore */ } resolve({ code: -1, output: [], error: 'Could not start SteamCMD: ' + err.message }); });
     let buf = '';
     const onData = d => {
       buf += d.toString('utf8');
@@ -177,6 +178,28 @@ async function downloadWorkshopItem(id, emit, { retries = 3 } = {}) {
   throw new Error((last && last.error) || `Workshop item ${id} did not download.`);
 }
 
+// Latest public build id on Steam (anonymous app_info_print). Cached for 30 minutes.
+let latestCache = { at: 0, appId: null, buildId: null };
+async function getLatestBuild(emit = () => {}) {
+  const s = settings.load();
+  if (latestCache.appId === s.serverAppId && Date.now() - latestCache.at < 30 * 60000) return latestCache.buildId;
+  await ensureSteamcmd(emit);
+  const r = await runScript(['@ShutdownOnFailedCommand 1', '@NoPromptForPassword 1', 'login anonymous', 'app_info_update 1', `app_info_print ${s.serverAppId}`, 'quit'], () => {}, { allowCodes: [0, 6, 7] });
+  const text = r.output.join('\n');
+  const start = text.indexOf(`"${s.serverAppId}"`);
+  let buildId = null;
+  if (start >= 0) {
+    try {
+      const data = vdf.parse(text.slice(start));
+      const app = data[String(s.serverAppId)] || {};
+      buildId = app.depots && app.depots.branches && app.depots.branches.public ? app.depots.branches.public.buildid : null;
+    } catch { buildId = null; }
+  }
+  if (!buildId) { const m = text.match(/"public"\s*\{[^}]*"buildid"\s*"(\d+)"/); buildId = m ? m[1] : null; }
+  if (buildId) latestCache = { at: Date.now(), appId: s.serverAppId, buildId };
+  return buildId;
+}
+
 function getServerBuild() {
   const p = settings.paths();
   try {
@@ -202,4 +225,4 @@ function status() {
   };
 }
 
-module.exports = { setCredentials, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getServerBuild, status, cancel, runScript };
+module.exports = { setCredentials, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getServerBuild, getLatestBuild, status, cancel, runScript };

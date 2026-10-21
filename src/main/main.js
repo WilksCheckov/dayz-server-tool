@@ -203,6 +203,7 @@ handle('mods:relink', (id) => mods.link(id));
 handle('mods:details', (ids) => mods.fetchDetails(ids));
 handle('mods:scanUnmanaged', () => mods.scanUnmanaged());
 handle('mods:autoOrganize', () => mods.autoOrganize());
+handle('mods:dependents', (id) => mods.dependents(id));
 handle('mods:launchLines', () => mods.launchLines());
 handle('mods:addMany', async (ids, opts) => {
   const failed = [];
@@ -392,6 +393,8 @@ handle('logs:summary', (name) => logs.summarize(name));
 // Updater
 handle('updater:state', () => updater.state());
 handle('updater:runNow', (opts) => updater.runNow(opts || {}));
+handle('updater:check', () => updater.check());
+handle('updater:runIfNeeded', () => updater.runIfNeeded());
 
 // Keep settings from the previous app name (the userData folder is named after productName).
 try {

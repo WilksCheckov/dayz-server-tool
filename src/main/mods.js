@@ -35,17 +35,24 @@ async function fetchDetails(ids) {
 }
 
 // Required items are only on the workshop page, not in the public API.
-async function fetchRequiredItems(id) {
-  try {
-    const res = await fetch(PAGE + id, { headers: { 'Accept-Language': 'en' } });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const block = html.match(/id="RequiredItems"[\s\S]*?<\/div>\s*<\/div>/);
-    if (!block) return [];
-    const ids = new Set();
-    for (const m of block[0].matchAll(/filedetails\/\?id=(\d+)/g)) if (m[1] !== String(id)) ids.add(m[1]);
-    return [...ids];
-  } catch { return []; }
+async function fetchRequiredItems(id, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const res = await fetch(PAGE + id, { headers: { 'Accept-Language': 'en' }, signal: AbortSignal.timeout(15000) });
+      if (res.status === 429 || res.status >= 500) throw new Error('HTTP ' + res.status);
+      if (!res.ok) return [];
+      const html = await res.text();
+      const block = html.match(/id="RequiredItems"[\s\S]*?<\/div>\s*<\/div>/);
+      if (!block) return [];
+      const ids = new Set();
+      for (const m of block[0].matchAll(/filedetails\/\?id=(\d+)/g)) if (m[1] !== String(id)) ids.add(m[1]);
+      return [...ids];
+    } catch (e) {
+      if (i === attempts) { emitRef('console', { source: 'mods', line: `Could not read required items for ${id}: ${e.message}` }); return null; }
+      await new Promise(r => setTimeout(r, 1500 * i));
+    }
+  }
+  return null;
 }
 
 async function refreshMeta(ids) {
@@ -232,8 +239,10 @@ async function resolveDeps(ids, depth = 0, seen = new Set()) {
   for (const id of ids) {
     if (seen.has(id) || isLocal(id)) continue;
     seen.add(id);
-    const deps = depth < 4 ? await fetchRequiredItems(id) : [];
+    if (depth > 25) continue; // safety valve; cycles are already stopped by 'seen'
+    const fetched = await fetchRequiredItems(id);
     const s = settings.load();
+    const deps = fetched === null ? ((s.modCache[id] || {}).deps || []) : fetched;
     settings.save({ modCache: { ...s.modCache, [id]: { ...(s.modCache[id] || {}), deps } } });
     for (const d of await resolveDeps(deps, depth + 1, seen)) if (!order.includes(d)) order.push(d);
     order.push(id);
@@ -372,8 +381,17 @@ async function checkUpdates() {
   const s = settings.load();
   const ids = s.mods.map(m => m.id).filter(id => !isLocal(id));
   if (ids.length) await refreshMeta(ids);
+  // Authors add requirements over time: re-read them so missing dependencies show up before the next restart.
+  for (const id of ids) {
+    const fetched = await fetchRequiredItems(id, 2);
+    if (fetched === null) continue;
+    const s2 = settings.load();
+    settings.save({ modCache: { ...s2.modCache, [id]: { ...(s2.modCache[id] || {}), deps: fetched } } });
+  }
   settings.save({ lastUpdateCheck: Date.now() });
   emitRef('mods:changed', {});
+  const missing = list().filter(m => m.missingDeps && m.missingDeps.length);
+  if (missing.length) emitRef('console', { source: 'mods', line: `${missing.length} mod(s) have missing dependencies: ${missing.map(m => m.title).join(', ')}. Use +deps on the Installed page.` });
   return list().filter(m => m.updateAvailable);
 }
 
@@ -471,6 +489,12 @@ function launchLines(s = settings.load()) {
 
 // -mod is generated from the enabled mods in list order. -serverMod starts with whatever the operator typed
 // (settings.serverModManual, ';'-separated folder names) followed by mods flagged server-only in the list.
+// Mods in the list that declare this id as a requirement.
+function dependents(id) {
+  const s = settings.load();
+  return s.mods.filter(m => ((s.modCache[m.id] || {}).deps || []).includes(String(id))).map(m => (s.modCache[m.id] || {}).title || m.id);
+}
+
 function modParam(s, serverSide) {
   const generated = s.mods
     .filter(m => m.enabled !== false && !!m.serverSide === serverSide)
@@ -518,4 +542,4 @@ function init(emit) {
   };
 }
 
-module.exports = { init, list, add, plan, update, updateAll, remove, setFlags, reorder, autoSort, autoOrganize, launchLines, writeLaunchFiles, checkUpdates, modParam, link, fetchDetails, scanUnmanaged, importUnmanaged, fetchRequiredItems };
+module.exports = { init, list, add, plan, update, updateAll, remove, setFlags, reorder, autoSort, autoOrganize, launchLines, writeLaunchFiles, checkUpdates, dependents, modParam, link, fetchDetails, scanUnmanaged, importUnmanaged, fetchRequiredItems };

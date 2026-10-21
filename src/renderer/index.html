@@ -44,6 +44,7 @@
       <main class="content">
         <!-- DASHBOARD -->
         <section class="page active" id="page-dashboard">
+          <div id="updatesBanner" class="banner" hidden></div>
           <div class="grid-4">
             <div class="card">
               <div class="card-title">Server</div>
@@ -466,14 +467,25 @@
           <div class="grid-2">
             <div class="card">
               <div class="card-title">Automatic updates</div>
-              <p class="muted">On each run the tool stops the server, updates it and any outdated mods, then starts it again.</p>
-              <label class="check"><input type="checkbox" id="autoUpdateEnabled"> Enable scheduled updates</label>
+              <p class="muted">When an update run happens, the tool stops the server, installs the server and mod updates, and starts it again. Players are warned through RCon when it is connected.</p>
+              <label class="check"><input type="checkbox" id="autoUpdateEnabled"> Enable scheduled update runs</label>
+              <label class="field">When
+                <select id="autoUpdateMode" class="input" style="width:260px"><option value="times">At fixed times every day</option><option value="interval">Every N hours</option></select>
+              </label>
+              <label class="field">Daily times (24h, comma separated, e.g. 05:00, 17:00) <input id="autoUpdateTimes" class="input" placeholder="05:00"></label>
               <label class="field inline">Every <input id="autoUpdateHours" class="input short" type="number" min="0.25" step="0.25"> hours</label>
+              <label class="check"><input type="checkbox" id="autoUpdateOnlyIf"> Only restart and install when the server or a mod is actually out of date</label>
+              <label class="field inline">Check for updates every <input id="autoUpdateCheckMin" class="input short" type="number" min="15"> minutes (for the Dashboard notice)</label>
               <div class="row gap mt">
                 <button class="btn" id="btnSaveAutoUpdate">Save schedule</button>
+                <button class="btn" id="btnCheckUpdatesNow">Check now</button>
                 <button class="btn primary" id="btnRunUpdateNow">Update everything now</button>
               </div>
               <div class="muted mt" id="updaterStatus">—</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Current state</div>
+              <div id="updateCheckBox" class="muted">Not checked yet.</div>
             </div>
           </div>
         </section>
