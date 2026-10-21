@@ -67,9 +67,38 @@ function tcpCheck(host, port) {
   return new Promise(resolve => { const s = net.createConnection({ host, port, timeout: 4000 }); s.on('connect', () => { s.destroy(); resolve(true); }); s.on('error', () => resolve(false)); s.on('timeout', () => { s.destroy(); resolve(false); }); });
 }
 
-async function report() {
-  const [ip, rl, ls] = await Promise.all([publicIp(), rules(), listening()]);
-  return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080) };
+// Steam A2S_INFO query (what the server browser does). Handles the challenge handshake newer servers require.
+function a2sInfo(host, port, timeoutMs = 4000) {
+  const dgram = require('dgram');
+  return new Promise(resolve => {
+    const sock = dgram.createSocket('udp4');
+    const base = Buffer.concat([Buffer.from([0xff, 0xff, 0xff, 0xff, 0x54]), Buffer.from('Source Engine Query\0', 'latin1')]);
+    const started = Date.now();
+    const done = (v) => { try { sock.close(); } catch { /* ignore */ } resolve(v); };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    sock.on('error', () => { clearTimeout(timer); done(null); });
+    sock.on('message', msg => {
+      if (msg.length < 5 || msg.readInt32LE(0) !== -1) return;
+      const type = msg[4];
+      if (type === 0x41 && msg.length >= 9) { sock.send(Buffer.concat([base, msg.subarray(5, 9)]), port, host); return; }
+      if (type !== 0x49) return;
+      clearTimeout(timer);
+      try {
+        let o = 6; const str = () => { const e = msg.indexOf(0, o); const v = msg.toString('utf8', o, e); o = e + 1; return v; };
+        const name = str(), map = str(), folder = str(), game = str(); o += 2;
+        const players = msg[o++], maxPlayers = msg[o++];
+        done({ name, map, folder, game, players, maxPlayers, ping: Date.now() - started });
+      } catch { done(null); }
+    });
+    sock.send(base, port, host, err => { if (err) { clearTimeout(timer); done(null); } });
+  });
 }
 
-module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, tcpCheck };
+async function report() {
+  const [ip, rl, ls] = await Promise.all([publicIp(), rules(), listening()]);
+  const qport = Number(settings.load().steamQueryPort) || 27016;
+  const [queryLocal, queryPublic] = await Promise.all([a2sInfo('127.0.0.1', qport), ip ? a2sInfo(ip, qport) : Promise.resolve(null)]);
+  return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080), queryPort: qport, queryLocal, queryPublic };
+}
+
+module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, tcpCheck, a2sInfo };

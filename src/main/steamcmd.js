@@ -17,7 +17,21 @@ function setCredentials(c) {
   creds.pass = c.pass || '';
   creds.guard = (c.guard || '').trim();
   if (creds.user) settings.save({ steamUser: creds.user });
+  // Opt-in: keep the password encrypted with the Windows user account (Electron safeStorage) so scheduled
+  // mod updates still work after the tool restarts. Anything else clears a stored password.
+  if (c.remember && creds.pass) {
+    try { const { safeStorage } = require('electron'); if (safeStorage && safeStorage.isEncryptionAvailable()) settings.save({ steamPassEnc: safeStorage.encryptString(creds.pass).toString('base64') }); }
+    catch { /* no safeStorage in this environment */ }
+  } else if (c.remember === false) settings.save({ steamPassEnc: '' });
 }
+// Called once at startup: restore a remembered password.
+function loadSavedCredentials() {
+  const s = settings.load();
+  if (!s.steamPassEnc || !s.steamUser) return false;
+  try { const { safeStorage } = require('electron'); creds.user = s.steamUser; creds.pass = safeStorage.decryptString(Buffer.from(s.steamPassEnc, 'base64')); return true; }
+  catch { return false; }
+}
+function hasSavedPassword() { return !!settings.load().steamPassEnc; }
 
 function hasCredentials() {
   return !!(creds.user && creds.pass);
@@ -87,6 +101,7 @@ function runScript(lines, emit, opts = {}) {
         emit('console', { source: 'steamcmd', line });
         if (/Steam Guard|Two-factor code|two-factor code/i.test(line)) {
           emit('steam:guardNeeded', {});
+          try { require('./alerts').alert('steam-guard', 'Steam Guard code needed', 'SteamCMD is asking for a Steam Guard code, so workshop downloads are paused. Enter the code on the Installation page and retry.'); } catch { /* ignore */ }
         }
       }
     };
@@ -220,9 +235,10 @@ function status() {
     serverBuild: getServerBuild(),
     steamUser: s.steamUser,
     loggedIn: hasCredentials(),
+    savedPassword: !!s.steamPassEnc,
     busy: !!current,
     paths: p
   };
 }
 
-module.exports = { setCredentials, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getServerBuild, getLatestBuild, status, cancel, runScript };
+module.exports = { setCredentials, loadSavedCredentials, hasSavedPassword, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getServerBuild, getLatestBuild, status, cancel, runScript };

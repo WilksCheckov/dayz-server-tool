@@ -99,7 +99,7 @@ async function ensureFirewall() {
 function emit(channel, data) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
-  if (channel === 'server:status') { refreshTray(); if (data && data.running) ensureFirewall(); }
+  if (channel === 'server:status') { refreshTray(); if (data && data.running) { ensureFirewall(); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
 }
 
 function createWindow() {
@@ -182,6 +182,8 @@ handle('server:readConfig', () => {
   const p = settings.paths();
   return fs.existsSync(p.configPath) ? fs.readFileSync(p.configPath, 'utf8') : null;
 });
+handle('cfgform:read', () => configs.cfgFormRead());
+handle('cfgform:write', (changes) => configs.cfgFormWrite(changes || {}));
 handle('server:writeConfig', (text) => {
   const p = settings.paths();
   fs.mkdirSync(path.dirname(p.configPath), { recursive: true });
@@ -292,6 +294,10 @@ handle('tasks:run', (id) => { const t = tasks.all().find(x => x.id === id); if (
 
 // Network helper
 handle('network:report', () => network.report());
+handle('logs:cleanup', (opts) => logs.cleanup(opts || {}));
+handle('logs:cleanupCfg', () => logs.cleanupCfg());
+handle('steam:forgetPassword', () => { settings.save({ steamPassEnc: '' }); return steamcmd.status(); });
+handle('tasks:types', () => tasks.TYPES);
 handle('network:addRules', () => network.addRules());
 handle('network:removeRules', () => network.removeRules());
 
@@ -411,6 +417,7 @@ try {
 
 app.whenReady().then(() => {
   alerts.init(emit);
+  try { if (steamcmd.loadSavedCredentials()) emit('console', { source: 'steamcmd', line: `Using remembered Steam login for ${settings.load().steamUser}.` }); } catch { /* ignore */ }
   crashes.init(emit);
   mods.init(emit);
   server.init(emit);

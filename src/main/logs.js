@@ -20,6 +20,26 @@ function list() {
   return { dir: p.profilesDir, files };
 }
 
+// Delete old log files from the profiles folder. The newest file of each kind is always kept.
+function cleanupCfg() { const s = settings.load(); return { enabled: false, keepDays: 14, ...(s.logCleanup || {}) }; }
+function cleanup({ keepDays } = {}) {
+  const c = cleanupCfg();
+  const days = Number(keepDays) || c.keepDays || 14;
+  const cutoff = Date.now() - days * 86400000;
+  const { files, dir } = list();
+  const newestOfKind = {};
+  for (const f of files) if (!newestOfKind[f.kind] || f.mtime > newestOfKind[f.kind].mtime) newestOfKind[f.kind] = f;
+  let removed = 0, bytes = 0;
+  for (const f of files) {
+    if (f.mtime >= cutoff || newestOfKind[f.kind] === f) continue;
+    try { fs.unlinkSync(path.join(dir, f.name)); removed++; bytes += f.size; } catch { /* in use */ }
+  }
+  // crash dumps too
+  try { for (const n of fs.readdirSync(dir)) if (/\.mdmp$/i.test(n)) { const full = path.join(dir, n); const st = fs.statSync(full); if (st.mtimeMs < cutoff) { fs.unlinkSync(full); removed++; bytes += st.size; } } } catch { /* ignore */ }
+  return { removed, bytes, keepDays: days };
+}
+function cleanupIfEnabled(emit) { const c = cleanupCfg(); if (!c.enabled) return null; try { const r = cleanup(c); if (r.removed && emit) emit('console', { source: 'logs', line: `Log cleanup: removed ${r.removed} file(s), ${(r.bytes / 1048576).toFixed(1)} MB older than ${r.keepDays} days` }); return r; } catch { return null; } }
+
 function resolve(name) {
   const p = settings.paths();
   const dir = path.resolve(p.profilesDir);
@@ -131,4 +151,4 @@ function verdict(per, total, lineCount) {
   return { level: 'ok', text: 'Only warnings. Server looks healthy.' };
 }
 
-module.exports = { list, read, summarize };
+module.exports = { list, read, summarize, cleanup, cleanupIfEnabled, cleanupCfg };

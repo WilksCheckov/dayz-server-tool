@@ -384,3 +384,10 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .topbar-status { flex-shrink: 0; }
 
 .brand-logo { object-fit: cover; }
+
+.mt-s { margin-top: 6px; }
+
+.cfg-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px 18px; }
+.cfg-form .cfg-group { grid-column: 1 / -1; margin-top: 8px; font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.cfg-form .cfg-missing { opacity: .7; }
+.cfg-form textarea { min-height: 64px; font-family: inherit; }

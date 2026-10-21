@@ -169,10 +169,11 @@
             </div>
             <div class="card">
               <div class="card-title">Steam login <span class="muted">for Workshop mods</span></div>
-              <p class="muted">The server itself installs anonymously. Workshop mods need a Steam account that owns DayZ. The password is kept in memory only and never saved.</p>
+              <p class="muted">The server itself installs anonymously. Workshop mods need a Steam account that owns DayZ. By default the password is kept in memory only; tick "Remember" to store it encrypted with your Windows account so scheduled mod updates keep working after the tool restarts.</p>
               <label class="field">Username <input id="steamUser" class="input" autocomplete="off"></label>
               <label class="field">Password <input id="steamPass" class="input" type="password" autocomplete="off"></label>
               <label class="field">Steam Guard code (if asked) <input id="steamGuard" class="input" autocomplete="off" placeholder="optional"></label>
+              <label class="check"><input type="checkbox" id="steamRemember"> Remember the password on this computer (encrypted, needed for unattended mod updates)</label>
               <div class="row gap mt">
                 <button class="btn" id="btnSaveCreds">Use these credentials</button>
                 <span class="muted" id="credStatus"></span>
@@ -202,7 +203,15 @@
                 <label class="field">Config file <input id="configFile" class="input"></label>
                 <label class="field">Profiles folder <input id="profilesDir" class="input"></label>
               </div>
-              <label class="field">Other parameters <input id="extraParams" class="input"></label>
+              <div class="card-title mt">Logging and limits</div>
+              <div class="row gap wrap">
+                <label class="check" title="Write the RPT engine log; the FPS graph needs this"><input type="checkbox" id="flagDologs"> -dologs</label>
+                <label class="check" title="Write the ADM admin log; the player database, map and Discord feeds need this"><input type="checkbox" id="flagAdminlog"> -adminlog</label>
+                <label class="check" title="Network log for diagnosing desync"><input type="checkbox" id="flagNetlog"> -netlog</label>
+                <label class="check" title="Restart the server if the main loop freezes"><input type="checkbox" id="flagFreezecheck"> -freezecheck</label>
+                <label class="field inline">-limitFPS <input id="flagLimitFps" class="input short" type="number" min="0" placeholder="0" title="0 = no limit; 200 is a common value"></label>
+              </div>
+              <label class="field">Other parameters <input id="extraParams" class="input" placeholder="anything else, space separated"></label>
               <label class="check"><input type="checkbox" id="autoRestart"> Auto-restart the server if it crashes or closes</label>
               <div class="row gap mt"><button class="btn primary" id="btnSaveLaunch">Save</button></div>
             </div>
@@ -219,6 +228,10 @@
           <div class="card">
             <div class="card-title">Resulting command line</div>
             <pre class="cmdline" id="cmdline">—</pre>
+          </div>
+          <div class="card">
+            <div class="card-title row between"><span>Server settings <span class="muted">serverDZ.cfg, the common keys</span></span><span class="row gap"><span class="muted" id="cfgFormFile"></span><button class="btn small" id="btnCfgFormOpen">Open in Config Editor</button><button class="btn small" id="btnCfgFormReload">Reload</button><button class="btn small primary" id="btnCfgFormSave">Save to serverDZ.cfg</button></span></div>
+            <div id="cfgForm" class="cfg-form"><div class="muted">Loading…</div></div>
           </div>
         </section>
 
@@ -354,6 +367,8 @@
               <div class="card-title row between"><span>Ports</span><span class="muted" id="netPublicIp"></span></div>
               <div class="table-wrap"><table class="table" id="netPorts"><thead><tr><th>Use</th><th>Port</th><th>Proto</th><th>Listening</th><th>Why</th></tr></thead><tbody></tbody></table></div>
               <div class="muted" id="netWeb"></div>
+              <div class="card-title mt">Server browser check</div>
+              <div id="netQuery" class="muted">—</div>
             </div>
             <div class="card">
               <div class="card-title">Windows firewall</div>
@@ -381,6 +396,8 @@
           <div class="page-toolbar">
             <label class="check"><input type="checkbox" id="logFollow" checked> Follow (refresh every 3s)</label>
             <span class="grow"></span>
+            <label class="check" title="Delete RPT / ADM / log / dump files older than this many days after each server start. The newest file of each kind is always kept."><input type="checkbox" id="logCleanEnabled"> Delete logs older than</label><input id="logCleanDays" class="input short" type="number" min="1" value="14"><span class="muted">days</span>
+            <button class="btn" id="btnLogCleanNow" title="Delete old logs now">Clean now</button>
             <button class="btn" id="btnRefreshLogs">Refresh list</button>
             <button class="btn" id="btnOpenProfiles">Open folder</button>
           </div>
@@ -475,6 +492,7 @@
               <label class="field">Daily times (24h, comma separated, e.g. 05:00, 17:00) <input id="autoUpdateTimes" class="input" placeholder="05:00"></label>
               <label class="field inline">Every <input id="autoUpdateHours" class="input short" type="number" min="0.25" step="0.25"> hours</label>
               <label class="check"><input type="checkbox" id="autoUpdateOnlyIf"> Only restart and install when the server or a mod is actually out of date</label>
+              <label class="check"><input type="checkbox" id="autoUpdateBackup" checked> Take a backup before installing (recommended)</label>
               <label class="field inline">Check for updates every <input id="autoUpdateCheckMin" class="input short" type="number" min="15"> minutes (for the Dashboard notice)</label>
               <div class="row gap mt">
                 <button class="btn" id="btnSaveAutoUpdate">Save schedule</button>
@@ -502,6 +520,7 @@
                 <label class="check"><input type="checkbox" id="bkProfiles"> profiles (logs, bans, settings)</label>
                 <label class="check"><input type="checkbox" id="bkConfig"> server config</label>
                 <label class="check"><input type="checkbox" id="bkKeys"> keys</label>
+                <label class="check"><input type="checkbox" id="bkToolData"> tool data (settings, player database, Discord applications and bans)</label>
               </div>
               <label class="field">Backup folder (blank = &lt;install dir&gt;\backups)
                 <div class="row gap"><input id="bkDir" class="input grow"><button class="btn" id="btnPickBackupDir">Browse…</button></div>
@@ -754,6 +773,13 @@
               </div>
               <label class="field">Log channel ID (bot posts every action here) <input id="dcLog" class="input" placeholder="optional"></label>
               <label class="check"><input type="checkbox" id="dcAuto"> Start the bot automatically when the tool starts</label>
+              <div class="card-title mt">Tickets and feeds</div>
+              <div class="grid-2 tight">
+                <label class="field">Ticket category ID (each ticket gets a private channel here; /ticketpanel posts the button) <input id="dcTicketCategory" class="input" placeholder="optional"></label>
+                <label class="field">Ticket log channel ID (transcript posted on close; falls back to the log channel) <input id="dcTicketLog" class="input" placeholder="optional"></label>
+                <label class="field">Kill feed channel ID (kills and deaths from the admin log) <input id="dcKillFeed" class="input" placeholder="optional"></label>
+                <label class="field">Join / leave feed channel ID <input id="dcJoinFeed" class="input" placeholder="optional"></label>
+              </div>
               <div class="card-title mt">Live log to Discord</div>
               <label class="field">Live log channel ID (new log lines are posted here as they happen, batched every few seconds) <input id="dcLiveChannel" class="input" placeholder="optional"></label>
               <div class="row gap wrap"><label class="check"><input type="checkbox" id="dcLiveAdm" checked> Admin log (.ADM: connects, kills, placements)</label><label class="check"><input type="checkbox" id="dcLiveRpt"> Server log (.RPT: engine output, very chatty)</label><label class="check"><input type="checkbox" id="dcLiveErrors"> Errors and admin events only</label></div>

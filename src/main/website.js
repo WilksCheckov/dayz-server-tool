@@ -176,7 +176,18 @@ function customPage(c, p) { return layout(c, '/' + p.slug, p.title, pageBody(p))
 // ---------- admin panel (/admin): password-protected remote control ----------
 const crypto = require('crypto');
 const adminSessions = new Map(); // token -> expiry
-function adminCfg() { const s = settings.load(); return { enabled: false, password: '', ...((s.website || {}).admin || {}) }; }
+function hashPw(pw, salt) { return crypto.createHash('sha256').update(salt + ':' + pw).digest('hex'); }
+// The admin password is stored as a salted hash. A plain password left over from an older version is hashed on first read.
+function adminCfg() {
+  const s = settings.load();
+  const ac = { enabled: false, password: '', passwordHash: '', salt: '', ...((s.website || {}).admin || {}) };
+  if (ac.password) {
+    ac.salt = crypto.randomBytes(8).toString('hex'); ac.passwordHash = hashPw(ac.password, ac.salt); ac.password = '';
+    settings.save({ website: { ...(s.website || {}), admin: { enabled: ac.enabled, passwordHash: ac.passwordHash, salt: ac.salt } } });
+  }
+  return ac;
+}
+function setAdminPassword(pw) { const salt = crypto.randomBytes(8).toString('hex'); return { passwordHash: hashPw(pw, salt), salt }; }
 function adminToken(req) { const m = (req.headers.cookie || '').match(/dzadmin=([a-f0-9]+)/); const t = m && m[1]; return t && adminSessions.get(t) > Date.now() ? t : null; }
 function adminPage(c, body, { loggedIn = false, error = '' } = {}) {
   return layout(c, '/admin', 'Admin', loggedIn ? body : `<h1>Admin</h1>${error ? `<p style="color:#ff5f5f">${esc(error)}</p>` : ''}<form method="post" action="/admin/login" class="card" style="max-width:380px"><label>Password<br><input type="password" name="password" style="width:100%;padding:8px;margin:6px 0 12px;border-radius:8px;border:1px solid #333;background:#0b0d12;color:#fff"></label><button class="btn" type="submit" style="margin:0">Log in</button></form>`);
@@ -197,12 +208,12 @@ refresh();setInterval(refresh,15000);
 }
 async function handleAdmin(req, res, p, c, send) {
   const ac = adminCfg();
-  if (!ac.enabled || !ac.password) return send(404, 'text/html', layout(c, '', 'Not found', '<h1>Admin panel is disabled</h1><p class="muted">Enable it on the Website page in DayZ Server Tool and set a password.</p>'));
+  if (!ac.enabled || !ac.passwordHash) return send(404, 'text/html', layout(c, '', 'Not found', '<h1>Admin panel is disabled</h1><p class="muted">Enable it on the Website page in DayZ Server Tool and set a password.</p>'));
   if (p === '/admin/login' && req.method === 'POST') {
     let body = ''; req.on('data', d => { body += d; if (body.length > 4096) req.destroy(); });
     req.on('end', () => {
       const pw = decodeURIComponent((new URLSearchParams(body).get('password') || ''));
-      if (pw !== ac.password) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(adminPage(c, '', { error: 'Wrong password.' })); }
+      if (!pw || hashPw(pw, ac.salt) !== ac.passwordHash) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(adminPage(c, '', { error: 'Wrong password.' })); }
       const token = crypto.randomBytes(24).toString('hex'); adminSessions.set(token, Date.now() + 12 * 3600 * 1000);
       res.writeHead(302, { Location: '/admin', 'Set-Cookie': `dzadmin=${token}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=43200` }); res.end();
     });
@@ -506,4 +517,4 @@ async function preview(slug) {
   return page ? customPage(c, page) : '<p>Not found</p>';
 }
 
-module.exports = { init, start, stop, status, cfg, preview, markdown, DEFAULT_PAGES, listFiles, addFiles, removeFile, writeStarter, publicDir, importSite, removeSite, siteInfo, siteDir, findSiteRoot };
+module.exports = { setAdminPassword, hashPw, adminCfg, init, start, stop, status, cfg, preview, markdown, DEFAULT_PAGES, listFiles, addFiles, removeFile, writeStarter, publicDir, importSite, removeSite, siteInfo, siteDir, findSiteRoot };

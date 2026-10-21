@@ -106,7 +106,7 @@ function ingest() {
       const lines = (meta.rest + buf.toString('utf8', 0, n)).split(/\r?\n/);
       meta.rest = lines.pop() || '';
       const ctx = { date: meta.date, lastSec: meta.lastSec };
-      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; } }
+      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } } }
       meta.date = ctx.date; meta.lastSec = ctx.lastSec;
     } finally { fs.closeSync(fd); }
     d.files[x.f] = meta;

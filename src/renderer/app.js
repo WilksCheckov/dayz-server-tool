@@ -140,7 +140,7 @@ function showPage(name) {
   if (name === 'backups') { loadScheduleForm(); refreshSchedule(); refreshBackups(); }
   if (name === 'restarts') { loadScheduleForm(); refreshSchedule(); }
   if (name === 'updates') { refreshUpdater(); refreshSteam(); }
-  if (name === 'launch') refreshLaunchLines();
+  if (name === 'launch') { refreshLaunchLines(); loadCfgForm(); }
   if (name === 'players') { loadRconForm(); refreshPlayers(); refreshRecent(); }
   if (name === 'bans' || name === 'whitelist' || name === 'priority') refreshLists();
   if (name === 'website') refreshWebsite();
@@ -172,10 +172,16 @@ async function loadSettings() {
   $('cpuCount').value = s.cpuCount;
   $('configFile').value = s.configFile;
   $('profilesDir').value = s.profilesDir;
-  $('extraParams').value = s.extraParams;
+  { const parts = (s.extraParams || '').split(/\s+/).filter(Boolean); const rest = [];
+    const has = f => parts.some(p => p.toLowerCase() === f);
+    $('flagDologs').checked = has('-dologs'); $('flagAdminlog').checked = has('-adminlog'); $('flagNetlog').checked = has('-netlog'); $('flagFreezecheck').checked = has('-freezecheck');
+    const lim = parts.find(p => /^-limitfps=/i.test(p)); $('flagLimitFps').value = lim ? lim.split('=')[1] : '';
+    for (const p of parts) if (!['-dologs', '-adminlog', '-netlog', '-freezecheck'].includes(p.toLowerCase()) && !/^-limitfps=/i.test(p)) rest.push(p);
+    $('extraParams').value = rest.join(' '); }
   $('autoRestart').checked = !!s.autoRestart;
+  $('steamRemember').checked = !!s.steamPassEnc;
   const au = { enabled: false, intervalHours: 6, mode: 'times', times: [], onlyIfUpdates: true, checkEveryMinutes: 60, ...(s.autoUpdate || {}) };
-  $('autoUpdateEnabled').checked = !!au.enabled; $('autoUpdateHours').value = au.intervalHours; $('autoUpdateMode').value = au.mode; $('autoUpdateTimes').value = (au.times || []).join(', '); $('autoUpdateOnlyIf').checked = au.onlyIfUpdates !== false; $('autoUpdateCheckMin').value = au.checkEveryMinutes;
+  $('autoUpdateEnabled').checked = !!au.enabled; $('autoUpdateHours').value = au.intervalHours; $('autoUpdateMode').value = au.mode; $('autoUpdateTimes').value = (au.times || []).join(', '); $('autoUpdateOnlyIf').checked = au.onlyIfUpdates !== false; $('autoUpdateCheckMin').value = au.checkEveryMinutes; $('autoUpdateBackup').checked = au.backupBefore !== false;
   $('statAutoUpdate').textContent = s.autoUpdate && s.autoUpdate.enabled ? `Auto-update every ${s.autoUpdate.intervalHours}h` : 'Auto-update off';
 }
 async function saveSettings(partial) {
@@ -197,7 +203,7 @@ $('btnSaveLaunch').onclick = () => run(async () => {
     cpuCount: Number($('cpuCount').value) || 0,
     configFile: $('configFile').value.trim() || 'serverDZ.cfg',
     profilesDir: $('profilesDir').value.trim() || 'profiles',
-    extraParams: $('extraParams').value.trim(),
+    extraParams: [$('flagDologs').checked && '-dologs', $('flagAdminlog').checked && '-adminlog', $('flagNetlog').checked && '-netlog', $('flagFreezecheck').checked && '-freezecheck', Number($('flagLimitFps').value) > 0 && '-limitFPS=' + Number($('flagLimitFps').value), $('extraParams').value.trim()].filter(Boolean).join(' '),
     autoRestart: $('autoRestart').checked
   });
   toast('Launch settings saved'); refreshCmdline(); refreshConfigTree();
@@ -205,7 +211,7 @@ $('btnSaveLaunch').onclick = () => run(async () => {
 $('btnSaveAutoUpdate').onclick = () => run(async () => {
   const times = $('autoUpdateTimes').value.split(/[,\s]+/).map(t => t.trim()).filter(Boolean).map(t => t.padStart(5, '0'));
   const bad = times.filter(t => !/^\d{2}:\d{2}$/.test(t)); if (bad.length) return toast(`Invalid time: ${bad.join(', ')} (use HH:MM)`, true);
-  await saveSettings({ autoUpdate: { enabled: $('autoUpdateEnabled').checked, mode: $('autoUpdateMode').value, times, intervalHours: Number($('autoUpdateHours').value) || 6, onlyIfUpdates: $('autoUpdateOnlyIf').checked, checkEveryMinutes: Number($('autoUpdateCheckMin').value) || 60 } });
+  await saveSettings({ autoUpdate: { enabled: $('autoUpdateEnabled').checked, mode: $('autoUpdateMode').value, times, intervalHours: Number($('autoUpdateHours').value) || 6, onlyIfUpdates: $('autoUpdateOnlyIf').checked, checkEveryMinutes: Number($('autoUpdateCheckMin').value) || 60, backupBefore: $('autoUpdateBackup').checked } });
   toast('Schedule saved'); refreshUpdater();
 });
 
@@ -218,10 +224,10 @@ async function refreshSteam() {
     (b ? `<br>Build ${esc(b.buildId)} · last updated ${fmtDate(b.lastUpdated)}` : '');
   $('statInstall').textContent = st.serverInstalled ? 'Server installed' : (st.steamcmdInstalled ? 'SteamCMD ready, server not installed' : 'Nothing installed yet');
   $('statBuild').textContent = b ? `Build ${b.buildId} · ${fmtDate(b.lastUpdated)}` : st.paths.serverDir;
-  $('credStatus').textContent = st.loggedIn ? `Using account ${st.steamUser}` : 'No Steam login set (workshop downloads disabled)';
+  $('credStatus').textContent = st.loggedIn ? `Using account ${st.steamUser}${st.savedPassword ? ' (password remembered)' : ''}` : 'No Steam login set (workshop downloads disabled)';
 }
 $('btnSaveCreds').onclick = () => run(async () => {
-  await ipc.invoke('steam:setCredentials', { user: $('steamUser').value, pass: $('steamPass').value, guard: $('steamGuard').value });
+  await ipc.invoke('steam:setCredentials', { user: $('steamUser').value, pass: $('steamPass').value, guard: $('steamGuard').value, remember: $('steamRemember').checked });
   toast('Credentials set for this session'); refreshSteam();
 });
 $('btnInstallSteamcmd').onclick = (e) => run(async () => { await ipc.invoke('steam:installSteamcmd'); toast('SteamCMD ready'); refreshSteam(); }, e.target);
@@ -294,6 +300,42 @@ $('btnStop').onclick = stopServer; $('btnQuickStop').onclick = stopServer;
 $('btnRestart').onclick = (e) => run(async () => renderServer(await ipc.invoke('server:restart')), e.target);
 
 async function refreshCmdline() { return refreshLaunchLines(); }
+
+// ---------- serverDZ.cfg form ----------
+let cfgFormData = null;
+async function loadCfgForm() {
+  const box = $('cfgForm');
+  try { cfgFormData = await ipc.invoke('cfgform:read'); } catch (e) { box.innerHTML = `<div class="muted">${esc(e.message)}</div>`; return; }
+  $('cfgFormFile').textContent = cfgFormData.exists ? (cfgFormData.template ? 'mission ' + cfgFormData.template : '') : 'serverDZ.cfg not found';
+  if (!cfgFormData.exists) { box.innerHTML = '<div class="muted">serverDZ.cfg was not found. Install the server first; a default config is copied on the first install.</div>'; return; }
+  let group = null, html = '';
+  for (const f of cfgFormData.fields) {
+    if (f.group !== group) { group = f.group; html += `<div class="cfg-group">${esc(group)}</div>`; }
+    const v = cfgFormData.values[f.key]; const miss = v === null || v === undefined; const title = `${f.key}${f.hint ? ' — ' + f.hint : ''}${miss ? ' (not in the file yet)' : ''}`;
+    if (f.type === 'bool') html += `<label class="check ${miss ? 'cfg-missing' : ''}" title="${esc(title)}"><input type="checkbox" data-key="${f.key}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    else if (f.type === 'array') html += `<label class="field ${miss ? 'cfg-missing' : ''}" style="grid-column:1/-1" title="${esc(title)}">${esc(f.label)} <textarea class="input" data-key="${f.key}">${esc((v || []).join('\n'))}</textarea></label>`;
+    else html += `<label class="field ${miss ? 'cfg-missing' : ''}" title="${esc(title)}">${esc(f.label)} <input class="input" data-key="${f.key}" type="${f.type === 'string' ? 'text' : 'number'}" ${f.min !== undefined ? 'min="' + f.min + '"' : ''} ${f.max !== undefined ? 'max="' + f.max + '"' : ''} ${f.type === 'num' ? 'step="any"' : ''} value="${esc(miss ? '' : String(v))}" placeholder="${esc(f.hint || '')}"></label>`;
+  }
+  box.innerHTML = html;
+}
+$('btnCfgFormReload').onclick = () => run(loadCfgForm);
+$('btnCfgFormOpen').onclick = () => { showPage('server'); if (cfgFormData && cfgFormData.file && typeof openConfigFile === 'function') openConfigFile(cfgFormData.file); };
+$('btnCfgFormSave').onclick = (e) => run(async () => {
+  if (!cfgFormData) return;
+  const changes = {};
+  for (const f of cfgFormData.fields) {
+    const el = $('cfgForm').querySelector(`[data-key="${f.key}"]`); if (!el) continue;
+    const old = cfgFormData.values[f.key];
+    let v;
+    if (f.type === 'bool') v = el.checked; else if (f.type === 'array') v = el.value.split('\n').map(x => x.trim()).filter(Boolean); else if (f.type === 'string') v = el.value; else v = el.value === '' ? null : Number(el.value);
+    const same = f.type === 'array' ? JSON.stringify(v) === JSON.stringify(old || []) : (v === old || (v === null && old === null) || (f.type === 'string' && (old === null) && v === ''));
+    if (!same) changes[f.key] = v;
+  }
+  if (!Object.keys(changes).length) { toast('Nothing changed'); return; }
+  cfgFormData = await ipc.invoke('cfgform:write', changes);
+  toast(`Saved ${Object.keys(changes).length} setting(s) to serverDZ.cfg (takes effect on the next server start)`);
+  loadCfgForm();
+}, e.target);
 
 // ---------- config editor ----------
 const MODES = { xml: 'xml', json: { name: 'javascript', json: true }, c: 'text/x-c++src', cfg: 'text/x-c++src' };
@@ -744,7 +786,7 @@ function loadScheduleForm() {
   $('rsWarn').value = (rs.warnMinutes || [15, 5, 1]).join(', '); $('rsWarnMsg').value = rs.warnMessage || 'Server restart in {min} minute(s). Please log out safely.';
   const bk = { enabled: false, intervalHours: 6, keep: 20, includeMission: true, includeProfiles: true, includeConfig: true, includeKeys: false, dir: '', ...(s.backups || {}) };
   $('bkEnabled').checked = bk.enabled; $('bkInterval').value = bk.intervalHours; $('bkKeep').value = bk.keep;
-  $('bkMission').checked = bk.includeMission; $('bkProfiles').checked = bk.includeProfiles; $('bkConfig').checked = bk.includeConfig; $('bkKeys').checked = bk.includeKeys;
+  $('bkMission').checked = bk.includeMission; $('bkProfiles').checked = bk.includeProfiles; $('bkConfig').checked = bk.includeConfig; $('bkKeys').checked = bk.includeKeys; $('bkToolData').checked = bk.includeToolData !== false;
   $('bkDir').value = bk.dir || '';
   const os = { enabled: false, folder: '', ftp: { enabled: false, host: '', port: 21, user: '', password: '', secure: false, dir: '/backups' }, keepRemote: 10, ...(s.offsite || {}) };
   $('osEnabled').checked = os.enabled; $('osFolder').value = os.folder || ''; $('osFtpEnabled').checked = !!os.ftp.enabled; $('osHost').value = os.ftp.host || ''; $('osPort').value = os.ftp.port || 21; $('osUser').value = os.ftp.user || ''; $('osPass').value = os.ftp.password || ''; $('osDir').value = os.ftp.dir || '/backups'; $('osKeep').value = os.keepRemote || 10; $('osSecure').checked = !!os.ftp.secure;
@@ -758,7 +800,7 @@ $('btnSaveRestarts').onclick = (e) => run(async () => {
 }, e.target);
 $('btnRestartNowSched').onclick = (e) => run(async () => { showPage('dashboard'); await ipc.invoke('scheduler:restartNow'); }, e.target);
 $('btnSaveBackups').onclick = (e) => run(async () => {
-  await saveSettings({ backups: { enabled: $('bkEnabled').checked, intervalHours: Number($('bkInterval').value) || 6, keep: Number($('bkKeep').value) || 20, includeMission: $('bkMission').checked, includeProfiles: $('bkProfiles').checked, includeConfig: $('bkConfig').checked, includeKeys: $('bkKeys').checked, dir: $('bkDir').value.trim() } });
+  await saveSettings({ backups: { enabled: $('bkEnabled').checked, intervalHours: Number($('bkInterval').value) || 6, keep: Number($('bkKeep').value) || 20, includeMission: $('bkMission').checked, includeProfiles: $('bkProfiles').checked, includeConfig: $('bkConfig').checked, includeKeys: $('bkKeys').checked, includeToolData: $('bkToolData').checked, dir: $('bkDir').value.trim() } });
   toast('Backup settings saved'); refreshSchedule(); refreshBackups();
 }, e.target);
 $('btnPickBackupDir').onclick = () => run(async () => { const d = await ipc.invoke('dialog:pickFolder', $('bkDir').value); if (d) $('bkDir').value = d; });
@@ -962,7 +1004,7 @@ function renderDiscord(st) {
   $('discordInfo').textContent = st.running
     ? `${st.commands} slash commands registered${st.guildName ? ' in ' + st.guildName : ''}${st.presence ? ' · status: ' + st.presence : ''}${st.liveLogPosted ? ' · ' + st.liveLogPosted + ' log batches posted' : ''}${st.error ? ' · ' + st.error : ''}`
     : (st.hasToken ? 'Token saved. Start the bot to register commands.' : 'No token saved yet.');
-  if (st.store) $('discordStore').textContent = `${st.store.applications} application(s) on file · ${st.store.bans} active ban(s) tracked by the bot`;
+  if (st.store) $('discordStore').textContent = `${st.store.applications} application(s) on file · ${st.store.bans} active ban(s) tracked by the bot · ${st.store.tickets || 0} open ticket(s)`;
   const pre = $('discordLog');
   pre.textContent = (st.log || []).map(l => `[${new Date(l.at).toLocaleTimeString()}] ${l.line}`).join('\n');
   pre.scrollTop = pre.scrollHeight;
@@ -976,12 +1018,13 @@ function loadDiscordForm() {
   $('dcAdminChannel').value = c.adminChannelId || ''; $('dcWhitelistRole').value = c.whitelistRoleId || ''; $('dcPriorityRole').value = c.priorityRoleId || ''; $('dcBannedRole').value = c.bannedRoleId || ''; $('dcMutedRole').value = c.mutedRoleId || ''; $('dcSteamKey').value = c.steamApiKey || '';
   $('dcStatusFormat').value = c.statusFormat || 'Server Online | {count}/{max} Players'; $('dcOfflineStatus').value = c.offlineStatus || 'Server Offline';
   $('dcAuto').checked = !!c.autoStart;
+  $('dcTicketCategory').value = c.ticketCategoryId || ''; $('dcTicketLog').value = c.ticketLogChannelId || ''; $('dcKillFeed').value = c.killFeedChannelId || ''; $('dcJoinFeed').value = c.joinFeedChannelId || '';
   $('dcLiveChannel').value = c.liveLogChannelId || '';
   const kinds = c.liveLogKinds || ['adm'];
   $('dcLiveAdm').checked = kinds.includes('adm'); $('dcLiveRpt').checked = kinds.includes('rpt'); $('dcLiveErrors').checked = !!c.liveLogErrorsOnly;
 }
 function discordForm() {
-  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked };
+  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked, ticketCategoryId: $('dcTicketCategory').value.trim(), ticketLogChannelId: $('dcTicketLog').value.trim(), killFeedChannelId: $('dcKillFeed').value.trim(), joinFeedChannelId: $('dcJoinFeed').value.trim() };
 }
 $('btnDiscordSave').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); await ipc.invoke('discord:applyLiveLog'); toast('Bot settings saved'); renderDiscord(await ipc.invoke('discord:status')); }, e.target);
 $('btnDiscordStart').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); toast('Starting bot…'); renderDiscord(await ipc.invoke('discord:start')); toast('Bot online'); }, e.target);
@@ -1012,7 +1055,7 @@ function loadWebForm() {
   $('webTitle').value = c.title || ''; $('webTagline').value = c.tagline || ''; $('webPort').value = c.port || 8080;
   $('webAccent').value = c.accent || '#4f8cff'; $('webAddress').value = c.serverAddress || ''; $('webDiscord').value = c.discordInvite || '';
   $('webBanner').value = c.bannerUrl || ''; $('webDescription').value = c.description || ''; $('webCss').value = c.customCss || '';
-  $('webAdminEnabled').checked = !!(c.admin && c.admin.enabled); $('webAdminPass').value = (c.admin && c.admin.password) || '';
+  $('webAdminEnabled').checked = !!(c.admin && c.admin.enabled); $('webAdminPass').value = ''; $('webAdminPass').placeholder = c.admin && (c.admin.passwordHash || c.admin.password) ? '(password set, type a new one to change it)' : 'password';
   $('webShowMods').checked = c.showMods !== false; $('webShowPlayers').checked = c.showPlayers !== false; $('webShowSchedule').checked = c.showSchedule !== false; $('webEnabled').checked = !!c.enabled;
   webPages = (c.pages || []).map(p => ({ type: 'markdown', ...p }));
   renderWebPages();
@@ -1020,7 +1063,7 @@ function loadWebForm() {
 }
 function webForm() {
   const c = webState ? webState.config : {};
-  return { ...c, title: $('webTitle').value.trim() || 'My DayZ Server', tagline: $('webTagline').value.trim(), port: Number($('webPort').value) || 8080, accent: $('webAccent').value, serverAddress: $('webAddress').value.trim(), discordInvite: $('webDiscord').value.trim(), bannerUrl: $('webBanner').value.trim(), description: $('webDescription').value, customCss: $('webCss').value, showMods: $('webShowMods').checked, showPlayers: $('webShowPlayers').checked, showSchedule: $('webShowSchedule').checked, enabled: $('webEnabled').checked, pages: webPages, admin: { enabled: $('webAdminEnabled').checked && !!$('webAdminPass').value, password: $('webAdminPass').value } };
+  return { ...c, title: $('webTitle').value.trim() || 'My DayZ Server', tagline: $('webTagline').value.trim(), port: Number($('webPort').value) || 8080, accent: $('webAccent').value, serverAddress: $('webAddress').value.trim(), discordInvite: $('webDiscord').value.trim(), bannerUrl: $('webBanner').value.trim(), description: $('webDescription').value, customCss: $('webCss').value, showMods: $('webShowMods').checked, showPlayers: $('webShowPlayers').checked, showSchedule: $('webShowSchedule').checked, enabled: $('webEnabled').checked, pages: webPages, admin: (() => { const cur = (c.admin || {}); const pw = $('webAdminPass').value; const has = !!(pw || cur.passwordHash || cur.password); return pw ? { enabled: $('webAdminEnabled').checked, password: pw } : { ...cur, enabled: $('webAdminEnabled').checked && has }; })() };
 }
 async function saveWeb() { await saveSettings({ website: webForm() }); renderWeb(await ipc.invoke('website:status')); refreshWebPreview(); }
 $('btnWebSave').onclick = (e) => run(async () => { await saveWeb(); toast('Website settings saved'); }, e.target);
@@ -1565,10 +1608,17 @@ async function refreshNetwork() {
   const r = await ipc.invoke('network:report');
   $('netPublicIp').textContent = r.publicIp ? `Public IP ${r.publicIp}` : 'Public IP unknown (offline?)';
   $('netPorts').querySelector('tbody').innerHTML = r.ports.map(p => `<tr><td>${esc(p.name)}</td><td class="mono">${p.port}</td><td>${p.proto}</td><td>${p.listening === null ? '?' : p.listening ? '<span class="badge ok">yes</span>' : '<span class="badge">no</span>'}</td><td class="muted">${esc(p.why)}</td></tr>`).join('');
+  { const q = (lbl, v) => v ? `<span class="badge ok">${lbl}: answers</span> <span class="muted">${esc(v.name)} · ${esc(v.map)} · ${v.players}/${v.maxPlayers} players · ${v.ping} ms</span>` : `<span class="badge">${lbl}: no answer</span>`;
+    $('netQuery').innerHTML = `<div>${q('Local query (port ' + r.queryPort + ')', r.queryLocal)}</div><div class="mt-s">${r.publicIp ? q('Public query (' + r.publicIp + ')', r.queryPublic) : '<span class="badge">Public query: no public IP</span>'}</div><div class="muted mt-s">${r.queryLocal ? (r.queryPublic ? 'The server is visible from the internet.' : 'The server answers locally but not on the public IP. Either the router does not forward UDP ' + r.queryPort + ' and the game ports, or your router does not allow connecting to its own public IP from inside the LAN (hairpin NAT). Ask a friend to test, or check from a phone on mobile data.') : 'The server is not answering Steam queries locally. Start it, then refresh; it takes a minute after start.'}</div>`; }
   $('netWeb').textContent = r.websiteReachableLocal ? 'Website answers locally. If it is unreachable from outside, forward the TCP port on your router.' : 'Website is not running (start it on the Website page to test).';
   $('netRules').querySelector('tbody').innerHTML = r.rules.map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.proto)}</td><td class="mono">${esc(x.port)}</td><td>${x.enabled ? '<span class="badge ok">on</span>' : '<span class="badge warn">off</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No rules from this tool yet.</td></tr>';
 }
 $('btnNetRefresh').onclick = () => run(refreshNetwork);
+async function loadLogCleanup() { try { const c = await ipc.invoke('logs:cleanupCfg'); $('logCleanEnabled').checked = !!c.enabled; $('logCleanDays').value = c.keepDays; } catch { /* ignore */ } }
+const saveLogCleanup = () => saveSettings({ logCleanup: { enabled: $('logCleanEnabled').checked, keepDays: Number($('logCleanDays').value) || 14 } }).then(() => toast('Log cleanup ' + ($('logCleanEnabled').checked ? 'on' : 'off')));
+$('logCleanEnabled').onchange = saveLogCleanup; $('logCleanDays').onchange = saveLogCleanup;
+$('btnLogCleanNow').onclick = (e) => run(async () => { const r = await ipc.invoke('logs:cleanup', { keepDays: Number($('logCleanDays').value) || 14 }); toast(`Removed ${r.removed} file(s), ${(r.bytes / 1048576).toFixed(1)} MB`); refreshLogs(); }, e.target);
+loadLogCleanup();
 $('btnNetAddRules').onclick = (e) => run(async () => { toast('Windows will ask for permission…'); await ipc.invoke('network:addRules'); toast('Firewall rules added'); refreshNetwork(); }, e.target);
 $('btnNetRemoveRules').onclick = (e) => run(async () => { await ipc.invoke('network:removeRules'); toast('Rules removed'); refreshNetwork(); }, e.target);
 

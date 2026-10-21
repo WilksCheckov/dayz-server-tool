@@ -14,7 +14,7 @@ function cfg() {
   const s = settings.load();
   return {
     enabled: false, intervalHours: 6, keep: 20,
-    includeMission: true, includeProfiles: true, includeConfig: true, includeKeys: false,
+    includeMission: true, includeProfiles: true, includeConfig: true, includeKeys: false, includeToolData: true,
     dir: '',
     ...(s.backups || {})
   };
@@ -46,6 +46,8 @@ function sources() {
   if (c.includeProfiles) list.push({ name: 'profiles', src: p.profilesDir, type: 'dir', restoreTo: p.profilesDir });
   if (c.includeKeys) list.push({ name: 'keys', src: p.keysDir, type: 'dir', restoreTo: p.keysDir });
   if (c.includeConfig) list.push({ name: path.basename(p.configPath), src: p.configPath, type: 'file', restoreTo: p.configPath });
+  // The tool's own data: settings, player database, Discord applications and bans, Steam ban results, health history.
+  if (c.includeToolData) { try { list.push({ name: 'tool-data', src: require('electron').app.getPath('userData'), type: 'json', restoreTo: null }); } catch { /* ignore */ } }
   return list;
 }
 
@@ -65,6 +67,7 @@ async function create(label = 'manual') {
     for (const src of sources()) {
       if (!fs.existsSync(src.src)) { log(`Skipping ${src.name} (not found)`); continue; }
       if (src.type === 'dir') await robocopy(src.src, path.join(staging, src.name));
+      else if (src.type === 'json') { const dst = path.join(staging, src.name); fs.mkdirSync(dst, { recursive: true }); for (const n of fs.readdirSync(src.src)) if (/\.json$/i.test(n)) { try { fs.copyFileSync(path.join(src.src, n), path.join(dst, n)); } catch { /* ignore */ } } }
       else fs.copyFileSync(src.src, path.join(staging, src.name));
       any = true;
     }

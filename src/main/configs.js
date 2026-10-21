@@ -575,4 +575,110 @@ function validateAll() {
   return { results, totals, checked: groups.reduce((n, g) => n + (g.collapsed ? 0 : g.files.length), 0) };
 }
 
-module.exports = { listFiles, read, write, createFile, validate, validateAll, missionDir, xmlParser, loadLimits, loadTypeNames };
+// ---------- serverDZ.cfg form access ----------
+// Top-level "key = value;" pairs (not inside class blocks). Values keep their raw text; strings are unquoted for the form.
+const CFG_FORM_FIELDS = [
+  { key: 'hostname', label: 'Server name', type: 'string', group: 'Basics' },
+  { key: 'password', label: 'Join password', type: 'string', group: 'Basics', hint: 'blank = public' },
+  { key: 'passwordAdmin', label: 'Admin password (#login)', type: 'string', group: 'Basics' },
+  { key: 'maxPlayers', label: 'Max players', type: 'int', group: 'Basics', min: 1, max: 127 },
+  { key: 'instanceId', label: 'Instance ID', type: 'int', group: 'Basics', hint: 'storage folder number under mpmissions\\<mission>\\storage_N' },
+  { key: 'steamQueryPort', label: 'Steam query port', type: 'int', group: 'Basics', min: 1, max: 65535 },
+  { key: 'enableWhitelist', label: 'Whitelist on', type: 'bool', group: 'Access' },
+  { key: 'verifySignatures', label: 'Verify signatures', type: 'int', group: 'Access', min: 0, max: 2, hint: '2 = required with mods' },
+  { key: 'forceSameBuild', label: 'Force same client build', type: 'bool', group: 'Access' },
+  { key: 'BattlEye', label: 'BattlEye', type: 'bool', group: 'Access' },
+  { key: 'disableBanlist', label: 'Ignore ban.txt', type: 'bool', group: 'Access' },
+  { key: 'disablePrioritylist', label: 'Ignore priority.txt', type: 'bool', group: 'Access' },
+  { key: 'loginQueueConcurrentPlayers', label: 'Login queue: concurrent', type: 'int', group: 'Access' },
+  { key: 'loginQueueMaxPlayers', label: 'Login queue: max', type: 'int', group: 'Access' },
+  { key: 'disable3rdPerson', label: 'First person only', type: 'bool', group: 'Gameplay' },
+  { key: 'disableCrosshair', label: 'No crosshair', type: 'bool', group: 'Gameplay' },
+  { key: 'disableVoN', label: 'Disable voice', type: 'bool', group: 'Gameplay' },
+  { key: 'vonCodecQuality', label: 'Voice quality', type: 'int', group: 'Gameplay', min: 0, max: 30 },
+  { key: 'respawnTime', label: 'Respawn delay (s)', type: 'int', group: 'Gameplay' },
+  { key: 'disableBaseDamage', label: 'No base damage', type: 'bool', group: 'Gameplay' },
+  { key: 'disableContainerDamage', label: 'No container damage', type: 'bool', group: 'Gameplay' },
+  { key: 'disableRespawnDialog', label: 'Skip respawn dialog', type: 'bool', group: 'Gameplay' },
+  { key: 'enableCfgGameplayFile', label: 'Use cfggameplay.json', type: 'bool', group: 'Gameplay' },
+  { key: 'lootHistory', label: 'Loot history', type: 'int', group: 'Gameplay' },
+  { key: 'storeHouseStateDisabled', label: 'Do not persist house state', type: 'bool', group: 'Gameplay' },
+  { key: 'serverTime', label: 'Start time', type: 'string', group: 'Time', hint: '"SystemTime" or "2024/6/21/8/0"' },
+  { key: 'serverTimeAcceleration', label: 'Day acceleration', type: 'num', group: 'Time', min: 0, max: 24 },
+  { key: 'serverNightTimeAcceleration', label: 'Night acceleration', type: 'num', group: 'Time', min: 0, max: 64 },
+  { key: 'serverTimePersistent', label: 'Persistent time', type: 'bool', group: 'Time' },
+  { key: 'lightingConfig', label: 'Lighting (0 bright / 1 dark nights)', type: 'int', group: 'Time', min: 0, max: 1 },
+  { key: 'motd', label: 'Message of the day (one line per message)', type: 'array', group: 'Messages' },
+  { key: 'motdInterval', label: 'MOTD interval (s)', type: 'int', group: 'Messages' },
+  { key: 'logAverageFps', label: 'Log FPS every (s)', type: 'int', group: 'Logging', hint: 'needed for the FPS graph; 60 is fine' },
+  { key: 'logMemory', label: 'Log memory every (s)', type: 'int', group: 'Logging' },
+  { key: 'logPlayers', label: 'Log player count every (s)', type: 'int', group: 'Logging' },
+  { key: 'adminLogPlayerHitsOnly', label: 'Admin log: hits only', type: 'bool', group: 'Logging' },
+  { key: 'adminLogPlacement', label: 'Admin log: placements', type: 'bool', group: 'Logging' },
+  { key: 'adminLogBuildActions', label: 'Admin log: build actions', type: 'bool', group: 'Logging' },
+  { key: 'adminLogPlayerList', label: 'Admin log: player list', type: 'bool', group: 'Logging' }
+];
+function cfgTopLevel(text) {
+  // Mask class blocks so their inner keys are not picked up.
+  let depth = 0, out = '';
+  const src = stripComments(text);
+  for (let i = 0; i < src.length; i++) { const ch = src[i]; if (ch === '{') depth++; if (depth === 0) out += ch; else out += ch === '\n' ? '\n' : ' '; if (ch === '}') depth--; }
+  return out;
+}
+function cfgFormRead() {
+  const p = settings.paths();
+  if (!fs.existsSync(p.configPath)) return { exists: false, file: p.configPath, values: {}, fields: CFG_FORM_FIELDS, template: null };
+  const text = fs.readFileSync(p.configPath, 'utf8');
+  const stripped = stripComments(text); const top = cfgTopLevel(text);
+  const values = {};
+  for (const f of CFG_FORM_FIELDS) {
+    const m = new RegExp('(^|\\n)[ \\t]*' + f.key + (f.type === 'array' ? '(?:\\[\\])?' : '') + '[ \\t]*=', 'i').exec(top);
+    if (!m) { values[f.key] = null; continue; }
+    // value runs from after "=" to the next top-level ";" (class blocks are masked in top, so read it from the real text)
+    const vStart = m.index + m[0].length, semi = top.indexOf(';', vStart);
+    if (semi < 0) { values[f.key] = null; continue; }
+    const raw = stripped.slice(vStart, semi).trim();
+    if (f.type === 'array') values[f.key] = [...raw.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(x => x[1].replace(/\\"/g, '"'));
+    else if (f.type === 'string') values[f.key] = raw.replace(/^"|"$/g, '').replace(/\\"/g, '"');
+    else if (f.type === 'bool') values[f.key] = raw === '1' || /^true$/i.test(raw);
+    else values[f.key] = raw === '' ? null : Number(raw);
+  }
+  const tm = stripped.match(/template\s*=\s*"([^"]*)"/i);
+  return { exists: true, file: p.configPath, values, fields: CFG_FORM_FIELDS, template: tm ? tm[1] : null };
+}
+function cfgFormWrite(changes) {
+  const p = settings.paths();
+  if (!fs.existsSync(p.configPath)) throw new Error('serverDZ.cfg not found. Install the server first.');
+  let text = fs.readFileSync(p.configPath, 'utf8');
+  const nl = text.includes('\r\n') ? '\r\n' : '\n';
+  const fmt = (f, v) => {
+    if (f.type === 'array') return '{' + (v || []).map(x => '"' + String(x).replace(/"/g, '\\"') + '"').join(', ') + '}';
+    if (f.type === 'string') return '"' + String(v == null ? '' : v).replace(/"/g, '\\"') + '"';
+    if (f.type === 'bool') return v ? '1' : '0';
+    return String(v == null ? 0 : Number(v));
+  };
+  const missing = [];
+  for (const f of CFG_FORM_FIELDS) {
+    if (!(f.key in changes)) continue;
+    const v = changes[f.key];
+    if (v === null || v === undefined || (f.type === 'string' && v === '' && f.key !== 'password' && f.key !== 'passwordAdmin' && f.key !== 'hostname')) continue;
+    // replace an existing top-level assignment in place; the masked copy gives the position
+    const top = cfgTopLevel(text);
+    const re = new RegExp('(^|\\n)[ \\t]*' + f.key + (f.type === 'array' ? '(?:\\[\\])?' : '') + '[ \\t]*=', 'i');
+    const m = re.exec(top);
+    const semi = m ? top.indexOf(';', m.index + m[0].length) : -1;
+    if (m && semi >= 0) { let start = m.index + m[0].length; while (start < semi && /[ \t]/.test(text[start])) start++; text = text.slice(0, start) + fmt(f, v) + text.slice(semi); }
+    else missing.push(f.key + (f.type === 'array' ? '[]' : '') + ' = ' + fmt(f, v) + ';');
+  }
+  if (missing.length) {
+    // insert before "class Missions" when present, otherwise append
+    const i = text.search(/\n[ \t]*class\s+Missions/i);
+    const block = missing.join(nl) + nl;
+    text = i >= 0 ? text.slice(0, i + 1) + block + text.slice(i + 1) : text.replace(/\s*$/, '') + nl + block;
+  }
+  try { fs.copyFileSync(p.configPath, p.configPath + '.bak'); } catch { /* ignore */ }
+  fs.writeFileSync(p.configPath, text, 'utf8');
+  return cfgFormRead();
+}
+
+module.exports = { cfgFormRead, cfgFormWrite, CFG_FORM_FIELDS, listFiles, read, write, createFile, validate, validateAll, missionDir, xmlParser, loadLimits, loadTypeNames };

@@ -97,6 +97,10 @@ async function runNow({ force = false } = {}) {
       // Nothing is known to be outdated; still let SteamCMD check the server build.
     }
     if (wasRunning) { log('Stopping server for update...'); await server.stop(); }
+    if (cfg().backupBefore !== false) {
+      try { log('Backing up before the update...'); await require('./backups').create('update'); }
+      catch (e) { log(`Backup before update failed: ${e.message}`); result.failed.push({ what: 'backup', error: e.message }); }
+    }
     try { await steamcmd.updateServer(emitRef); result.server = true; }
     catch (e) { result.failed.push({ what: 'server', error: e.message }); log(`Server update failed: ${e.message}`); }
     if (needMods.length && steamcmd.hasCredentials()) {

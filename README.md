@@ -56,6 +56,17 @@ A small Windows desktop app (Electron) for running a DayZ Standalone dedicated s
 - **Server profiles** (top bar + Settings): separate settings per server instance; switching restarts the tool.
 - **Remote admin panel**: enable `/admin` on the Website page with a password to start, stop, restart, back up, broadcast and kick from a phone.
 - **Map** (Players → Map): last known player positions from the admin log. The map and world size are detected from the active mission template (Chernarus, Livonia, Sakhal, Namalsk, Deer Isle and others). Put an image named after the map, e.g. `chernarusplus.png`, in `<install dir>\maps\` (or use "Set map image") and positions are drawn on it.
+- **Server settings form** (Server → Launch): the common serverDZ.cfg keys (name, passwords, max players, whitelist, signatures, voice, third person, time and acceleration, MOTD, logging) as a form. Values are written in place, so comments and the rest of the file are untouched; a `.bak` is kept.
+- **Launch flags** as checkboxes: -dologs, -adminlog, -netlog, -freezecheck and -limitFPS. The FPS graph needs -dologs; the player database, map and Discord feeds need -adminlog.
+- **Remembered Steam password** (Installation page, opt-in): stored encrypted with your Windows account (Electron safeStorage) so scheduled mod updates keep working after the tool restarts. A "Steam Guard code needed" alert fires if SteamCMD asks for a code.
+- **Backup before updates**: the update timetable takes a backup before installing (on by default). Backups can also include the tool's own data (settings, player database, Discord applications and bans, Steam ban results).
+- **Log cleanup** (Logs page): delete RPT / ADM / log / dump files older than N days after each server start, keeping the newest of each kind. "Clean now" runs it immediately.
+- **Server browser check** (Network page): a Steam A2S query against localhost and your public IP shows whether the server is visible from the internet, with the name, map and player count it reports.
+- **Scheduled wipes** (Tasks): "Full wipe" and "Character wipe" task types warn players, stop the server, back up, wipe and start again.
+- **Tickets** (Discord): `/ticketpanel` posts an "Open a ticket" button; each ticket gets a private channel under the configured category, visible to the opener, the admin roles and the bot. Close it with the button or `/ticket close`; a transcript is posted to the ticket log channel and the channel is deleted. `/ticket add` brings someone else in, `/ticket list` shows open ones.
+- **Kill feed and join feed** (Discord): kills, deaths, joins and leaves parsed live from the admin log are posted to channels you pick, batched every few seconds.
+- **Web admin password** is stored as a salted hash.
+- **Running unattended**: "Launch when Windows starts" needs a logged-in Windows session, so on a dedicated box enable automatic login for the account that runs the tool (or run the tool from a scheduled task "at log on") and keep it in the tray. The tool itself is not a Windows service.
 - **Themes and shortcuts**: dark or light theme in Settings; Ctrl+1…9 jump to pages, F5 refreshes the page, Ctrl+K goes to a page by name.
 
 ## Layout

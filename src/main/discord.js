@@ -7,7 +7,8 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder,
-  ButtonBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActivityType } = require('discord.js');
+  ButtonBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActivityType, AttachmentBuilder, ChannelType } = require('discord.js');
+const PFB = PermissionFlagsBits;
 const { app } = require('electron');
 const settings = require('./settings');
 const lists = require('./lists');
@@ -28,6 +29,7 @@ function cfg() {
     token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', priorityRoleId: '', bannedRoleId: '', mutedRoleId: '', steamApiKey: '',
     statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
     logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
+    ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '',
     ...(s.discord || {})
   };
 }
@@ -36,7 +38,7 @@ function status() {
   const c = cfg();
   return { ...state, log: log.slice(-60), config: { ...c, token: c.token ? '••••' + c.token.slice(-4) : '' }, hasToken: !!c.token,
     inviteUrl: state.appId ? `https://discord.com/oauth2/authorize?client_id=${state.appId}&scope=bot%20applications.commands&permissions=1101659225094` : null,
-    store: { applications: Object.keys(store().applications).length, bans: store().bans.filter(b => b.status === 'banned').length } };
+    store: { applications: Object.keys(store().applications).length, bans: store().bans.filter(b => b.status === 'banned').length, tickets: (store().tickets || []).filter(t => t.status === 'open').length } };
 }
 
 function addLog(line) {
@@ -51,8 +53,8 @@ let storeCache = null;
 function storeFile() { return path.join(app.getPath('userData'), 'discord-data.json'); }
 function store() {
   if (storeCache) return storeCache;
-  try { storeCache = { applications: {}, bans: [], mutes: [], ...JSON.parse(fs.readFileSync(storeFile(), 'utf8')) }; }
-  catch { storeCache = { applications: {}, bans: [], mutes: [] }; }
+  try { storeCache = { applications: {}, bans: [], mutes: [], tickets: [], ...JSON.parse(fs.readFileSync(storeFile(), 'utf8')) }; }
+  catch { storeCache = { applications: {}, bans: [], mutes: [], tickets: [] }; }
   return storeCache;
 }
 function saveStore() { fs.writeFileSync(storeFile(), JSON.stringify(store(), null, 2)); }
@@ -111,7 +113,12 @@ function buildCommands() {
       .addSubcommand(s => s.setName('start').setDescription('Start the server'))
       .addSubcommand(s => s.setName('stop').setDescription('Stop the server'))
       .addSubcommand(s => s.setName('restart').setDescription('Restart the server (warns players if RCon is connected)')),
-    new SlashCommandBuilder().setName('maintenance').setDescription('Re-check every known player against Steam for VAC / game / trade bans and refresh the application embeds'),
+    new SlashCommandBuilder().setName('ticketpanel').setDescription('Post the "Open a ticket" button in this channel'),
+    new SlashCommandBuilder().setName('ticket').setDescription('Support tickets')
+      .addSubcommand(s => s.setName('close').setDescription('Close the ticket this channel belongs to').addStringOption(reasonOpt))
+      .addSubcommand(s => s.setName('add').setDescription('Add a member to this ticket').addUserOption(o => o.setName('discord_user').setDescription('Member').setRequired(true)))
+      .addSubcommand(s => s.setName('list').setDescription('Show open tickets')),
+    new SlashCommandBuilder().setName('maintenance').setDescription('Re-check everyone against Steam for VAC / game / trade bans and refresh the application embeds'),
     new SlashCommandBuilder().setName('backup').setDescription('Take a backup now')
   ].map(c => { const j = c.setDMPermission(false).toJSON(); if (j.default_member_permissions === undefined) j.default_member_permissions = String(PermissionFlagsBits.Administrator); return j; });
 }
@@ -221,6 +228,81 @@ async function syncRoles() {
     for (const b of activeBans) if (b.discordId && !seen.has(b.discordId) && c.bannedRoleId) { seen.add(b.discordId); await setRole(b.discordId, c.bannedRoleId, true); }
   } catch (e) { addLog('Role sync error: ' + e.message); }
   finally { syncing = false; }
+}
+
+// ---------- tickets (simplified: one private channel per ticket, transcript on close) ----------
+function ticketById(id) { return (store().tickets || []).find(t => t.id === id); }
+function ticketByChannel(channelId) { return (store().tickets || []).find(t => t.channelId === channelId && t.status === 'open'); }
+async function openTicket({ discordId, subject, description }) {
+  const c = cfg(); const g = await guild();
+  if (!g) throw new Error('Bot is not in the guild.');
+  if (!c.ticketCategoryId) throw new Error('No ticket category configured. Ask the server staff.');
+  const open = (store().tickets || []).filter(t => t.discordId === discordId && t.status === 'open');
+  if (open.length >= 2) throw new Error('You already have two open tickets. Close one first.');
+  store().tickets = store().tickets || [];
+  const id = String((store().ticketSeq || 0) + 1).padStart(4, '0'); store().ticketSeq = (store().ticketSeq || 0) + 1;
+  const overwrites = [
+    { id: g.roles.everyone.id, deny: [PFB.ViewChannel] },
+    { id: discordId, allow: [PFB.ViewChannel, PFB.SendMessages, PFB.ReadMessageHistory, PFB.AttachFiles] },
+    { id: client.user.id, allow: [PFB.ViewChannel, PFB.SendMessages, PFB.ManageChannels, PFB.ReadMessageHistory] },
+    ...(c.adminRoleIds || []).filter(Boolean).map(r => ({ id: String(r).trim(), allow: [PFB.ViewChannel, PFB.SendMessages, PFB.ReadMessageHistory, PFB.AttachFiles] }))
+  ];
+  const m = await member(discordId);
+  const ch = await g.channels.create({ name: `ticket-${id}-${(m ? m.displayName : 'user').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20)}`, type: ChannelType.GuildText, parent: c.ticketCategoryId, permissionOverwrites: overwrites, topic: `Ticket #${id} · ${subject}` });
+  const t = { id, channelId: ch.id, discordId, subject, description, status: 'open', createdAt: new Date().toISOString() };
+  store().tickets.push(t); saveStore(); emitRef('discord:state', status());
+  const embed = new EmbedBuilder().setColor(0x4f8cff).setTitle(`Ticket #${id}: ${subject}`).setDescription(description || '-').addFields({ name: 'Opened by', value: `<@${discordId}>`, inline: true }, { name: 'Opened', value: `<t:${Math.floor(Date.now() / 1000)}:f>`, inline: true }).setFooter({ text: 'Staff will reply here. Use the button or /ticket close when it is solved.' });
+  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Danger').setCustomId(`ticketclose-${id}`).setLabel('Close ticket'));
+  await ch.send({ content: `<@${discordId}>${(c.adminRoleIds || []).length ? ' ' + c.adminRoleIds.map(r => `<@&${String(r).trim()}>`).join(' ') : ''}`, embeds: [embed], components: [row] });
+  addLog(`Ticket #${id} opened by ${discordId}: ${subject}`); postLog(`🎫 Ticket #${id} opened by <@${discordId}>: ${subject}`);
+  return t;
+}
+async function closeTicket(id, { by, reason } = {}) {
+  const t = ticketById(id); if (!t || t.status !== 'open') return null;
+  const c = cfg(); const ch = await channel(t.channelId);
+  let transcript = `Ticket #${t.id}: ${t.subject}\nOpened by ${t.discordId} at ${t.createdAt}\nClosed by ${by || 'unknown'} at ${new Date().toISOString()}${reason ? ' — ' + reason : ''}\n\n${t.description || ''}\n\n--- messages ---\n`;
+  if (ch) {
+    try {
+      const msgs = []; let before;
+      for (let i = 0; i < 10; i++) { const batch = await ch.messages.fetch({ limit: 100, before }); if (!batch.size) break; msgs.push(...batch.values()); before = batch.last().id; if (batch.size < 100) break; }
+      msgs.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+      for (const m of msgs) transcript += `[${new Date(m.createdTimestamp).toISOString().replace('T', ' ').slice(0, 19)}] ${m.author.tag}: ${m.content || ''}${m.attachments.size ? ' ' + [...m.attachments.values()].map(a => a.url).join(' ') : ''}${m.embeds.length && !m.content ? ' [embed]' : ''}\n`;
+    } catch (e) { transcript += `(could not read messages: ${e.message})\n`; }
+  }
+  t.status = 'closed'; t.closedAt = new Date().toISOString(); t.closedBy = by || null; t.closeReason = reason || ''; saveStore(); emitRef('discord:state', status());
+  const log = await channel(c.ticketLogChannelId || c.logChannelId);
+  if (log) await log.send({ content: `🎫 Ticket #${t.id} (${t.subject}) closed by ${by ? `<@${by}>` : 'unknown'}${reason ? `: ${reason}` : ''}`, files: [new AttachmentBuilder(Buffer.from(transcript, 'utf8'), { name: `ticket-${t.id}.txt` })] }).catch(() => {});
+  const m = await member(t.discordId); if (m) m.send(`Your ticket #${t.id} (${t.subject}) was closed${reason ? ': ' + reason : '.'}`).catch(() => {});
+  if (ch) { await ch.send('This ticket is closed. The channel will be deleted in 10 seconds.').catch(() => {}); setTimeout(() => ch.delete('Ticket closed').catch(() => {}), 10000); }
+  addLog(`Ticket #${t.id} closed by ${by || '?'}`);
+  return t;
+}
+async function canTouchTicket(interaction, t) { return isAllowed(interaction) || (t && t.discordId === interaction.user.id); }
+
+// ---------- kill / join feeds from the admin log ----------
+const feedQueue = {}; let feedTimer = null;
+function feedEvent(ev) {
+  if (!client || !state.running || !ev || !ev.type) return;
+  if (ev.ts < Date.now() - 2 * 60 * 1000) return; // replayed history, not live
+  const c = cfg();
+  let line = null, chId = null;
+  if (ev.type === 'kill') { chId = c.killFeedChannelId; line = `☠️ **${ev.killer.name}** killed **${ev.name}**${ev.weapon ? ` with ${ev.weapon}` : ''}`; }
+  else if (ev.type === 'death') { chId = c.killFeedChannelId; line = `💀 **${ev.name}** died${/bled out/i.test(ev.body || '') ? ' (bled out)' : /suicide/i.test(ev.body || '') ? ' (suicide)' : ''}`; }
+  else if (ev.type === 'connect') { chId = c.joinFeedChannelId; line = `🟢 **${ev.name}** joined`; }
+  else if (ev.type === 'disconnect') { chId = c.joinFeedChannelId; line = `🔴 **${ev.name}** left`; }
+  if (!chId || !line) return;
+  (feedQueue[chId] = feedQueue[chId] || []).push(line);
+  if (!feedTimer) feedTimer = setTimeout(flushFeeds, 4000);
+}
+async function flushFeeds() {
+  feedTimer = null;
+  for (const [chId, lines] of Object.entries(feedQueue)) {
+    delete feedQueue[chId];
+    const ch = await channel(chId); if (!ch) continue;
+    let chunk = '';
+    for (const l of lines) { if (chunk.length + l.length + 1 > 1900) { await ch.send(chunk).catch(() => {}); chunk = ''; } chunk += (chunk ? '\n' : '') + l; }
+    if (chunk) await ch.send(chunk).catch(() => {});
+  }
 }
 
 // ---------- whitelist application flow ----------
@@ -381,6 +463,7 @@ async function execute(name, sub, opt, user) {
   if (name === 'help') {
     const lines = [
       '**/application** — Post the whitelist application button here. *(Admin)*',
+      '**/ticketpanel**, **/ticket close|add|list** — Support tickets: members open one with a button, each gets a private channel; closing posts a transcript to the ticket log. *(Admin, except using the button)*',
       '**/maintenance** — Re-check everyone against Steam for new VAC / game / trade bans and refresh the application embeds. *(Admin)*',
       '**/whitelist add|remove|list**, **/priority …** — Manage the server lists by Steam64 or Discord user; roles follow. *(Admin)*',
       '**/mute add|remove|list** — Give a member the muted role for a duration (30m, 2h, 3d); it is removed when time is up. *(Admin)*',
@@ -504,6 +587,13 @@ async function execute(name, sub, opt, user) {
     if (sub === 'stop') { await server.stop(); return { content: '✅ Server stopped.', log: `${who}: server stop` }; }
     if (sub === 'restart') { scheduler.restartNow().catch(() => {}); return { content: '✅ Restart started (players are warned if RCon is connected; backup taken if enabled).', log: `${who}: server restart` }; }
   }
+  if (name === 'ticket') {
+    if (sub === 'list') { const open = (store().tickets || []).filter(t => t.status === 'open'); return { embeds: [fmtList('Open tickets', open, t => `#${t.id} <#${t.channelId}> — ${t.subject} (<@${t.discordId}>)`)] }; }
+    const t = ticketByChannel(opt._channelId);
+    if (!t) return { content: '❌ Use this inside a ticket channel.' };
+    if (sub === 'close') { await closeTicket(t.id, { by, reason: opt.reason }); return { content: `✅ Ticket #${t.id} closed.`, log: `${who}: closed ticket #${t.id}` }; }
+    if (sub === 'add') { const ch = await channel(t.channelId); if (ch) await ch.permissionOverwrites.edit(opt.discord_user, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }); return { content: `✅ Added <@${opt.discord_user}> to ticket #${t.id}.` }; }
+  }
   if (name === 'maintenance') {
     const r = await require('./steambans').checkAll();
     const e = await refreshApplicationEmbeds();
@@ -545,6 +635,12 @@ async function onInteraction(interaction) {
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Success').setCustomId('application').setLabel('Whitelist Application'));
         return interaction.reply({ embeds: [embed], components: [row] });
       }
+      if (name === 'ticketpanel') {
+        if (!c.ticketCategoryId) return ephemeralErr('Set a ticket category ID on the Discord Bot page first.');
+        const embed = new EmbedBuilder().setColor(0x4f8cff).setAuthor({ name: `${interaction.guild.name} Support` }).setThumbnail(interaction.guild.iconURL()).setDescription('Need help, want to report a player, or have a base or compensation request? Click below to open a private ticket with the staff.');
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Primary').setCustomId('ticketopen').setLabel('Open a ticket'));
+        return interaction.reply({ embeds: [embed], components: [row] });
+      }
       if (name === 'ban' && (sub === 'permanent' || sub === 'temporary')) {
         const t = resolveTarget(opt);
         if (!t.steamId) return ephemeralErr('❌ Give a Steam64 ID, or a Discord user who has a whitelist application on file.');
@@ -553,6 +649,7 @@ async function onInteraction(interaction) {
         return interaction.showModal(reasonModal(`modal-ban-${t.steamId}-${t.discordId || '0'}-${days}`, sub === 'temporary' ? `Ban for ${days} day(s)` : 'Permanently Ban Player'));
       }
       await interaction.deferReply({ ephemeral: true });
+      opt._channelId = interaction.channelId;
       const r = await execute(name, sub, opt, interaction.user);
       const payload = { content: r.content, embeds: r.embeds };
       if (r.ephemeral === false) { await interaction.deleteReply().catch(() => {}); await interaction.followUp({ ...payload, ephemeral: false }); }
@@ -585,6 +682,22 @@ async function onInteraction(interaction) {
         addLog(`${interaction.user.tag}: accepted application ${steamId}`); postLog(`✅ <@${interaction.user.id}> accepted the whitelist application of <@${discordId}> (${steamId})`);
         emitRef('discord:state', status());
         return interaction.editReply({ content: 'Added to the whitelist.' });
+      }
+      if (req === 'ticketopen') {
+        if (activeBanFor(interaction.user.id, null)) return ephemeralErr('You are banned and cannot open tickets.');
+        const m = new ModalBuilder().setCustomId('modal-ticket').setTitle('Open a ticket');
+        m.addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('subject').setLabel('Subject').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('e.g. Player report, Base issue, Compensation')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('What happened?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500)));
+        return interaction.showModal(m);
+      }
+      if (req === 'ticketclose') {
+        const t = ticketById(a);
+        if (!t || t.status !== 'open') return ephemeralErr('This ticket is already closed.');
+        if (!(await canTouchTicket(interaction, t))) return ephemeralErr('Only staff or the person who opened the ticket can close it.');
+        await interaction.deferReply({ ephemeral: true });
+        await closeTicket(t.id, { by: interaction.user.id });
+        return interaction.editReply({ content: `Ticket #${t.id} closed.` });
       }
       if (req === 'decline') return interaction.showModal(reasonModal(`modal-decline-${a}`, 'Decline Application'));
       if (req === 'remove') {
@@ -628,6 +741,11 @@ async function onInteraction(interaction) {
         saveStore(); emitRef('discord:state', status());
         addLog(`Application submitted by ${interaction.user.tag} (${steamId})`);
         return interaction.editReply({ content: 'Your application was submitted. You will be notified once it is reviewed.' });
+      }
+      if (id === 'modal-ticket') {
+        await interaction.deferReply({ ephemeral: true });
+        try { const t = await openTicket({ discordId: interaction.user.id, subject: interaction.fields.getTextInputValue('subject').trim(), description: interaction.fields.getTextInputValue('description').trim() }); return interaction.editReply({ content: `Your ticket #${t.id} is open: <#${t.channelId}>` }); }
+        catch (e) { return interaction.editReply({ content: '❌ ' + e.message }); }
       }
       if (id.startsWith('modal-decline-')) {
         const discordId = id.split('-')[2];
@@ -794,4 +912,4 @@ async function stop(silent = false) {
 function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
 function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
 
-module.exports = { postAlert, refreshApplicationEmbeds, rolesFor, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, openTicket, closeTicket, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
