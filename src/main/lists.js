@@ -1,5 +1,5 @@
 'use strict';
-// Player lists that the DayZ server reads from the profiles folder, plus a tool-kept mute list and recent players from the admin log.
+// Player lists that the DayZ server reads from the profiles folder, plus recent players from the admin log.
 const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
@@ -116,19 +116,6 @@ function remove(kind, id) {
 
 function has(kind, id) { return read(kind).entries.some(e => matches(e, id)); }
 
-// Mutes: DayZ has no server-side mute, so this list is kept by the tool for your records.
-function mutes() { return (settings.load().mutes || []).slice().sort((a, b) => b.added - a.added); }
-function addMute(entry) {
-  const id = String(entry.id || '').trim();
-  if (!id) throw new Error('ID is required.');
-  const list = mutes().filter(m => m.id !== id);
-  list.push({ id, name: entry.name || '', reason: entry.reason || '', until: entry.until || null, added: Date.now() });
-  settings.save({ mutes: list });
-  if (entry.name) saveNote(id, { name: entry.name });
-  return mutes();
-}
-function removeMute(id) { settings.save({ mutes: mutes().filter(m => m.id !== id) }); return mutes(); }
-
 // Recent players parsed from .ADM / .RPT logs: name, id, last seen, connect count.
 function recentPlayers(limit = 200) {
   const p = settings.paths();
@@ -169,7 +156,7 @@ function recentPlayers(limit = 200) {
 }
 
 function allLists() {
-  return { ban: read('ban'), whitelist: read('whitelist'), priority: read('priority'), bebans: read('bebans'), mutes: mutes() };
+  return { ban: read('ban'), whitelist: read('whitelist'), priority: read('priority'), bebans: read('bebans') };
 }
 
-module.exports = { KINDS, read, write, add, remove, has, mutes, addMute, removeMute, recentPlayers, allLists, saveNote, steamIdToDayzId, isSteam64 };
+module.exports = { KINDS, read, write, add, remove, has, recentPlayers, allLists, saveNote, steamIdToDayzId, isSteam64 };

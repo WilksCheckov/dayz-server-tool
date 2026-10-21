@@ -2,7 +2,7 @@
 // Built-in Discord bot, modelled on the standalone DayZ whitelist bot:
 //  - whitelist applications (button -> modal -> admin embed with Accept/Decline, Steam VAC check, role + nickname)
 //  - permanent/temporary bans with reasons, Discord ban/timeout, auto-expiry, Unban button
-//  - slash commands for whitelist/priority/mute/ban lists, players, kick, say, status, server control, backups
+//  - slash commands for whitelist/priority/ban lists, players, kick, say, status, server control, backups
 //  - presence showing online/offline and the live player count, optional action log and live log streaming
 const fs = require('fs');
 const path = require('path');
@@ -91,7 +91,6 @@ function buildCommands() {
     new SlashCommandBuilder().setName('application').setDescription('Post the whitelist application button in this channel'),
     listGroup('whitelist', 'Manage whitelist.txt', 'Steam64 ID'),
     listGroup('priority', 'Manage priority.txt (login queue skip)', 'Steam64 ID'),
-    listGroup('mute', 'Manage the tracked mute list', 'Steam64 ID or DayZ ID'),
     new SlashCommandBuilder().setName('ban').setDescription('Ban management')
       .addSubcommand(s => s.setName('permanent').setDescription('Permanently ban a player (game ban + Discord ban, whitelist removed)').addStringOption(o => o.setName('steamid64').setDescription("The player's SteamID64")).addUserOption(userOpt))
       .addSubcommand(s => s.setName('temporary').setDescription('Temporarily ban a player (game ban + Discord timeout) until the ban expires').addIntegerOption(o => o.setName('duration_days').setDescription('How many days').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('steamid64').setDescription("The player's SteamID64")).addUserOption(userOpt))
@@ -277,7 +276,7 @@ async function execute(name, sub, opt, user) {
   if (name === 'help') {
     const lines = [
       '**/application** — Post the whitelist application button here. *(Admin)*',
-      '**/whitelist add|remove|list**, **/priority …**, **/mute …** — Manage the server lists by Steam64 or Discord user. *(Admin)*',
+      '**/whitelist add|remove|list**, **/priority …** — Manage the server lists by Steam64 or Discord user. *(Admin)*',
       '**/ban permanent|temporary** — Ban a player (game + Discord), with a reason prompt. **/ban battleye** for GUID/IP bans, **/ban remove** to lift, **/ban list**. *(Admin)*',
       '**/search** — Player dossier: application, whitelist, bans, notes. *(Admin)*',
       '**/players**, **/kick**, **/say** — Live via RCon. *(Admin)*',
@@ -309,14 +308,6 @@ async function execute(name, sub, opt, user) {
       if (kind === 'whitelist') await revokeWhitelist({ steamId: t.steamId, discordId: t.discordId }); else lists.remove(kind, t.steamId);
       return { content: `✅ Removed \`${t.steamId}\` from the ${kind}.`, log: `${who}: ${kind} remove ${t.steamId}` };
     }
-  }
-  if (name === 'mute') {
-    if (sub === 'list') return { embeds: [fmtList('Mutes', lists.mutes(), m => `${m.id}  ${m.name || ''}${m.reason ? ' — ' + m.reason : ''}`)] };
-    const t = resolveTarget(opt);
-    const id = t.steamId || opt.id;
-    if (!id) return { content: '❌ Give a Steam64 ID / DayZ ID or a Discord user with an application on file.' };
-    if (sub === 'add') { lists.addMute({ id, name: t.name, reason: opt.reason ? `${opt.reason} (${who})` : who }); return { content: `✅ Muted \`${id}\` in the tracked list.`, log: `${who}: mute ${id}` }; }
-    if (sub === 'remove') { lists.removeMute(id); return { content: `✅ Unmuted \`${id}\`.`, log: `${who}: unmute ${id}` }; }
   }
   if (name === 'ban') {
     if (sub === 'list') {
@@ -359,8 +350,7 @@ async function execute(name, sub, opt, user) {
       { name: 'Application', value: rec ? `${rec.status}${rec.reviewerId ? ` (by <@${rec.reviewerId}>)` : ''}${rec.reason ? ` — ${rec.reason}` : ''}` : 'None on file', inline: true },
       { name: 'Whitelist', value: steamId && lists.has('whitelist', steamId) ? 'Yes' : 'No', inline: true },
       { name: 'Priority', value: steamId && lists.has('priority', steamId) ? 'Yes' : 'No', inline: true },
-      { name: 'Ban', value: ban ? `${ban.status === 'banned' ? 'Currently banned' : 'Previously banned'} — ${ban.reason}${ban.expiresAt ? ` (expires <t:${Math.floor(new Date(ban.expiresAt) / 1000)}:R>)` : ''}` : 'None' },
-      { name: 'Muted', value: lists.mutes().some(m => m.id === steamId || (discordId && m.id === discordId)) ? 'Yes' : 'No', inline: true });
+      { name: 'Ban', value: ban ? `${ban.status === 'banned' ? 'Currently banned' : 'Previously banned'} — ${ban.reason}${ban.expiresAt ? ` (expires <t:${Math.floor(new Date(ban.expiresAt) / 1000)}:R>)` : ''}` : 'None' });
     if (note.note) e.addFields({ name: 'Notes', value: note.note });
     try { const pr = require('./players').all({ query: steamId || (rec && rec.characterName) || '', limit: 1 })[0]; if (pr) e.addFields({ name: 'Playtime', value: `${Math.floor(pr.playtimeSec / 3600)}h ${Math.floor((pr.playtimeSec % 3600) / 60)}m over ${pr.connects} joins`, inline: true }, { name: 'Last seen', value: pr.lastSeen ? `<t:${Math.floor(pr.lastSeen / 1000)}:R>` : '-', inline: true }, { name: 'K / D', value: `${pr.kills} / ${pr.deaths}`, inline: true }); } catch { /* ignore */ }
     return { embeds: [e] };

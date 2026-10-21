@@ -132,7 +132,7 @@ function enrich(r) {
   const note = (r.id && notes[r.id] && notes[r.id].note) || (steamId && notes[steamId] && notes[steamId].note) || r.notes || '';
   const online = !!load().online[r.key] && server.status().running;
   return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online,
-    whitelisted: !!(r.id && lists.has('whitelist', r.id)), banned: !!(r.id && lists.has('ban', r.id)), priority: !!(r.id && lists.has('priority', r.id)), muted: lists.mutes().some(m => m.id === r.id || (steamId && m.id === steamId)) };
+    whitelisted: !!(r.id && lists.has('whitelist', r.id)), banned: !!(r.id && lists.has('ban', r.id)), priority: !!(r.id && lists.has('priority', r.id)) };
 }
 
 function all({ query = '', sort = 'lastSeen', limit = 500 } = {}) {

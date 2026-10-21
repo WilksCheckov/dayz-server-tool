@@ -71,7 +71,6 @@ const ICONS = {
   database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg>',
   bans: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg>',
   lists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>',
-  mutes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3z"/><path d="M5 11a7 7 0 0014 0M12 18v3M4 4l16 16"/></svg>',
   website: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>',
   alerts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16V11a6 6 0 1112 0v5l2 2H4l2-2z"/><path d="M10 20a2 2 0 004 0"/></svg>',
   discord: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5a16 16 0 018 0l1.5 2.5a13 13 0 013 8.5l-3.5 2-1.5-2.5a12 12 0 01-7 0L7 18l-3.5-2a13 13 0 013-8.5L8 5z"/><circle cx="9.5" cy="12.5" r="1"/><circle cx="14.5" cy="12.5" r="1"/></svg>'
@@ -103,7 +102,6 @@ const NAV = [
     { page: 'database', label: 'Database', sub: 'Every player seen in the admin logs: playtime, kills, sessions, notes', icon: 'database' },
     { page: 'bans', label: 'Bans', sub: 'Game bans and BattlEye bans', icon: 'bans' },
     { page: 'lists', label: 'Whitelist & Priority', sub: 'whitelist.txt and priority.txt', icon: 'lists' },
-    { page: 'mutes', label: 'Mutes', sub: 'Tracked mute list for your admin team', icon: 'mutes' },
     { page: 'map', label: 'Map', sub: 'Last known player positions on your map image', icon: 'map' }
   ] },
   { title: 'Integrations', items: [
@@ -142,7 +140,7 @@ function showPage(name) {
   if (name === 'updates') { refreshUpdater(); refreshSteam(); }
   if (name === 'launch') refreshLaunchLines();
   if (name === 'players') { loadRconForm(); refreshPlayers(); refreshRecent(); }
-  if (name === 'bans' || name === 'lists' || name === 'mutes') refreshLists();
+  if (name === 'bans' || name === 'lists') refreshLists();
   if (name === 'website') refreshWebsite();
   if (name === 'alerts') loadAlertsPage();
   if (name === 'settings') { loadSettingsPage(); refreshProfiles(); }
@@ -835,7 +833,7 @@ function renderPlayers(list) {
     <tr data-num="${p.num}" data-guid="${esc(p.guid)}" data-name="${esc(p.name)}">
       <td>${p.num}</td><td>${esc(p.name)}</td><td class="mono">${esc(p.guid)}</td><td class="mono">${esc(p.ip)}</td><td>${p.ping}</td>
       <td>${p.lobby ? '<span class="badge">lobby</span>' : '<span class="badge ok">in game</span>'} ${p.verified ? '' : '<span class="badge warn">unverified</span>'}</td>
-      <td class="row gap"><button class="btn small pl-msg">Message</button><button class="btn small pl-kick">Kick</button><button class="btn small danger pl-ban">Ban</button><button class="btn small pl-mute">Mute</button></td>
+      <td class="row gap"><button class="btn small pl-msg">Message</button><button class="btn small pl-kick">Kick</button><button class="btn small danger pl-ban">Ban</button></td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">No players</td></tr>';
 }
 async function askReason(title, withMinutes = false) {
@@ -850,7 +848,6 @@ $('playersTable').addEventListener('click', e => {
   if (e.target.classList.contains('pl-msg')) return run(async () => { const ok = await showModal(`Message ${name}`, '<textarea id="mMsg" class="input" rows="3"></textarea>', [{ label: 'Send', value: true, primary: true }, { label: 'Cancel', value: false }]); if (ok && $('mMsg').value.trim()) await ipc.invoke('rcon:say', $('mMsg').value.trim(), num); });
   if (e.target.classList.contains('pl-kick')) return run(async () => { const r = await askReason(`Kick ${name}`); if (!r) return; await ipc.invoke('rcon:kick', num, r.reason); toast(`Kicked ${name}`); setTimeout(refreshPlayers, 1000); });
   if (e.target.classList.contains('pl-ban')) return run(async () => { const r = await askReason(`BattlEye ban ${name}`, true); if (!r) return; await ipc.invoke('rcon:ban', num, r.minutes, r.reason); await ipc.invoke('lists:note', guid, { name, note: r.reason }); toast(`Banned ${name}`); setTimeout(() => { refreshPlayers(); refreshLists(); }, 1000); });
-  if (e.target.classList.contains('pl-mute')) return run(async () => { const r = await askReason(`Mute ${name} (tracked by the tool)`); if (!r) return; await ipc.invoke('lists:addMute', { id: guid, name, reason: r.reason }); toast(`Muted ${name} in the tool's list`); });
 });
 
 async function refreshRecent() {
@@ -870,7 +867,7 @@ $('recentTable').addEventListener('click', e => {
   run(async () => { const r = kind === 'ban' ? await askReason(`Ban ${name} (ban.txt)`) : { reason: '' }; if (!r) return; await ipc.invoke('lists:add', kind, { id }, { name, note: r.reason }); toast(`Added ${name} to ${kind}`); refreshLists(); });
 });
 
-// ---------- lists: bans / whitelist / priority / mutes ----------
+// ---------- lists: bans / whitelist / priority ----------
 function renderListTable(tableId, entries, kind) {
   const tb = $(tableId).querySelector('tbody');
   if (kind === 'bebans') {
@@ -890,7 +887,6 @@ async function refreshLists() {
   $('bebanFile').textContent = all.bebans.file + (all.bebans.exists ? '' : ' (not created yet)');
   $('bebanHelp').textContent = all.bebans.help;
   renderListTable('bebanTable', all.bebans.entries, 'bebans');
-  $('muteTable').querySelector('tbody').innerHTML = all.mutes.map(m => `<tr data-id="${esc(m.id)}"><td>${esc(m.name)}</td><td class="mono">${esc(m.id)}</td><td>${esc(m.reason)}</td><td>${m.until ? fmtDate(new Date(m.until).getTime()) : 'indefinite'}</td><td class="muted">${fmtDate(m.added)}</td><td><button class="btn small danger mu-remove">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">No mutes</td></tr>';
   // whitelist banner
   try {
     const cfg = await ipc.invoke('server:readConfig');
@@ -905,10 +901,6 @@ for (const [tableId, kind] of [['banTable', 'ban'], ['bebanTable', 'bebans'], ['
     run(async () => { await ipc.invoke('lists:remove', kind, tr.dataset.id); toast('Removed'); refreshLists(); });
   });
 }
-$('muteTable').addEventListener('click', e => {
-  const tr = e.target.closest('tr'); if (!tr || !tr.dataset.id || !e.target.classList.contains('mu-remove')) return;
-  run(async () => { await ipc.invoke('lists:removeMute', tr.dataset.id); refreshLists(); });
-});
 $('btnAddBan').onclick = (e) => run(async () => {
   const kind = $('banTarget').value;
   const id = $('banId').value.trim(); if (!id) return toast('Enter an ID', true);
@@ -922,11 +914,6 @@ $('btnAddList').onclick = (e) => run(async () => {
   const id = $('listId').value.trim(); if (!id) return toast('Enter an ID', true);
   await ipc.invoke('lists:add', $('listTarget').value, { id }, { name: $('listName').value.trim() });
   toast('Added'); $('listId').value = ''; $('listName').value = ''; refreshLists();
-}, e.target);
-$('btnAddMute').onclick = (e) => run(async () => {
-  const id = $('muteId').value.trim(); if (!id) return toast('Enter an ID', true);
-  await ipc.invoke('lists:addMute', { id, name: $('muteName').value.trim(), reason: $('muteReason').value.trim(), until: $('muteUntil').value || null });
-  toast('Mute added'); $('muteId').value = ''; $('muteName').value = ''; $('muteReason').value = ''; refreshLists();
 }, e.target);
 
 
@@ -1186,7 +1173,7 @@ async function refreshPdb() {
   $('pdbTable').querySelector('tbody').innerHTML = pdbRows.map(r => `<tr data-key="${esc(r.key)}" class="${pdbSelected === r.key ? 'selected' : ''}">
     <td>${r.online ? '<span class="dot ok" style="margin-right:6px"></span>' : ''}${esc(r.name)}${r.characterName && r.characterName !== r.name ? ` <span class="muted">(${esc(r.characterName)})</span>` : ''}</td>
     <td class="mono">${esc(r.steamId || r.id || '?')}</td><td class="muted">${r.lastSeen ? fmtDate(r.lastSeen) : '—'}</td><td>${fmtPlaytime(r.playtimeSec)}</td><td>${r.kills} / ${r.deaths}</td>
-    <td>${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.priority ? '<span class="badge">priority</span> ' : ''}${r.muted ? '<span class="badge warn">muted</span> ' : ''}${r.application ? `<span class="badge">app: ${esc(r.application)}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No players recorded yet. The database fills from the admin log (-adminlog) while the server runs.</td></tr>';
+    <td>${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.priority ? '<span class="badge">priority</span> ' : ''}${r.application ? `<span class="badge">app: ${esc(r.application)}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No players recorded yet. The database fills from the admin log (-adminlog) while the server runs.</td></tr>';
   if (pdbSelected) renderPdbDetail(pdbRows.find(r => r.key === pdbSelected) || await ipc.invoke('players:get', pdbSelected));
 }
 function renderPdbDetail(r) {
@@ -1203,7 +1190,7 @@ function renderPdbDetail(r) {
     </div>
     ${r.names.length > 1 ? `<div><span class="muted">Names used</span><br>${r.names.map(esc).join(', ')}</div>` : ''}
     <div class="row gap wrap">
-      ${r.id ? `<button class="btn small pd-act" data-kind="ban">Ban</button><button class="btn small pd-act" data-kind="whitelist">Whitelist</button><button class="btn small pd-act" data-kind="priority">Priority</button><button class="btn small pd-mute">Mute</button>` : ''}
+      ${r.id ? `<button class="btn small pd-act" data-kind="ban">Ban</button><button class="btn small pd-act" data-kind="whitelist">Whitelist</button><button class="btn small pd-act" data-kind="priority">Priority</button>` : ''}
       ${r.steamId ? `<button class="btn small" id="pdSteam">Steam profile</button>` : ''}
       <button class="btn small danger" id="pdRemove" title="Delete this record (it will be rebuilt from the logs if the player appears again)">Delete record</button>
     </div>
@@ -1212,7 +1199,6 @@ function renderPdbDetail(r) {
     <div class="card-title mt">Recent sessions</div>
     <div class="table-wrap" style="max-height:220px"><table class="table"><thead><tr><th>Start</th><th>End</th><th>Length</th></tr></thead><tbody>${sessions.map(s => `<tr><td>${fmtDate(s.start)}</td><td>${fmtDate(s.end)}</td><td>${fmtPlaytime((s.end - s.start) / 1000)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No completed sessions.</td></tr>'}</tbody></table></div>`;
   box.querySelectorAll('.pd-act').forEach(b => b.onclick = (e) => run(async () => { const kind = b.dataset.kind; const rr = kind === 'ban' ? await askReason(`Ban ${r.name} (ban.txt)`) : { reason: '' }; if (!rr) return; await ipc.invoke('lists:add', kind, { id: r.steamId || r.id }, { name: r.name, note: rr.reason }); toast(`Added to ${kind}`); refreshPdb(); }, e.target));
-  const mu = box.querySelector('.pd-mute'); if (mu) mu.onclick = (e) => run(async () => { const rr = await askReason(`Mute ${r.name}`); if (!rr) return; await ipc.invoke('lists:addMute', { id: r.steamId || r.id, name: r.name, reason: rr.reason }); toast('Muted'); refreshPdb(); }, e.target);
   const sp = box.querySelector('#pdSteam'); if (sp) sp.onclick = () => ipc.invoke('shell:openExternal', `https://steamcommunity.com/profiles/${r.steamId}`);
   box.querySelector('#pdSaveNote').onclick = (e) => run(async () => { await ipc.invoke('players:setNote', r.key, box.querySelector('#pdNotes').value); toast('Note saved'); refreshPdb(); }, e.target);
   box.querySelector('#pdRemove').onclick = (e) => run(async () => { const ok = await showModal(`Delete record for ${r.name}?`, '', [{ label: 'Delete', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('players:remove', r.key); pdbSelected = null; refreshPdb(); });

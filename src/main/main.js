@@ -357,9 +357,6 @@ handle('lists:all', () => lists.allLists());
 handle('lists:read', (kind) => lists.read(kind));
 handle('lists:add', (kind, entry, meta) => lists.add(kind, entry, meta));
 handle('lists:remove', (kind, id) => lists.remove(kind, id));
-handle('lists:mutes', () => lists.mutes());
-handle('lists:addMute', (entry) => lists.addMute(entry));
-handle('lists:removeMute', (id) => lists.removeMute(id));
 handle('lists:recentPlayers', () => lists.recentPlayers());
 handle('lists:note', (id, meta) => lists.saveNote(id, meta));
 
