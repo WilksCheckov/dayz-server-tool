@@ -47,7 +47,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "CHANGE-ME",
+      "owner": "WilksCheckov",
       "repo": "dayz-server-tool"
     }
   },
@@ -60,6 +60,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/CHANGE-ME/dayz-server-tool.git"
+    "url": "https://github.com/WilksCheckov/dayz-server-tool.git"
   }
 }
