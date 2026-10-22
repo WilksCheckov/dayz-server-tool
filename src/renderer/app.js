@@ -1541,7 +1541,7 @@ function renderBrush() {
   document.querySelector('#eco-types .vtable').classList.toggle('brushing', !!brush.name);
   $('brushHint').textContent = brush.name ? `Brush: ${brush.kind === 'value' ? 'tier' : brush.kind} "${brush.name}". Left-click a row to add, right-click to remove, Esc to stop.` : 'Pick a value, then left-click a row to add it, right-click to remove it. Esc clears the brush.';
 }
-$('brushKind').onchange = () => { brush.name = null; renderBrush(); };
+$('brushKind').onchange = () => { brush.kind = $('brushKind').value; brush.name = null; renderBrush(); };
 $('brushChips').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; brush.name = brush.name === c.dataset.v ? null : c.dataset.v; renderBrush(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && brush.name) { brush.name = null; renderBrush(); } });
 function brushApply(e, add) {
