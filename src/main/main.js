@@ -130,9 +130,13 @@ function createWindow() {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
       backgroundThrottling: false,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   });
+  // The window only ever shows our own page: block navigation away from it and open links outside instead.
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); if (/^https?:\/\//i.test(url)) shell.openExternal(url); } });
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.on('close', e => { if (!quitting && appPrefs().closeToTray && !process.env.DZ_SCREENSHOT) { e.preventDefault(); win.hide(); buildTray(); } });
   win.on('closed', () => { win = null; });
@@ -185,9 +189,12 @@ handle('dialog:pickFolder', async (current) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: current || undefined });
   return r.canceled ? null : r.filePaths[0];
 });
-handle('shell:openPath', (p) => shell.openPath(p));
-handle('dialog:pickFile', async (opts) => { const r = await dialog.showOpenDialog(win, { properties: ['openFile'], ...(opts || {}) }); return r.canceled ? null : r.filePaths[0]; });
-handle('shell:openExternal', (url) => shell.openExternal(url));
+// Only folders and files inside the server install or the tool's data folder may be opened from the page.
+function insideKnownRoots(p) { const abs = path.resolve(String(p || '')); const roots = [settings.load().installDir, app.getPath('userData'), settings.paths().serverDir].filter(Boolean).map(r => path.resolve(r)); return roots.some(r => abs === r || abs.startsWith(r + path.sep)); }
+handle('shell:openPath', (p) => { if (!insideKnownRoots(p)) throw new Error('Refusing to open a path outside the server or data folder.'); return shell.openPath(p); });
+const pickedFiles = new Set(); // files the user chose through a dialog this session; the only ones fs:readText may read
+handle('dialog:pickFile', async (opts) => { const r = await dialog.showOpenDialog(win, { properties: ['openFile'], ...(opts || {}) }); if (r.canceled) return null; pickedFiles.add(path.resolve(r.filePaths[0])); return r.filePaths[0]; });
+handle('shell:openExternal', (url) => { if (!/^https?:\/\/[^\s]+$/i.test(String(url || ''))) throw new Error('Only http(s) links can be opened.'); return shell.openExternal(url); });
 
 // Steam / install
 handle('steam:status', () => steamcmd.status());
@@ -277,7 +284,7 @@ handle('economy:saveSpawnable', (abs, rows) => economy.saveSpawnable(abs, rows))
 handle('economy:parse', (kind, text) => economy.rowsFromText(kind, text));
 handle('economy:createFile', (opts) => economy.createFile(opts || {}));
 handle('economy:unregisterFile', (abs) => economy.unregisterFile(abs));
-handle('fs:readText', (abs) => fs.readFileSync(abs, 'utf8'));
+handle('fs:readText', (abs) => { if (!pickedFiles.has(path.resolve(String(abs || '')))) throw new Error('Pick the file through the file dialog first.'); return fs.readFileSync(abs, 'utf8'); });
 
 // App preferences + self-update
 handle('app:prefs', () => ({ ...appPrefs(), version: app.getVersion(), packaged: app.isPackaged, dataDir: app.getPath('userData'), loginItem: app.getLoginItemSettings().openAtLogin }));
@@ -293,7 +300,14 @@ handle('app:rendererError', (msg) => { toollog.error(`renderer: ${msg}`); return
 handle('app:exportSettings', async () => {
   const r = await dialog.showSaveDialog(win, { defaultPath: 'dayz-server-tool-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
   if (r.canceled) return null;
-  const s = { ...settings.load() }; if (s.discord) s.discord = { ...s.discord, token: '' }; if (s.rcon) s.rcon = { ...s.rcon, password: '' };
+  const s = JSON.parse(JSON.stringify(settings.load()));
+  // never export credentials: bot token, API keys, passwords, DNS tokens, certificates, the remembered Steam password
+  if (s.discord) { s.discord.token = ''; s.discord.steamApiKey = ''; }
+  if (s.rcon) s.rcon.password = '';
+  if (s.offsite) { for (const k of Object.keys(s.offsite)) if (/pass/i.test(k)) s.offsite[k] = ''; }
+  if (s.alerts) s.alerts.webhookUrl = '';
+  if (s.website) { delete s.website.admin; if (s.website.domain) { s.website.domain.certPem = ''; s.website.domain.keyPem = ''; if (s.website.domain.ddns) s.website.domain.ddns.token = ''; } }
+  delete s.steamPassEnc;
   fs.writeFileSync(r.filePath, JSON.stringify(s, null, 2)); return r.filePath;
 });
 handle('app:importSettings', async () => {

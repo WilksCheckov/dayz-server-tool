@@ -177,6 +177,8 @@ function customPage(c, p) { return layout(c, '/' + p.slug, p.title, pageBody(p))
 // ---------- admin panel (/admin): password-protected remote control ----------
 const crypto = require('crypto');
 const adminSessions = new Map(); // token -> expiry
+const loginFails = new Map(); // ip -> { n, until }
+function safeEq(a, b) { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
 function hashPw(pw, salt) { return crypto.createHash('sha256').update(salt + ':' + pw).digest('hex'); }
 // The admin password is stored as a salted hash. A plain password left over from an older version is hashed on first read.
 function adminCfg() {
@@ -213,10 +215,16 @@ async function handleAdmin(req, res, p, c, send) {
   if (p === '/admin/login' && req.method === 'POST') {
     let body = ''; req.on('data', d => { body += d; if (body.length > 4096) req.destroy(); });
     req.on('end', () => {
+      const ip = String(req.socket.remoteAddress || ''); const lf = loginFails.get(ip);
+      if (lf && lf.n >= 5 && Date.now() < lf.until) { res.writeHead(429, { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '900' }); return res.end(adminPage(c, '', { error: 'Too many attempts. Try again in 15 minutes.' })); }
       const pw = decodeURIComponent((new URLSearchParams(body).get('password') || ''));
-      if (!pw || hashPw(pw, ac.salt) !== ac.passwordHash) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(adminPage(c, '', { error: 'Wrong password.' })); }
+      if (!pw || !safeEq(hashPw(pw, ac.salt), ac.passwordHash)) {
+        const f = loginFails.get(ip) || { n: 0, until: 0 }; f.n++; f.until = Date.now() + 15 * 60000; loginFails.set(ip, f);
+        try { require('./audit').log('web', ip, 'admin login failed', ''); } catch { /* ignore */ } res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(adminPage(c, '', { error: 'Wrong password.' })); }
+      loginFails.delete(ip);
       const token = crypto.randomBytes(24).toString('hex'); adminSessions.set(token, Date.now() + 12 * 3600 * 1000);
-      res.writeHead(302, { Location: '/admin', 'Set-Cookie': `dzadmin=${token}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=43200` }); res.end();
+      try { require('./audit').log('web', ip, 'admin login', ''); } catch { /* ignore */ }
+      res.writeHead(302, { Location: '/admin', 'Set-Cookie': `dzadmin=${token}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=43200${req.socket.encrypted ? '; Secure' : ''}` }); res.end();
     });
     return;
   }
@@ -224,6 +232,7 @@ async function handleAdmin(req, res, p, c, send) {
   const token = adminToken(req);
   if (p.startsWith('/admin/api/')) {
     if (!token) return send(401, 'application/json', '{"error":"unauthorized"}');
+    if (req.method === 'POST') { const origin = req.headers.origin || req.headers.referer || ''; const host = String(req.headers.host || ''); if (origin && !new RegExp('^https?://' + host.replace(/[.*+?^$()|[\]\\]/g, '\\$&') + '(/|$)', 'i').test(origin)) return send(403, 'application/json', '{"error":"cross-site request blocked"}'); if (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin') return send(403, 'application/json', '{"error":"cross-site request blocked"}'); }
     const action = p.slice('/admin/api/'.length);
     let body = {}; if (req.method === 'POST') { let raw = ''; await new Promise(r => { req.on('data', d => { raw += d; if (raw.length > 8192) req.destroy(); }); req.on('end', r); }); try { body = JSON.parse(raw || '{}'); } catch { body = {}; } }
     try {
@@ -250,7 +259,7 @@ async function handle(req, res) {
   const c = cfg();
   const url = new URL(req.url, 'http://x');
   const p = url.pathname.replace(/\/+$/, '') || '/';
-  const send = (code, type, body) => { res.writeHead(code, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(body); };
+  const send = (code, type, body) => { res.writeHead(code, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer' }); res.end(body); };
   try {
     { const dom = require('./domain'); const ch = dom.challengeResponse(p); if (ch) return send(200, 'text/plain', ch);
       const dc = dom.cfg();

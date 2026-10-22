@@ -23,6 +23,27 @@ const DEFAULTS = {
 
 let cache = null;
 
+// ---------- secrets at rest ----------
+// These fields are stored encrypted with Electron's safeStorage (DPAPI, bound to the Windows user). In memory they stay plain.
+const SECRET_PATHS = ['discord.token', 'discord.steamApiKey', 'rcon.password', 'offsite.ftp.password', 'alerts.webhookUrl', 'website.domain.ddns.token', 'website.domain.keyPem'];
+const ENC = 'enc:v1:';
+function safeStore() { try { const { safeStorage } = require('electron'); return safeStorage && typeof safeStorage.isEncryptionAvailable === 'function' && safeStorage.isEncryptionAvailable() ? safeStorage : null; } catch { return null; } }
+function atPath(obj, p, fn) { const parts = p.split('.'); let o = obj; for (let i = 0; i < parts.length - 1; i++) { if (!o || typeof o !== 'object') return; o = o[parts[i]]; } if (o && typeof o === 'object' && typeof o[parts[parts.length - 1]] === 'string') o[parts[parts.length - 1]] = fn(o[parts[parts.length - 1]]); }
+function encryptSecrets(obj) {
+  const ss = safeStore(); const out = JSON.parse(JSON.stringify(obj));
+  if (!ss) return out;
+  for (const p of SECRET_PATHS) atPath(out, p, v => v && !v.startsWith(ENC) ? ENC + ss.encryptString(v).toString('base64') : v);
+  return out;
+}
+function decryptSecrets(obj) {
+  for (const p of SECRET_PATHS) atPath(obj, p, v => {
+    if (!v || !v.startsWith(ENC)) return v;
+    const ss = safeStore(); if (!ss) return ''; // another Windows account cannot read it; treat as unset
+    try { return ss.decryptString(Buffer.from(v.slice(ENC.length), 'base64')); } catch { return ''; }
+  });
+  return obj;
+}
+
 // Each server profile has its own settings file (see profiles.js); "default" is settings.json.
 function file() {
   try { return require('./profiles').settingsFile(); } catch { return path.join(app.getPath('userData'), 'settings.json'); }
@@ -32,7 +53,7 @@ function load() {
   if (cache) return cache;
   try {
     const raw = fs.readFileSync(file(), 'utf8');
-    cache = { ...DEFAULTS, ...JSON.parse(raw) };
+    cache = decryptSecrets({ ...DEFAULTS, ...JSON.parse(raw) });
   } catch {
     cache = { ...DEFAULTS };
   }
@@ -43,7 +64,7 @@ function save(partial) {
   const s = load();
   Object.assign(s, partial);
   fs.mkdirSync(path.dirname(file()), { recursive: true });
-  fs.writeFileSync(file(), JSON.stringify(s, null, 2));
+  fs.writeFileSync(file(), JSON.stringify(encryptSecrets(s), null, 2));
   return s;
 }
 

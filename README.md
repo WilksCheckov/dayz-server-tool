@@ -98,6 +98,15 @@ npm run dist
 
 Output lands in `dist\` (NSIS installer and a portable exe).
 
+## Security notes
+
+- The window runs with context isolation, no Node integration and a sandboxed renderer; the page can only call the IPC handlers the tool defines, the renderer's script policy is self-only, and navigation or pop-ups to other sites are blocked (links open in your browser).
+- Secrets in settings.json (Discord bot token, Steam API key, RCon password, FTP password, webhook URL, DNS token, HTTPS private key) are stored encrypted with Windows DPAPI through Electron's safeStorage, bound to your Windows account, as is the remembered Steam password. Settings export never includes them.
+- The public website serves files only from the website folder (path traversal is rejected), sends nosniff / frame-deny / no-referrer headers, and the /admin panel uses a salted-hash password with constant-time comparison, a 15-minute lock-out after five failed logins, HttpOnly SameSite=Strict cookies (Secure over HTTPS) and an origin check on every state-changing request. Logins and admin actions go to the audit log.
+- Shell commands are run with argument arrays, not strings; the only free-form command execution is the "command line" task type, which you write yourself.
+- The Discord bot checks Administrator permission or your admin role IDs on every admin command; applicants and ticket openers can only act on their own records.
+- Known dependency advisory: node-forge (pulled in by the Let's Encrypt client) has an advisory about RSA signature verification. The tool only uses it to generate keys and certificate requests locally and never verifies signatures with it, so the affected code path is not reachable.
+
 ## Notes
 
 - **Startup speed**: the portable exe unpacks itself (about 85 MB) into a temp folder on every launch, which costs several seconds, and running it from a OneDrive folder adds more. Use the installer (`DayZ-Server-Tool-Setup-<version>.exe`) for day-to-day use: it starts in a second or two and updates itself in place. The tool's own initialisation takes well under a second; the rest is Electron starting.
