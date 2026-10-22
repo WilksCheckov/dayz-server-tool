@@ -37,7 +37,7 @@ function setError(msg) {
 
 function cfg() {
   const s = settings.load();
-  return { host: '127.0.0.1', port: 2306, password: '', autoConnect: true, autoConfigure: true, ...(s.rcon || {}) };
+  return { host: '127.0.0.1', port: 2306, password: '', autoConnect: true, autoConfigure: true, rotatePassword: true, ...(s.rcon || {}) };
 }
 
 function status() { return { ...state, config: { ...cfg(), password: cfg().password ? '••••' : '' } }; }
@@ -175,16 +175,19 @@ function writeBe(password, port) {
   return main;
 }
 // Make the tool's settings and the BattlEye file agree. Returns what happened.
-function ensureConfigured() {
+function newPassword() { return require('crypto').randomBytes(18).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 16); }
+// rotate: true before a server start when "new random password on every start" is on
+function ensureConfigured({ rotate = false } = {}) {
   const c = cfg(); if (c.autoConfigure === false) return { action: 'off' };
   const be = readBe();
   let password = c.password, port = Number(c.port) || 2306, action = 'ok';
+  if (rotate && c.rotatePassword !== false) { password = newPassword(); action = 'rotated'; }
   if (!password && be && be.password) { password = be.password; if (be.port) port = be.port; action = 'from-battleye'; }
-  if (!password) { password = require('crypto').randomBytes(9).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 12) || 'rcon' + Date.now(); action = 'generated'; }
+  if (!password) { password = newPassword(); action = 'generated'; }
   const needWrite = !be || be.password !== password || be.port !== port;
   if (needWrite) { try { writeBe(password, port); if (action === 'ok') action = 'wrote-battleye'; } catch (e) { return { action: 'error', error: e.message }; } }
   if (password !== c.password || port !== c.port || c.autoConnect !== true) settings.save({ rcon: { ...c, password, port, host: c.host || '127.0.0.1', autoConnect: true } });
-  if (action !== 'ok') emitRef('console', { source: 'rcon', line: action === 'generated' ? `RCon configured: created a password in battleye\\BEServer_x64.cfg (port ${port}).` : action === 'from-battleye' ? `RCon configured from battleye\\BEServer_x64.cfg (port ${port}).` : `RCon: battleye\\BEServer_x64.cfg updated to match the tool's settings (port ${port}).` });
+  if (action !== 'ok') emitRef('console', { source: 'rcon', line: action === 'rotated' ? `RCon: new random password written to battleye\\BEServer_x64.cfg for this start (port ${port}).` : action === 'generated' ? `RCon configured: created a password in battleye\\BEServer_x64.cfg (port ${port}).` : action === 'from-battleye' ? `RCon configured from battleye\\BEServer_x64.cfg (port ${port}).` : `RCon: battleye\\BEServer_x64.cfg updated to match the tool's settings (port ${port}).` });
   return { action, port, file: pathx.join(beDir(), 'BEServer_x64.cfg') };
 }
 // Connect on its own once the server is up: retry every 15 s for up to 10 minutes, stop when connected or the server stops.

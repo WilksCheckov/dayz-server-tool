@@ -914,9 +914,9 @@ function loadRconForm() {
   $('rconHost').value = c.host || '127.0.0.1';
   $('rconPort').value = c.port || 2306;
   $('rconPass').value = c.password || '';
-  $('rconAuto').checked = c.autoConnect !== false; $('rconAutoCfg').checked = c.autoConfigure !== false;
+  $('rconAuto').checked = c.autoConnect !== false; $('rconAutoCfg').checked = c.autoConfigure !== false; $('rconRotate').checked = c.rotatePassword !== false;
 }
-function rconForm() { return { autoConfigure: $('rconAutoCfg').checked, host: $('rconHost').value.trim() || '127.0.0.1', port: Number($('rconPort').value) || 2306, password: $('rconPass').value, autoConnect: $('rconAuto').checked }; }
+function rconForm() { return { autoConfigure: $('rconAutoCfg').checked, rotatePassword: $('rconRotate').checked, host: $('rconHost').value.trim() || '127.0.0.1', port: Number($('rconPort').value) || 2306, password: $('rconPass').value, autoConnect: $('rconAuto').checked }; }
 $('btnRconSave').onclick = (e) => run(async () => { await saveSettings({ rcon: rconForm() }); toast('RCon settings saved'); }, e.target);
 $('btnRconFromBe').onclick = (e) => run(async () => {
   await saveSettings({ rcon: rconForm() });
