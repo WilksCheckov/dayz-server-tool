@@ -36,7 +36,7 @@ let tray = null;
 let quitting = false;
 const ICON = path.join(__dirname, '..', 'assets', 'icon.png');
 
-function appPrefs() { return { closeToTray: true, startMinimized: false, launchAtLogin: false, autoUpdate: true, autoStartServer: false, autoStartDelaySec: 10, theme: 'dark', autoFirewall: true, ...(settings.load().app || {}) }; }
+function appPrefs() { return { closeToTray: true, startMinimized: false, launchAtLogin: false, autoUpdate: true, autoStartServer: false, autoStartDelaySec: 10, theme: 'dark', autoFirewall: true, showServerWindow: false, ...(settings.load().app || {}) }; }
 
 // ----- system tray -----
 function buildTray() {

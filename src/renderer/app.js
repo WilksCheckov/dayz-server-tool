@@ -36,9 +36,12 @@ function fmtDuration(ms) {
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 // ---------- console ----------
+const consoleHidden = new Set();
 function logLine({ source, line }) {
   const pre = $('console');
   const span = document.createElement('span');
+  span.dataset.src = ['server', 'rpt', 'steamcmd'].includes(source) ? source : 'other';
+  if (consoleHidden.has(span.dataset.src)) span.hidden = true;
   const cls = /error|fail|invalid|exception|can't|cannot/i.test(line) ? 'err' : /warn/i.test(line) ? 'warn' : '';
   span.innerHTML = `<span class="src src-${esc(source)}">[${esc(source)}]</span> <span class="${cls}">${esc(line)}</span>\n`;
   pre.appendChild(span);
@@ -55,6 +58,10 @@ function logLine({ source, line }) {
 }
 ipc.on('console', logLine);
 $('btnClearConsole').onclick = () => { $('console').textContent = ''; };
+document.querySelectorAll('.console-filters input[data-src]').forEach(cb => cb.onchange = () => {
+  if (cb.checked) consoleHidden.delete(cb.dataset.src); else consoleHidden.add(cb.dataset.src);
+  $('console').querySelectorAll('span[data-src]').forEach(sp => { sp.hidden = consoleHidden.has(sp.dataset.src); });
+});
 $('btnClearSteamConsole').onclick = () => { $('steamConsole').textContent = ''; };
 
 // ---------- navigation ----------
@@ -1558,11 +1565,11 @@ $('btnEcoOpenEditor').onclick = () => { const st = ecoState(); if (!st) return; 
 async function loadSettingsPage() {
   const p = await ipc.invoke('app:prefs');
   $('prefCloseToTray').checked = !!p.closeToTray; $('prefStartMinimized').checked = !!p.startMinimized; $('prefLaunchAtLogin').checked = !!p.launchAtLogin;   $('prefAutoUpdate').checked = p.autoUpdate !== false;
-  $('prefAutoStartServer').checked = !!p.autoStartServer; $('prefAutoFirewall').checked = p.autoFirewall !== false; $('prefAutoStartDelay').value = p.autoStartDelaySec || 10; $('prefTheme').value = p.theme || 'dark';
+  $('prefAutoStartServer').checked = !!p.autoStartServer; $('prefShowServerWindow').checked = !!p.showServerWindow; $('prefAutoFirewall').checked = p.autoFirewall !== false; $('prefAutoStartDelay').value = p.autoStartDelaySec || 10; $('prefTheme').value = p.theme || 'dark';
   $('dataDir').textContent = p.dataDir;
   renderUpdate(await ipc.invoke('update:state'), p);
 }
-$('btnPrefsSave').onclick = (e) => run(async () => { await ipc.invoke('app:setPrefs', { closeToTray: $('prefCloseToTray').checked, startMinimized: $('prefStartMinimized').checked, launchAtLogin: $('prefLaunchAtLogin').checked, autoUpdate: $('prefAutoUpdate').checked, autoStartServer: $('prefAutoStartServer').checked, autoFirewall: $('prefAutoFirewall').checked, autoStartDelaySec: Number($('prefAutoStartDelay').value) || 10, theme: $('prefTheme').value }); applyTheme($('prefTheme').value); try { localStorage.setItem('theme', $('prefTheme').value); } catch {} toast('Preferences saved'); }, e.target);
+$('btnPrefsSave').onclick = (e) => run(async () => { await ipc.invoke('app:setPrefs', { closeToTray: $('prefCloseToTray').checked, startMinimized: $('prefStartMinimized').checked, launchAtLogin: $('prefLaunchAtLogin').checked, autoUpdate: $('prefAutoUpdate').checked, autoStartServer: $('prefAutoStartServer').checked, autoFirewall: $('prefAutoFirewall').checked, showServerWindow: $('prefShowServerWindow').checked, autoStartDelaySec: Number($('prefAutoStartDelay').value) || 10, theme: $('prefTheme').value }); applyTheme($('prefTheme').value); try { localStorage.setItem('theme', $('prefTheme').value); } catch {} toast('Preferences saved'); }, e.target);
 $('btnOpenDataDir').onclick = () => ipc.invoke('app:openDataDir');
 $('btnExportSettings').onclick = (e) => run(async () => { const f = await ipc.invoke('app:exportSettings'); if (f) toast('Exported to ' + f); }, e.target);
 $('btnImportSettings').onclick = (e) => run(async () => { const ok = await ipc.invoke('app:importSettings'); if (ok) { toast('Settings imported'); await loadSettings(); } }, e.target);

@@ -1,6 +1,7 @@
 'use strict';
 // Starts, stops and watches the DayZServer_x64.exe process.
 const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 const settings = require('./settings');
 const mods = require('./mods');
@@ -47,6 +48,39 @@ function buildArgs(s) {
   return args;
 }
 
+// ---------- live RPT tail: the server's real console output, streamed line by line ----------
+let rptTimer = null, rptFile = null, rptOffset = 0, rptRest = '', rptStartedAt = 0;
+function newestRpt() {
+  const p = settings.paths();
+  try { return fs.readdirSync(p.profilesDir).filter(f => /\.rpt$/i.test(f)).map(f => ({ f: path.join(p.profilesDir, f), m: fs.statSync(path.join(p.profilesDir, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0] || null; } catch { return null; }
+}
+function startRptTail() {
+  stopRptTail(false);
+  rptStartedAt = Date.now(); rptFile = null; rptOffset = 0; rptRest = '';
+  rptTimer = setInterval(pollRpt, 1500);
+}
+function stopRptTail(final) { if (final) pollRpt(); clearInterval(rptTimer); rptTimer = null; }
+function pollRpt() {
+  try {
+    if (!rptFile) {
+      // wait for the RPT the new server process creates (its mtime is after our start)
+      const n = newestRpt(); if (!n || n.m < rptStartedAt - 5000) return;
+      rptFile = n.f; rptOffset = 0; rptRest = '';
+      emitRef('console', { source: 'rpt', line: `--- following ${path.basename(rptFile)} ---` });
+    }
+    const st = fs.statSync(rptFile);
+    if (st.size < rptOffset) { rptOffset = 0; rptRest = ''; }
+    if (st.size === rptOffset) return;
+    const len = Math.min(st.size - rptOffset, 256 * 1024);
+    const buf = Buffer.alloc(len); const fd = fs.openSync(rptFile, 'r');
+    try { fs.readSync(fd, buf, 0, len, rptOffset); } finally { fs.closeSync(fd); }
+    rptOffset += len;
+    const lines = (rptRest + buf.toString('utf8')).split(/\r?\n/); rptRest = lines.pop() || '';
+    let n = 0;
+    for (const l of lines) { if (!l.trim()) continue; if (++n > 200) { emitRef('console', { source: 'rpt', line: `(… ${lines.length - 200} more lines, open the Logs page for the full file)` }); break; } emitRef('console', { source: 'rpt', line: l }); }
+  } catch { /* file not readable yet */ }
+}
+
 function start() {
   if (proc) return status();
   const s = settings.load();
@@ -59,8 +93,11 @@ function start() {
   if (crashLoop) { crashLoop = false; crashes.resetLoop(); }
   const args = buildArgs(s);
   emitRef('console', { source: 'server', line: `Starting: DayZServer_x64.exe ${args.join(' ')}` });
-  proc = spawn(p.serverExe, args, { cwd: p.serverDir, stdio: 'ignore', windowsHide: false, detached: false });
+  const showWindow = !!((s.app || {}).showServerWindow);
+  proc = spawn(p.serverExe, args, { cwd: p.serverDir, stdio: showWindow ? 'ignore' : ['ignore', 'pipe', 'pipe'], windowsHide: !showWindow, detached: false });
+  if (proc.stdout) { const onOut = d => { for (const l of d.toString('utf8').split(/\r?\n/)) if (l.trim()) emitRef('console', { source: 'server', line: l.trim() }); }; proc.stdout.on('data', onOut); proc.stderr.on('data', onOut); }
   startedAt = Date.now();
+  startRptTail();
   startedModParam = currentModParam(s);
   lastExit = null;
   proc.on('exit', (code, signal) => {
@@ -68,6 +105,7 @@ function start() {
     lastExit = { code, signal, at: Date.now(), ranFor };
     emitRef('console', { source: 'server', line: `Server exited (code ${code}) after ${ranFor}s` });
     proc = null; startedAt = null;
+    setTimeout(() => { stopRptTail(true); }, 3000);
     const wasManual = manualStop;
     manualStop = false;
     emitRef('server:status', status());
@@ -120,4 +158,4 @@ async function restart() {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, start, stop, restart, status, buildArgs };
+module.exports = { init, start, stop, restart, status, buildArgs, _tail: { startRptTail, stopRptTail } };

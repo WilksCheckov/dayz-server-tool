@@ -89,6 +89,7 @@
             <div class="card-title row between">
               <span>Console</span>
               <span class="row gap">
+                <span class="row gap console-filters" title="Which sources to show"><label class="check"><input type="checkbox" data-src="server" checked> server</label><label class="check"><input type="checkbox" data-src="rpt" checked> server log</label><label class="check"><input type="checkbox" data-src="steamcmd" checked> steam</label><label class="check"><input type="checkbox" data-src="other" checked> tool</label></span>
                 <label class="check"><input type="checkbox" id="consoleAutoscroll" checked> Autoscroll</label>
                 <button class="btn small" id="btnClearConsole">Clear</button>
               </span>
@@ -115,6 +116,7 @@
               <label class="check"><input type="checkbox" id="prefAutoStartServer"> Start the DayZ server automatically when the tool starts</label>
               <label class="check"><input type="checkbox" id="prefAutoFirewall"> Open the server ports in the Windows firewall automatically when the server starts</label>
               <label class="field inline">…after <input id="prefAutoStartDelay" class="input short" type="number" min="3"> seconds</label>
+              <label class="check"><input type="checkbox" id="prefShowServerWindow"> Show the DayZ server's own console window (otherwise its output is shown inside the tool)</label>
               <label class="field">Theme <select id="prefTheme" class="input" style="width:160px"><option value="dark">Dark</option><option value="light">Light</option></select></label>
               <div class="row gap mt"><button class="btn primary" id="btnPrefsSave">Save</button></div>
               <p class="muted">The tray icon shows the server state and lets you start, stop, restart and back up without opening the window. The game server keeps running whether or not the tool is open.</p>
