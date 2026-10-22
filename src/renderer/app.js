@@ -179,7 +179,7 @@ function showPage(name) {
   if (name === 'tasks') refreshTasks();
   if (name === 'network') refreshNetwork();
   if (name === 'map') { loadMapInfo().then(() => { scheduleDraw(); ensureMapImage(false); mapLive(true); }); }
-  if (name === 'stats') refreshStats();
+  if (name === 'stats') { refreshStats(); refreshCombat(); }
   if (name === 'audit') refreshAudit();
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
@@ -1406,7 +1406,8 @@ function renderPdbDetail(r) {
     <div class="muted mono">${esc(r.id || '(no DayZ ID seen yet)')}${r.steamId ? '<br>Steam64 ' + esc(r.steamId) : ''}${r.discordId ? '<br>Discord &lt;@' + esc(r.discordId) + '&gt;' : ''}</div>
     <div class="grid-2 tight pdb-kv">
       <div><span class="muted">First seen</span><br>${r.firstSeen ? fmtDate(r.firstSeen) : '—'}</div><div><span class="muted">Last seen</span><br>${r.lastSeen ? fmtDate(r.lastSeen) : '—'}</div>
-      <div><span class="muted">Playtime</span><br>${fmtPlaytime(r.playtimeSec)} over ${r.connects} join(s)</div><div><span class="muted">Kills / deaths</span><br>${r.kills} / ${r.deaths}</div>
+      <div><span class="muted">Playtime</span><br>${fmtPlaytime(r.playtimeSec)} over ${r.connects} join(s)</div><div><span class="muted">Kills / deaths</span><br>${r.kills} / ${r.deaths}${r.combat ? ` · <span class="muted">longest kill ${r.combat.longestKill} m, ${r.combat.headshots} headshots</span>` : ''}</div>
+      ${r.combat ? `<div><span class="muted">Damage dealt / taken</span><br>${r.combat.dealt.toLocaleString()} (${r.combat.hits} hits) / ${r.combat.taken.toLocaleString()} (${r.combat.hitsTaken} hits)</div><div><span class="muted">Favourite weapons</span><br>${esc(r.combat.favourite || '—')}</div><div><span class="muted">Killed by</span><br>${esc(r.combat.deathsBy || '—')}</div><div><span class="muted">Base building actions</span><br>${r.combat.builds}</div>` : ''}
       <div><span class="muted">Last position</span><br>${r.lastPos ? `${Math.round(r.lastPos.x)}, ${Math.round(r.lastPos.z)} (${fmtDate(r.lastPos.at)})` : '—'}</div><div><span class="muted">Last death</span><br>${r.lastDeath ? (r.lastDeath.killer ? `killed by ${esc(r.lastDeath.killer)}${r.lastDeath.weapon ? ' with ' + esc(r.lastDeath.weapon) : ''}` : 'died') + ' · ' + fmtDate(r.lastDeath.at) : '—'}</div>
     </div>
     <div class="grid-2 tight pdb-kv">
@@ -1756,6 +1757,8 @@ async function loadSettingsPage() {
 }
 $('btnPrefsSave').onclick = (e) => run(async () => { await ipc.invoke('app:setPrefs', { closeToTray: $('prefCloseToTray').checked, startMinimized: $('prefStartMinimized').checked, launchAtLogin: $('prefLaunchAtLogin').checked, autoUpdate: $('prefAutoUpdate').checked, autoStartServer: $('prefAutoStartServer').checked, autoFirewall: $('prefAutoFirewall').checked, showServerWindow: $('prefShowServerWindow').checked, autoStartDelaySec: Number($('prefAutoStartDelay').value) || 10, theme: $('prefTheme').value }); applyTheme($('prefTheme').value); try { localStorage.setItem('theme', $('prefTheme').value); } catch {} toast('Preferences saved'); }, e.target);
 $('btnOpenDataDir').onclick = () => ipc.invoke('app:openDataDir');
+$('btnOpenLogDir').onclick = () => ipc.invoke('app:openLogDir');
+$('btnExportDiag').onclick = (e) => run(async () => { const f = await ipc.invoke('app:exportDiagnostics'); if (f) toast('Diagnostics bundle saved: ' + f); }, e.target);
 $('btnExportSettings').onclick = (e) => run(async () => { const f = await ipc.invoke('app:exportSettings'); if (f) toast('Exported to ' + f); }, e.target);
 $('btnImportSettings').onclick = (e) => run(async () => { const ok = await ipc.invoke('app:importSettings'); if (ok) { toast('Settings imported'); await loadSettings(); } }, e.target);
 let updateInfo = null;
@@ -2005,7 +2008,16 @@ async function refreshStats() {
   const lb = (title, rows, fmt) => `<div class="card"><div class="card-title">${title}</div><table class="table"><tbody>${rows.length ? rows.map((r, i) => `<tr><td class="muted">${i + 1}</td><td>${esc(r.name)}</td><td class="right">${fmt(r)}</td></tr>`).join('') : '<tr><td class="muted">No data yet.</td></tr>'}</tbody></table></div>`;
   $('statsBoards').innerHTML = lb('Most kills', o.leaderboards.kills, r => r.value) + lb('Most deaths', o.leaderboards.deaths, r => r.value) + lb('Best K/D (5+ fights)', o.leaderboards.kd, r => `${r.value} (${r.kills}/${r.deaths})`) + lb('Most playtime', o.leaderboards.playtime, r => fmtPlaytime(r.value)) + lb('Longest sessions', o.leaderboards.longest, r => fmtPlaytime(r.sec)) + lb('Weapons (30 days)', o.month.weapons.map(([name, n]) => ({ name, value: n })), r => r.value);
 }
-$('btnStatsRefresh').onclick = () => run(refreshStats);
+async function refreshCombat() {
+  let c; try { c = await ipc.invoke('combat:overview'); } catch (e) { toast(e.message, true); return; }
+  $('combatTotals').textContent = `${c.totals.hits.toLocaleString()} player hits · ${c.totals.damage.toLocaleString()} damage · ${c.totals.kills} player kills`;
+  $('combatWeapons').querySelector('tbody').innerHTML = c.weapons.map(w => `<tr><td>${esc(w.name)}</td><td>${w.kills}</td><td>${w.hits}</td><td>${w.damage.toLocaleString()}</td><td>${w.headshots}</td><td>${w.avgDist ?? '—'}</td><td>${w.maxDist || '—'}</td><td class="muted">${esc(w.ammo)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No player-versus-player hits recorded yet.</td></tr>';
+  const parts = c.parts.slice(0, 12); drawBars($('chParts'), parts.map(p => p[1]), parts.map(p => p[0]), '#ff9f3b', { labelsEvery: 12 });
+  const lb = (title, rows) => `<div class="card"><div class="card-title">${title}</div><table class="table"><tbody>${rows.length ? rows.map((r, i) => `<tr><td class="muted">${i + 1}</td><td>${esc(r.name)}</td><td class="right">${esc(String(r.value))}</td></tr>`).join('') : '<tr><td class="muted">No data yet.</td></tr>'}</tbody></table></div>`;
+  $('combatBoards').innerHTML = lb('Most damage dealt', c.damageDealt) + lb('Most damage taken', c.damageTaken) + lb('Headshots', c.headshots) + lb('Longest kills', c.longestKills) + lb('Rivalries (killer → victim)', c.rivalries) + lb('Favourite weapons', c.favouriteWeapons) + lb('Base builders (actions)', c.builders);
+}
+$('btnCombatRebuild').onclick = (e) => run(async () => { const r = await ipc.invoke('combat:rebuild'); toast(`Read ${r.files} log file(s), ${r.events.toLocaleString()} events`); refreshCombat(); }, e.target);
+$('btnStatsRefresh').onclick = () => run(() => Promise.all([refreshStats(), refreshCombat()]));
 $('btnStatsSummary').onclick = (e) => run(async () => { await ipc.invoke('stats:postSummary'); toast('Summary posted to Discord'); }, e.target);
 $('btnStatsCopy').onclick = (e) => run(async () => { const t = await ipc.invoke('stats:summaryText'); await navigator.clipboard.writeText(t.replace(/\*\*/g, '')); toast('Summary copied'); }, e.target);
 

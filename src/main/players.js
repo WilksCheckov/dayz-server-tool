@@ -107,7 +107,7 @@ function ingest() {
       const lines = (meta.rest + buf.toString('utf8', 0, n)).split(/\r?\n/);
       meta.rest = lines.pop() || '';
       const ctx = { date: meta.date, lastSec: meta.lastSec };
-      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch { /* ignore */ } } }
+      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } try { require('./combat').record(ev); } catch { /* ignore */ } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch { /* ignore */ } } }
       meta.date = ctx.date; meta.lastSec = ctx.lastSec;
     } finally { fs.closeSync(fd); }
     d.files[x.f] = meta;
@@ -134,7 +134,8 @@ function enrich(r) {
   const online = !!load().online[r.key] && server.status().running;
   let steam = null; try { steam = steamId ? require('./steambans').get(steamId) : null; } catch { /* ignore */ }
   let account = null; try { account = require('./accounts').summary({ steamId, names: r.names }); } catch { /* ignore */ }
-  return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online, steam, account,
+  let combat = null; try { const cb = require('./combat'); combat = cb.forPlayer(r.id || r.key) || cb.forPlayer(r.names[r.names.length - 1]); } catch { /* ignore */ }
+  return { ...r, name: r.names[r.names.length - 1] || r.key, steamId, discordId, characterName, application, note, online, steam, account, combat,
     whitelisted: !!(r.id && lists.has('whitelist', r.id)), banned: !!(r.id && lists.has('ban', r.id)), priority: !!(r.id && lists.has('priority', r.id)) };
 }
 

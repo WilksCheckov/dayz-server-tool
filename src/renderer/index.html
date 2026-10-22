@@ -149,7 +149,10 @@
                   <button class="btn" id="btnExportSettings">Export settings…</button>
                   <button class="btn" id="btnImportSettings">Import settings…</button>
                 </div>
-                <p class="muted">The export leaves out the Discord bot token and RCon password.</p>
+                <p class="muted">The export leaves out every credential (bot token, API keys, passwords, DNS token, certificates).</p>
+                <div class="card-title mt">Diagnostics</div>
+                <p class="muted">The tool writes its own log (console lines, failed actions, errors) to <code>tool.log</code> in the data folder. The bundle zips that log, the audit log, statistics, a scrubbed copy of the settings, system info, the newest crash reports and the tail of the latest server RPT, so it can be shared for debugging without exposing credentials.</p>
+                <div class="row gap wrap"><button class="btn" id="btnOpenLogDir">Open tool.log</button><button class="btn primary" id="btnExportDiag">Export diagnostics bundle…</button></div>
               </div>
             </div>
           </div>
@@ -449,6 +452,13 @@
             <div class="card"><div class="card-title">Unique players per day</div><canvas id="chUniqueDay" height="150"></canvas></div>
             <div class="card"><div class="card-title">Average server FPS per day</div><canvas id="chFpsDay" height="150"></canvas></div>
           </div>
+          <div class="card"><div class="card-title row between"><span>Combat <span class="muted">from hit and kill lines in the admin log</span></span><span class="row gap"><span class="muted" id="combatTotals"></span><button class="btn small" id="btnCombatRebuild" title="Re-read every admin log on disk">Rebuild from all logs</button></span></div>
+            <div class="grid-2">
+              <div><div class="card-title">Weapons</div><div class="table-wrap" style="max-height:320px"><table class="table" id="combatWeapons"><thead><tr><th>Weapon</th><th>Kills</th><th>Hits</th><th>Damage</th><th>Head</th><th>Avg m</th><th>Max m</th><th>Ammo</th></tr></thead><tbody></tbody></table></div></div>
+              <div><div class="card-title">Body parts hit</div><canvas id="chParts" height="200"></canvas></div>
+            </div>
+          </div>
+          <div id="combatBoards" class="stats-boards"></div>
           <div id="statsBoards" class="stats-boards"></div>
         </section>
         <!-- AUDIT -->

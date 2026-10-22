@@ -28,6 +28,8 @@ const heat = require('./heat');
 const lootmap = require('./lootmap');
 const stats = require('./stats');
 const audit = require('./audit');
+const combat = require('./combat');
+const zip = require('./zip');
 const economy = require('./economy');
 const mission = require('./mission');
 const tasks = require('./tasks');
@@ -297,6 +299,16 @@ handle('app:setPrefs', (prefs) => {
 });
 handle('app:openDataDir', () => shell.openPath(app.getPath('userData')));
 handle('app:rendererError', (msg) => { toollog.error(`renderer: ${msg}`); return true; });
+function scrubbedSettings() {
+  const s = JSON.parse(JSON.stringify(settings.load()));
+  if (s.discord) { s.discord.token = ''; s.discord.steamApiKey = ''; }
+  if (s.rcon) s.rcon.password = '';
+  if (s.offsite) { for (const k of Object.keys(s.offsite)) if (/pass/i.test(k)) s.offsite[k] = ''; if (s.offsite.ftp) s.offsite.ftp.password = ''; }
+  if (s.alerts) s.alerts.webhookUrl = '';
+  if (s.website) { delete s.website.admin; if (s.website.domain) { s.website.domain.certPem = ''; s.website.domain.keyPem = ''; if (s.website.domain.ddns) s.website.domain.ddns.token = ''; } }
+  delete s.steamPassEnc; delete s.steamUser;
+  return s;
+}
 handle('app:exportSettings', async () => {
   const r = await dialog.showSaveDialog(win, { defaultPath: 'dayz-server-tool-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
   if (r.canceled) return null;
@@ -337,6 +349,24 @@ handle('stats:overview', () => stats.overview());
 handle('stats:summaryText', () => stats.summaryText());
 handle('stats:postSummary', () => stats.postSummaryNow());
 handle('audit:list', (o) => audit.list(o || {}));
+handle('combat:overview', () => combat.overview());
+handle('combat:rebuild', () => combat.rebuild());
+// ---- diagnostics: the tool's own log and a shareable bundle ----
+handle('app:openLogDir', () => { const p = toollog.path(); if (p && fs.existsSync(p)) shell.showItemInFolder(p); else shell.openPath(app.getPath('userData')); return p; });
+handle('app:exportDiagnostics', async () => {
+  const r = await dialog.showSaveDialog(win, { defaultPath: `dayz-server-tool-diagnostics-${new Date().toISOString().slice(0, 10)}.zip`, filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  if (r.canceled) return null;
+  const ud = app.getPath('userData'); const staging = path.join(ud, '_diag'); fs.rmSync(staging, { recursive: true, force: true }); fs.mkdirSync(staging, { recursive: true });
+  const copy = (name) => { try { if (fs.existsSync(path.join(ud, name))) fs.copyFileSync(path.join(ud, name), path.join(staging, name)); } catch { /* ignore */ } };
+  for (const n of ['tool.log', 'tool.log.1', 'audit.log', 'stats.json', 'health.json', 'steam-bans.json']) copy(n);
+  fs.writeFileSync(path.join(staging, 'settings-scrubbed.json'), JSON.stringify(scrubbedSettings(), null, 2));
+  const st = { version: app.getVersion(), packaged: app.isPackaged, electron: process.versions.electron, node: process.versions.node, os: `${require('os').platform()} ${require('os').release()}`, arch: process.arch, exportedAt: new Date().toISOString(), server: (() => { try { return server.status(); } catch { return null; } })(), steam: (() => { try { const x = steamcmd.status(); return { steamcmdInstalled: x.steamcmdInstalled, serverInstalled: x.serverInstalled, serverBuild: x.serverBuild, loggedIn: x.loggedIn }; } catch { return null; } })(), mods: (() => { try { return mods.list().map(m => ({ id: m.id, title: m.title, enabled: m.enabled, installed: m.installed })); } catch { return null; } })(), recentAlerts: (() => { try { return alerts.recent(50); } catch { return null; } })() };
+  fs.writeFileSync(path.join(staging, 'system.json'), JSON.stringify(st, null, 2));
+  try { const crashesDir = path.join(settings.load().installDir, 'crashes'); const latest = fs.readdirSync(crashesDir).filter(f => f.endsWith('.json')).sort().slice(-3); for (const f of latest) fs.copyFileSync(path.join(crashesDir, f), path.join(staging, 'crash-' + f)); } catch { /* none */ }
+  try { const p = settings.paths(); const rpts = fs.readdirSync(p.profilesDir).filter(f => /\.rpt$/i.test(f)).map(f => ({ f, m: fs.statSync(path.join(p.profilesDir, f)).mtimeMs })).sort((a, b) => b.m - a.m).slice(0, 1); for (const x of rpts) { const buf = fs.readFileSync(path.join(p.profilesDir, x.f)); fs.writeFileSync(path.join(staging, 'latest-' + x.f), buf.subarray(Math.max(0, buf.length - 512 * 1024))); } } catch { /* none */ }
+  await zip.zipDir(staging, r.filePath); fs.rmSync(staging, { recursive: true, force: true });
+  shell.showItemInFolder(r.filePath); return r.filePath;
+});
 handle('audit:export', () => { const p = path.join(app.getPath('userData'), 'audit-export.csv'); fs.writeFileSync(p, audit.exportCsv()); shell.showItemInFolder(p); return p; });
 handle('heat:rebuild', () => heat.rebuild());
 handle('heat:clear', () => heat.clear());
@@ -506,6 +536,7 @@ app.whenReady().then(() => {
   timed('heat', () => heat.init(emit));
   timed('stats', () => stats.init(emit));
   timed('audit', () => audit.init(emit));
+  timed('combat', () => combat.init(emit));
   createWindow();
 });
 
