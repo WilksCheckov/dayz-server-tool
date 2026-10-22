@@ -450,7 +450,7 @@ handle('configs:validateAll', () => configs.validateAll());
 // RCon (BattlEye)
 handle('rcon:status', () => rcon.status());
 handle('rcon:connect', (opts) => rcon.connect(opts || {}));
-handle('rcon:ensure', () => rcon.ensureConfigured());
+handle('rcon:ensure', (o) => rcon.ensureConfigured(o || {}));
 handle('rcon:readBe', () => rcon.readBe());
 handle('rcon:disconnect', () => rcon.disconnect());
 handle('rcon:command', (cmd) => rcon.command(cmd));

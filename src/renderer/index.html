@@ -723,9 +723,9 @@
               </div>
               <label class="field">Password <input id="rconPass" class="input" type="password" autocomplete="off"></label>
               <label class="check"><input type="checkbox" id="rconAutoCfg"> Configure BattlEye's RCon file automatically before each start</label>
-              <label class="check"><input type="checkbox" id="rconRotate"> Use a new random password on every server start</label>
               <label class="check"><input type="checkbox" id="rconAuto"> Connect automatically when the server is up</label>
-              <div class="row gap mt"><button class="btn" id="btnRconSave">Save</button><button class="btn small" id="btnRconFromBe" title="Sync the tool and battleye\BEServer_x64.cfg now (creates a password if neither has one)">Sync with BEServer_x64.cfg</button></div>
+              <div class="row gap mt"><button class="btn" id="btnRconSave">Save</button><button class="btn small" id="btnRconNewPw" title="Replace the RCon password with a new random one (takes effect at the next server start)">New random password</button>
+                <button class="btn small" id="btnRconFromBe" title="Sync the tool and battleye\BEServer_x64.cfg now (creates a password if neither has one)">Sync with BEServer_x64.cfg</button></div>
             </div>
             <div class="card">
               <div class="card-title">Broadcast</div>
