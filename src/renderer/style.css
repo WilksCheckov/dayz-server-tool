@@ -462,3 +462,7 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .cfg-fold > summary::before { content: "\25B8 "; }
 .cfg-fold[open] > summary::before { content: "\25BE "; }
 .cfg-fold .cfg-form { margin-top: 6px; }
+
+.map-overlay-bar { flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; }
+.map-legend { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+.map-legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; background: var(--c); vertical-align: middle; }

@@ -416,6 +416,15 @@
             <label class="check"><input type="checkbox" id="mapOnlineOnly"> online only</label>
             <button class="btn" id="btnMapRefresh">Refresh</button>
           </div>
+          <div class="row gap wrap map-overlay-bar">
+            <b>Overlay</b>
+            <select id="mapOverlay" class="input" style="width:230px"><option value="none">None</option><option value="travel">Travel heat (where players go)</option><option value="deaths">Death heat (where players die)</option><option value="causes">Deaths by cause (who killed them)</option></select>
+            <label class="field inline">Opacity <input id="mapOverlayAlpha" type="range" min="20" max="100" value="70" style="width:110px"></label>
+            <span class="muted" id="mapOverlayInfo"></span>
+            <span class="grow"></span>
+            <button class="btn small" id="btnHeatRebuild" title="Re-read every admin log in the profiles folder from the beginning">Rebuild from all logs</button>
+            <button class="btn small danger" id="btnHeatClear">Clear</button>
+          </div>
           <div class="card grow map-card"><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
         </section>
         <!-- LOGS -->

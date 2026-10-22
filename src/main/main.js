@@ -24,6 +24,7 @@ const players = require('./players');
 const steambans = require('./steambans');
 const accounts = require('./accounts');
 const domain = require('./domain');
+const heat = require('./heat');
 const economy = require('./economy');
 const mission = require('./mission');
 const tasks = require('./tasks');
@@ -138,6 +139,7 @@ function createWindow() {
       if (process.env.DZ_SIZE) { const [w, h] = process.env.DZ_SIZE.split('x').map(Number); win.setSize(w, h); await new Promise(r => setTimeout(r, 300)); }
       if (process.env.DZ_CLICK) for (const sel of process.env.DZ_CLICK.split('||')) { await win.webContents.executeJavaScript(`(function(){ const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); })()`); await new Promise(r => setTimeout(r, 700)); }
       if (process.env.DZ_SCROLL) await win.webContents.executeJavaScript(`document.querySelector('.page.active').scrollTop = ${Number(process.env.DZ_SCROLL)}`);
+      if (process.env.DZ_JS) { await win.webContents.executeJavaScript(process.env.DZ_JS); await new Promise(r => setTimeout(r, 800)); }
       if (process.env.DZ_FAKE_LINES) for (const l of process.env.DZ_FAKE_LINES.split('||')) { const [source, line] = l.split('::'); emit('console', { source, line }); }
       await new Promise(r => setTimeout(r, Number(process.env.DZ_WAIT || 1500)));
       if (process.env.DZ_DEBUG) console.log('[shot] page:', await win.webContents.executeJavaScript("document.querySelector('.page.active').id + ' title=' + document.getElementById('pageTitle').textContent + ' navbtn=' + !!document.querySelector('[data-page=' + JSON.stringify(" + JSON.stringify(process.env.DZ_PAGE || '') + ") + ']')"));
@@ -303,6 +305,9 @@ handle('mission:saveGameplay', (changes) => mission.saveGameplay(changes));
 handle('mission:mapInfo', () => mission.mapInfo());
 handle('mission:setMapImage', (src) => mission.setMapImage(src));
 handle('mission:buildMap', (opts) => mission.buildMapImage(opts || {}));
+handle('heat:summary', () => heat.summary());
+handle('heat:rebuild', () => heat.rebuild());
+handle('heat:clear', () => heat.clear());
 handle('mission:mapSources', () => mission.mapSources());
 handle('mission:openMapsDir', () => { const d = mission.mapInfo().mapsDir; fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
 
@@ -463,6 +468,7 @@ app.whenReady().then(() => {
   steambans.init(emit);
   accounts.init(emit);
   domain.init(emit);
+  heat.init(emit);
   createWindow();
 });
 

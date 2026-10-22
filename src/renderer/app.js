@@ -1856,11 +1856,50 @@ async function drawMap() {
   const c = $('mapCanvas'); const card = c.parentElement; const W = card.clientWidth - 36, H = card.clientHeight - 60; const sz = Math.max(200, Math.min(W, H)); c.width = sz; c.height = sz;
   const ctx = c.getContext('2d'); ctx.clearRect(0, 0, sz, sz);
   if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz); else { ctx.fillStyle = '#1a1d22'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#2b3036'; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
+  await drawOverlay(ctx, sz, size);
   const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 });
   const pts = rows.filter(r => r.lastPos && (!$('mapOnlineOnly').checked || r.online));
   for (const r of pts) { const x = (r.lastPos.x / size) * sz, y = sz - (r.lastPos.z / size) * sz; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke(); ctx.font = '11px Segoe UI'; const tw = ctx.measureText(r.name).width; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x + 7, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(r.name, x + 10, y + 4); }
   $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · refreshes every 5 s · world ${size} m`;
 }
+// ----- heatmap overlays -----
+const CAUSE_COLORS = { player: '#ff5252', infected: '#6fd36f', animal: '#ff9f3b', vehicle: '#b784ff', explosion: '#ffe14d', fall: '#7fd3ff', suicide: '#c9c9c9', bleeding: '#ff8fa3', environment: '#9aa3ad', other: '#e0e0e0', unknown: '#777' };
+const CAUSE_LABELS = { player: 'players', infected: 'infected', animal: 'animals', vehicle: 'vehicles', explosion: 'explosions', fall: 'falls', suicide: 'suicide', bleeding: 'bleeding out', environment: 'environment (hunger, sickness…)', other: 'other', unknown: 'unknown' };
+let heatCache = { at: 0, data: null };
+async function heatData(force) { if (!force && heatCache.data && Date.now() - heatCache.at < 5000) return heatCache.data; try { heatCache = { at: Date.now(), data: await ipc.invoke('heat:summary') }; } catch { heatCache = { at: Date.now(), data: null }; } return heatCache.data; }
+function heatColor(t) { // 0..1 -> blue -> green -> yellow -> red
+  const stops = [[60, 120, 255], [60, 220, 120], [255, 220, 60], [255, 60, 30]]; const p = t * (stops.length - 1); const i = Math.min(stops.length - 2, Math.floor(p)); const f = p - i;
+  const c = stops[i].map((v, k) => Math.round(v + (stops[i + 1][k] - v) * f)); return c;
+}
+function drawHeatGrid(ctx, sz, N, cells, max, alpha) {
+  const cell = sz / N;
+  for (const [i, c] of cells) {
+    const gx = i % N, gz = Math.floor(i / N); const t = Math.log(1 + c) / Math.log(1 + max);
+    const [r, g, b] = heatColor(t); const x = gx * cell + cell / 2, y = sz - (gz * cell + cell / 2);
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, cell * 1.6); grad.addColorStop(0, `rgba(${r},${g},${b},${(0.25 + 0.75 * t) * alpha})`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, cell * 1.6, 0, Math.PI * 2); ctx.fill();
+  }
+}
+async function drawOverlay(ctx, sz, size) {
+  const mode = $('mapOverlay').value; const info = $('mapOverlayInfo');
+  if (mode === 'none') { info.textContent = ''; return; }
+  const h = await heatData(); const alpha = Number($('mapOverlayAlpha').value) / 100;
+  if (!h || (!h.travel.length && !h.deaths.length)) { info.textContent = 'No data yet. It fills from the admin log (-adminlog) while players play; "Rebuild from all logs" reads older logs.'; return; }
+  const N = h.N;
+  if (mode === 'travel') { drawHeatGrid(ctx, sz, N, h.travel, h.travelMax, alpha); info.textContent = `${h.samples.toLocaleString()} positions from the admin log · blue = rare, red = busiest`; }
+  else if (mode === 'deaths') {
+    const grid = new Map(); let max = 0;
+    for (const d of h.deaths) { const gx = Math.min(N - 1, Math.floor(d.x / size * N)), gz = Math.min(N - 1, Math.floor(d.z / size * N)); const i = gz * N + gx; const v = (grid.get(i) || 0) + 1; grid.set(i, v); if (v > max) max = v; }
+    drawHeatGrid(ctx, sz, N, [...grid.entries()], max, alpha); info.textContent = `${h.deaths.length.toLocaleString()} deaths · blue = few, red = most`;
+  } else if (mode === 'causes') {
+    for (const d of h.deaths) { const x = d.x / size * sz, y = sz - d.z / size * sz; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = CAUSE_COLORS[d.cause] || CAUSE_COLORS.unknown; ctx.globalAlpha = alpha; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1; ctx.stroke(); }
+    const order = Object.entries(h.causes).sort((a, b) => b[1] - a[1]);
+    info.innerHTML = `<span class="map-legend">${order.map(([c, n]) => `<span style="--c:${CAUSE_COLORS[c] || CAUSE_COLORS.unknown}">${esc(CAUSE_LABELS[c] || c)} ${n}</span>`).join('')}</span>`;
+  }
+}
+$('mapOverlay').onchange = () => drawMap(); $('mapOverlayAlpha').oninput = () => drawMap();
+$('btnHeatRebuild').onclick = (e) => run(async () => { const r = await ipc.invoke('heat:rebuild'); heatCache.at = 0; toast(`Read ${r.files} log file(s): ${r.positions.toLocaleString()} positions, ${r.deaths} deaths`); drawMap(); }, e.target);
+$('btnHeatClear').onclick = (e) => run(async () => { const ok = await showModal('Clear the heatmap data for this map?', '', [{ label: 'Clear', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('heat:clear'); heatCache.at = 0; drawMap(); }, e.target);
 $('btnMapPickImage').onclick = () => run(async () => { const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (!f) return; await ipc.invoke('mission:setMapImage', f); await loadMapInfo(); drawMap(); toast('Map image saved for ' + mapState.info.label); });
 $('btnMapOpenDir').onclick = () => ipc.invoke('mission:openMapsDir');
 // Build the map image automatically the first time the page is opened without one, and keep positions live.
