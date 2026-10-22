@@ -60,13 +60,13 @@ async function alert(kind, title, details = '', { force = false } = {}) {
   const c = cfg();
   const jobs = [];
   if (c.toast[kind]) {
-    try { if (Notification.isSupported()) new Notification({ title: `DayZ Server Tool: ${title}`, body: String(details || meta.label).slice(0, 200) }).show(); } catch { /* ignore */ }
+    try { if (Notification.isSupported()) new Notification({ title: `DayZ Admin Tools: ${title}`, body: String(details || meta.label).slice(0, 200) }).show(); } catch { /* ignore */ }
   }
   if (c.discord[kind]) {
     jobs.push((async () => { try { const discord = require('./discord'); await discord.postAlert({ title, description: details || meta.label, color: meta.color, channelId: c.alertChannelId }); } catch { /* bot offline */ } })());
   }
   if (c.webhook[kind] && c.webhookUrl) {
-    jobs.push(fetch(c.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'DayZ Server Tool', embeds: [{ title, description: String(details || meta.label).slice(0, 2000), color: meta.color, timestamp: new Date(now).toISOString() }] }) }).catch(() => {}));
+    jobs.push(fetch(c.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'DayZ Admin Tools', embeds: [{ title, description: String(details || meta.label).slice(0, 2000), color: meta.color, timestamp: new Date(now).toISOString() }] }) }).catch(() => {}));
   }
   await Promise.all(jobs);
   return true;

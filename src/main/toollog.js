@@ -7,7 +7,7 @@ const { app } = require('electron');
 
 let file = null;
 function init() {
-  try { file = path.join(app.getPath('userData'), 'tool.log'); write('info', `--- DayZ Server Tool ${app.getVersion()} started (${process.platform} ${process.arch}, Electron ${process.versions.electron}) ---`); } catch { file = null; }
+  try { file = path.join(app.getPath('userData'), 'tool.log'); write('info', `--- DayZ Admin Tools ${app.getVersion()} started (${process.platform} ${process.arch}, Electron ${process.versions.electron}) ---`); } catch { file = null; }
   process.on('uncaughtException', e => { write('error', `uncaughtException: ${e && e.stack || e}`); });
   process.on('unhandledRejection', e => { write('error', `unhandledRejection: ${e && e.stack || e}`); });
 }

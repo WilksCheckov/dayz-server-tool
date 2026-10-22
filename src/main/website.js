@@ -139,7 +139,7 @@ function layout(c, active, title, body) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · ${esc(c.title)}</title><link rel="stylesheet" href="/assets/site.css"></head><body>
 <header><div class="wrap"><nav><a class="brand" href="/">${esc(c.title)}</a>${navLinks(c, active)}</nav></div></header>
 <main><div class="wrap">${body}</div></main>
-<footer><div class="wrap">${esc(c.title)} · powered by DayZ Server Tool</div></footer></body></html>`;
+<footer><div class="wrap">${esc(c.title)} · powered by DayZ Admin Tools</div></footer></body></html>`;
 }
 
 // Custom pages can be written in Markdown or raw HTML.
@@ -211,7 +211,7 @@ refresh();setInterval(refresh,15000);
 }
 async function handleAdmin(req, res, p, c, send) {
   const ac = adminCfg();
-  if (!ac.enabled || !ac.passwordHash) return send(404, 'text/html', layout(c, '', 'Not found', '<h1>Admin panel is disabled</h1><p class="muted">Enable it on the Website page in DayZ Server Tool and set a password.</p>'));
+  if (!ac.enabled || !ac.passwordHash) return send(404, 'text/html', layout(c, '', 'Not found', '<h1>Admin panel is disabled</h1><p class="muted">Enable it on the Website page in DayZ Admin Tools and set a password.</p>'));
   if (p === '/admin/login' && req.method === 'POST') {
     let body = ''; req.on('data', d => { body += d; if (body.length > 4096) req.destroy(); });
     req.on('end', () => {

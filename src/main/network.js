@@ -4,7 +4,8 @@ const { spawn } = require('child_process');
 const net = require('net');
 const settings = require('./settings');
 
-const RULE_PREFIX = 'DayZ Server Tool';
+const RULE_PREFIX = 'DayZ Admin Tools';
+const OLD_PREFIX = 'DayZ Server Tool'; // rules created by earlier versions are replaced
 
 function ps(cmd, { elevated = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -63,7 +64,8 @@ async function rules() {
 
 async function addRules() {
   const cmds = ports().map(p => `New-NetFirewallRule -DisplayName '${RULE_PREFIX} ${p.name} ${p.proto} ${p.port}' -Direction Inbound -Action Allow -Protocol ${p.proto} -LocalPort ${p.port} -Profile Any -ErrorAction Stop | Out-Null`);
-  await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue\r\n${cmds.join('\r\n')}`, { elevated: true });
+  await ps(`Get-NetFirewallRule -DisplayName '${OLD_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue\r\n${cmds.join('\r\n')}`, { elevated: true });
   // verify: the rules must now exist, otherwise report it instead of pretending
   const have = await rules();
   const missing = ports().filter(p => !have.some(r => String(r.port) === String(p.port) && r.proto === p.proto));

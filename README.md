@@ -1,4 +1,4 @@
-# DayZ Server Tool
+# DayZ Admin Tools
 
 A small Windows desktop app (Electron) for running a DayZ Standalone dedicated server.
 

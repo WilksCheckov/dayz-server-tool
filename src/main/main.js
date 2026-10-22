@@ -50,7 +50,7 @@ function appPrefs() { return { closeToTray: true, startMinimized: false, launchA
 function buildTray() {
   if (tray) return;
   try { tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 })); } catch { return; }
-  tray.setToolTip('DayZ Server Tool');
+  tray.setToolTip('DayZ Admin Tools');
   tray.on('click', () => showWindow());
   refreshTray();
 }
@@ -60,9 +60,9 @@ function refreshTray() {
   const st = server.status();
   let h = null; try { h = health.current(); } catch { /* ignore */ }
   const players = h && h.players !== null && h.players !== undefined ? ` · ${h.players} players` : '';
-  tray.setToolTip(`DayZ Server Tool — ${st.running ? 'server on' + players : 'server off'}`);
+  tray.setToolTip(`DayZ Admin Tools — ${st.running ? 'server on' + players : 'server off'}`);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open DayZ Server Tool', click: () => showWindow() },
+    { label: 'Open DayZ Admin Tools', click: () => showWindow() },
     { type: 'separator' },
     { label: st.running ? 'Stop server' : 'Start server', click: () => { try { st.running ? server.stop() : server.start(); } catch (e) { emit('console', { source: 'server', line: e.message }); } } },
     { label: 'Restart server', enabled: st.running, click: () => server.restart().catch(() => {}) },
@@ -83,7 +83,7 @@ function initUpdater() {
     autoUpd.autoDownload = false;
     autoUpd.autoInstallOnAppQuit = true;
     autoUpd.on('checking-for-update', () => setUpdate({ status: 'checking', error: null }));
-    autoUpd.on('update-available', info => { setUpdate({ status: 'available', version: info.version }); alerts.alert('update-available', `DayZ Server Tool ${info.version} is available`, 'Open Settings to download and install it.'); });
+    autoUpd.on('update-available', info => { setUpdate({ status: 'available', version: info.version }); alerts.alert('update-available', `DayZ Admin Tools ${info.version} is available`, 'Open Settings to download and install it.'); });
     autoUpd.on('update-not-available', () => setUpdate({ status: 'none' }));
     autoUpd.on('download-progress', p => setUpdate({ status: 'downloading', progress: Math.round(p.percent) }));
     autoUpd.on('update-downloaded', info => setUpdate({ status: 'downloaded', version: info.version, progress: 100 }));
@@ -124,7 +124,7 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 640,
     backgroundColor: '#0f1115',
-    title: 'DayZ Server Tool',
+    title: 'DayZ Admin Tools',
     autoHideMenuBar: true,
     icon: ICON,
     show: !appPrefs().startMinimized,
@@ -252,7 +252,7 @@ handle('health:current', () => health.current());
 handle('health:history', (minutes) => health.history(minutes || 180));
 handle('alerts:config', () => alerts.cfg());
 handle('alerts:recent', () => alerts.recent());
-handle('alerts:test', () => alerts.alert('test', 'Test alert from DayZ Server Tool', 'If you can read this, alerts are wired up.', { force: true }));
+handle('alerts:test', () => alerts.alert('test', 'Test alert from DayZ Admin Tools', 'If you can read this, alerts are wired up.', { force: true }));
 handle('crashes:list', () => crashes.list());
 handle('crashes:remove', (name) => crashes.remove(name));
 handle('crashes:openFolder', () => { const d = crashes.dir(); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
@@ -310,7 +310,7 @@ function scrubbedSettings() {
   return s;
 }
 handle('app:exportSettings', async () => {
-  const r = await dialog.showSaveDialog(win, { defaultPath: 'dayz-server-tool-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+  const r = await dialog.showSaveDialog(win, { defaultPath: 'dayz-admin-tools-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
   if (r.canceled) return null;
   const s = JSON.parse(JSON.stringify(settings.load()));
   // never export credentials: bot token, API keys, passwords, DNS tokens, certificates, the remembered Steam password
@@ -355,7 +355,7 @@ handle('combat:rebuild', () => combat.rebuild());
 // ---- diagnostics: the tool's own log and a shareable bundle ----
 handle('app:openLogDir', () => { const p = toollog.path(); if (p && fs.existsSync(p)) shell.showItemInFolder(p); else shell.openPath(app.getPath('userData')); return p; });
 handle('app:exportDiagnostics', async () => {
-  const r = await dialog.showSaveDialog(win, { defaultPath: `dayz-server-tool-diagnostics-${new Date().toISOString().slice(0, 10)}.zip`, filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  const r = await dialog.showSaveDialog(win, { defaultPath: `dayz-admin-tools-diagnostics-${new Date().toISOString().slice(0, 10)}.zip`, filters: [{ name: 'Zip', extensions: ['zip'] }] });
   if (r.canceled) return null;
   const ud = app.getPath('userData'); const staging = path.join(ud, '_diag'); fs.rmSync(staging, { recursive: true, force: true }); fs.mkdirSync(staging, { recursive: true });
   const copy = (name) => { try { if (fs.existsSync(path.join(ud, name))) fs.copyFileSync(path.join(ud, name), path.join(staging, name)); } catch { /* ignore */ } };
@@ -505,8 +505,7 @@ handle('updater:runIfNeeded', () => updater.runIfNeeded());
 // Keep settings from the previous app name (the userData folder is named after productName).
 try {
   const newDir = app.getPath('userData');
-  const oldDir = path.join(path.dirname(newDir), 'DayZ Admin Tool');
-  if (!fs.existsSync(newDir) && fs.existsSync(oldDir)) fs.renameSync(oldDir, newDir);
+  for (const old of ['DayZ Server Tool', 'DayZ Admin Tool']) { const oldDir = path.join(path.dirname(newDir), old); if (!fs.existsSync(newDir) && fs.existsSync(oldDir)) { fs.renameSync(oldDir, newDir); break; } }
 } catch { /* ignore */ }
 
 const T0 = Date.now(); const initTimes = [];

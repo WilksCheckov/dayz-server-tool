@@ -1980,7 +1980,7 @@ try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch { /* ignore *
   refreshHealth(); refreshAlertList();
   renderRcon(await ipc.invoke('rcon:status'));
   renderDiscord(await ipc.invoke('discord:status'));
-  logLine({ source: 'app', line: 'DayZ Server Tool ready.' });
+  logLine({ source: 'app', line: 'DayZ Admin Tools ready.' });
 })().catch(e => toast(e.message, true));
 
 // Report renderer errors to the main process log (tool.log in the data folder).

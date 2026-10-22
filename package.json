@@ -1,6 +1,6 @@
 {
-  "name": "dayz-server-tool",
-  "productName": "DayZ Server Tool",
+  "name": "dayz-admin-tools",
+  "productName": "DayZ Admin Tools",
   "version": "0.1.36",
   "description": "Desktop app to install, update, run and monitor a DayZ Standalone dedicated server with Steam Workshop mod management.",
   "main": "src/main/main.js",
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.chris.dayzservertool",
-    "productName": "DayZ Server Tool",
+    "productName": "DayZ Admin Tools",
     "directories": {
       "output": "dist"
     },
@@ -33,17 +33,17 @@
         "portable"
       ],
       "icon": "build/icon.ico",
-      "artifactName": "DayZ-Server-Tool-${version}-${arch}.${ext}"
+      "artifactName": "DayZ-Admin-Tools-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "DayZ-Server-Tool-Setup-${version}.${ext}",
+      "artifactName": "DayZ-Admin-Tools-Setup-${version}.${ext}",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
     "portable": {
-      "artifactName": "DayZ-Server-Tool-${version}-portable.${ext}"
+      "artifactName": "DayZ-Admin-Tools-${version}-portable.${ext}"
     },
     "publish": {
       "provider": "github",

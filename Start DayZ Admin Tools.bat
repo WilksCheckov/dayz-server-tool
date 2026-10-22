@@ -1,5 +1,5 @@
 @echo off
-title DayZ Server Tool
+title DayZ Admin Tools
 cd /d "%~dp0"
 
 where node >nul 2>nul

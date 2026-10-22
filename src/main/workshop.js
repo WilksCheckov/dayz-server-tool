@@ -6,7 +6,7 @@ const mods = require('./mods');
 
 const BROWSE = 'https://steamcommunity.com/workshop/browse/';
 const DETAILS = 'https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/';
-const HEADERS = { 'Accept-Language': 'en', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DayZServerTool' };
+const HEADERS = { 'Accept-Language': 'en', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DayZAdminTools' };
 const SORTS = { trend: 'trend', recent: 'mostrecent', updated: 'lastupdated', subscribers: 'totaluniquesubscribers', top: 'toprated' };
 const TAGS = ['Mod', 'Server', 'Animals', 'Character', 'Environment', 'Equipment', 'Map', 'Mechanics', 'Sounds', 'Structures', 'Textures', 'UI', 'Vehicle', 'Weapons', 'Scripts', 'Misc'];
 

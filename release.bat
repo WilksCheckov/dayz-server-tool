@@ -20,7 +20,7 @@ git push && git push --tags || exit /b 1
 set CSC_IDENTITY_AUTO_DISCOVERY=false
 call npx electron-builder --win --publish always || exit /b 1
 for /f "delims=" %%v in ('node -p "require('./package.json').version"') do set VER=%%v
-copy /y "dist\DayZ-Server-Tool-%VER%-portable.exe" "DayZ Server Tool.exe" >nul
+copy /y "dist\DayZ-Server-Tool-%VER%-portable.exe" "DayZ Admin Tools.exe" >nul
 echo.
 echo Released v%VER%: https://github.com/WilksCheckov/dayz-server-tool/releases/tag/v%VER%
 endlocal
