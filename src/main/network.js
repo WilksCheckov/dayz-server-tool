@@ -41,13 +41,17 @@ function ports() {
   const s = settings.load();
   const web = (s.website || {}).port || 8080;
   const rconPort = (s.rcon || {}).port || 2306;
-  return [
+  const list = [
     { name: 'Game', port: Number(s.port) || 2302, proto: 'UDP', why: 'players connect here' },
     { name: 'Game +1', port: (Number(s.port) || 2302) + 1, proto: 'UDP', why: 'engine traffic (DayZ uses port and port+1)' },
     { name: 'Steam query', port: Number(s.steamQueryPort) || 27016, proto: 'UDP', why: 'server browser' },
     { name: 'RCon', port: rconPort, proto: 'UDP', why: 'BattlEye RCon (only open if you use RCon remotely)' },
     { name: 'Website', port: web, proto: 'TCP', why: 'built-in website' }
   ];
+  const dom = ((s.website || {}).domain) || {};
+  if (dom.httpPort && Number(dom.httpPort) !== web) list.push({ name: 'Website HTTP', port: Number(dom.httpPort), proto: 'TCP', why: 'domain: plain HTTP and Let\'s Encrypt checks' });
+  if (dom.https && dom.https !== 'off') list.push({ name: 'Website HTTPS', port: Number(dom.httpsPort) || 443, proto: 'TCP', why: 'domain: HTTPS' });
+  return list;
 }
 
 async function rules() {

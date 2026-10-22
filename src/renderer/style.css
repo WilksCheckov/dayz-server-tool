@@ -449,3 +449,5 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .vtable.brushing .vrow:not(.vhead) { cursor: crosshair; }
 .vtable.brushing .vrow:not(.vhead):hover { background: var(--accent-soft, rgba(140,180,110,.12)); }
 .wipe-arm { margin-bottom: 4px; }
+
+.input.mono { font-family: var(--mono); font-size: 11.5px; }

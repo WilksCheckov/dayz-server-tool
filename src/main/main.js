@@ -23,6 +23,7 @@ const crashes = require('./crashes');
 const players = require('./players');
 const steambans = require('./steambans');
 const accounts = require('./accounts');
+const domain = require('./domain');
 const economy = require('./economy');
 const mission = require('./mission');
 const tasks = require('./tasks');
@@ -333,6 +334,10 @@ handle('profiles:activate', (name) => profiles.activate(name));
 
 // Website
 handle('website:status', () => website.status());
+handle('domain:status', () => domain.status());
+handle('domain:save', (d) => { domain.saveCfg(d || {}); domain.applyTimers(); return domain.status(); });
+handle('domain:issue', (opts) => domain.issue(opts || {}));
+handle('domain:updateDns', () => domain.updateDns({ force: true }));
 handle('website:start', (port) => website.start(port));
 handle('website:stop', () => website.stop());
 handle('website:preview', (slug) => website.preview(slug));
@@ -455,6 +460,7 @@ app.whenReady().then(() => {
   players.init(emit);
   steambans.init(emit);
   accounts.init(emit);
+  domain.init(emit);
   createWindow();
 });
 

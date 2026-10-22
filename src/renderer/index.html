@@ -866,6 +866,32 @@
                 <div class="row gap mt"><button class="btn primary" id="btnWebSave">Save</button><span class="muted" id="webUrls"></span></div>
               </div>
               <div class="card">
+                <div class="card-title row between"><span>Domain and HTTPS</span><span class="muted" id="domStatus"></span></div>
+                <p class="muted">Point your domain's A record at this machine's public IP and forward the ports on the router (80 for Let's Encrypt and plain HTTP, 443 for HTTPS). The tool adds the Windows firewall rules.</p>
+                <div class="grid-2 tight">
+                  <label class="field">Domain name <input id="domName" class="input" placeholder="play.yourdomain.com"></label>
+                  <label class="field">HTTPS <select id="domHttps" class="input"><option value="off">Off (plain HTTP)</option><option value="letsencrypt">Let's Encrypt (automatic, free)</option><option value="manual">Paste my own certificate</option></select></label>
+                  <label class="field">Listen for HTTP on port <input id="domHttpPort" class="input" type="number" min="0" placeholder="blank = site port above; 80 for Let's Encrypt"></label>
+                  <label class="field">HTTPS port <input id="domHttpsPort" class="input" type="number" min="1" value="443"></label>
+                  <label class="field dom-le">Let's Encrypt contact e-mail <input id="domEmail" class="input" placeholder="you@example.com"></label>
+                  <label class="check dom-le" style="align-self:end"><input type="checkbox" id="domRedirect" checked> Redirect HTTP to HTTPS</label>
+                </div>
+                <div class="dom-manual" hidden>
+                  <label class="field">Certificate (PEM, full chain) <textarea id="domCert" class="input mono" rows="4" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+                  <label class="field">Private key (PEM) <textarea id="domKey" class="input mono" rows="3" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
+                </div>
+                <div class="row gap wrap mt"><button class="btn primary" id="btnDomSave">Save domain settings</button><button class="btn" id="btnDomIssue">Get / renew certificate</button><span class="muted" id="domCertInfo"></span></div>
+                <div class="card-title mt">Dynamic DNS <span class="muted">keeps the A record on your current public IP</span></div>
+                <div class="grid-2 tight">
+                  <label class="field">Provider <select id="ddnsProvider" class="input"><option value="none">None (static IP or manual)</option><option value="cloudflare">Cloudflare</option><option value="duckdns">DuckDNS</option></select></label>
+                  <label class="field">Record / sub domain <input id="ddnsRecord" class="input" placeholder="blank = domain name above"></label>
+                  <label class="field">API token <input id="ddnsToken" class="input" type="password" autocomplete="off" placeholder="Cloudflare: token with Zone.DNS edit · DuckDNS: account token"></label>
+                  <label class="field ddns-cf">Cloudflare zone ID <input id="ddnsZone" class="input" placeholder="from the domain's overview page"></label>
+                  <label class="field">Check every <input id="ddnsInterval" class="input" type="number" min="2" value="10"> minutes</label>
+                </div>
+                <div class="row gap wrap mt"><button class="btn" id="btnDdnsNow">Update DNS now</button><span class="muted" id="ddnsInfo"></span></div>
+              </div>
+              <div class="card">
                 <div class="card-title row between"><span>Pages</span><button class="btn small" id="btnWebAddPage">New page</button></div>
                 <p class="muted">Pages appear in the site navigation. Write them in Markdown (headings with #, lists, **bold**, links) or raw HTML.</p>
                 <div id="webPageList" class="file-list"></div>

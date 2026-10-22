@@ -1195,7 +1195,46 @@ $('btnSiteRemove').onclick = (e) => run(async () => {
   renderSite(await ipc.invoke('website:removeSite')); toast('Custom site removed'); refreshWebPreview();
 }, e.target);
 
-async function refreshWebsite() { renderWeb(await ipc.invoke('website:status')); loadWebForm(); refreshWebFiles(); refreshWebPreview(); }
+// ----- domain / HTTPS / dynamic DNS -----
+let domState = null;
+function domFormVisibility() {
+  const mode = $('domHttps').value; document.querySelectorAll('.dom-manual').forEach(x => { x.hidden = mode !== 'manual'; }); document.querySelectorAll('.dom-le').forEach(x => { x.hidden = mode === 'off'; });
+  document.querySelectorAll('.ddns-cf').forEach(x => { x.hidden = $('ddnsProvider').value !== 'cloudflare'; });
+  $('btnDomIssue').hidden = mode !== 'letsencrypt';
+}
+function renderDomain(st) {
+  domState = st; const c = st.config;
+  $('domName').value = c.name || ''; $('domHttps').value = c.https || 'off'; $('domHttpPort').value = c.httpPort || ''; $('domHttpsPort').value = c.httpsPort || 443; $('domEmail').value = c.email || ''; $('domRedirect').checked = c.redirectHttp !== false;
+  $('domCert').placeholder = c.certPem ? '(certificate set; paste to replace)' : '-----BEGIN CERTIFICATE-----'; $('domKey').placeholder = c.keyPem ? '(key set; paste to replace)' : '-----BEGIN PRIVATE KEY-----';
+  $('ddnsProvider').value = c.ddns.provider || 'none'; $('ddnsRecord').value = c.ddns.record || ''; $('ddnsZone').value = c.ddns.zoneId || ''; $('ddnsInterval').value = c.ddns.intervalMin || 10; $('ddnsToken').placeholder = c.ddns.token ? '(token set; paste to replace)' : 'API token';
+  $('domStatus').textContent = st.publicUrl || '';
+  $('domCertInfo').textContent = st.issuing ? 'Requesting certificate…' : st.cert ? `Certificate: ${st.cert.source === 'letsencrypt' ? "Let's Encrypt" : 'your own'}, ${st.cert.daysLeft !== null ? st.cert.daysLeft + ' days left' : 'expiry unknown'}${st.cert.source === 'letsencrypt' ? ' (renews automatically)' : ''}` : (c.https === 'off' ? '' : st.lastIssueError ? 'Last attempt failed: ' + st.lastIssueError : 'No certificate yet.');
+  $('ddnsInfo').textContent = c.ddns.provider === 'none' ? '' : st.ddns.updating ? 'Updating…' : st.ddns.lastError ? 'Last update failed: ' + st.ddns.lastError : st.ddns.lastUpdate ? `Last update ${fmtDate(st.ddns.lastUpdate)} → ${st.ddns.lastIp}` : 'Not updated yet.';
+  domFormVisibility();
+}
+function domForm() {
+  const o = { name: $('domName').value.trim().toLowerCase(), https: $('domHttps').value, httpPort: Number($('domHttpPort').value) || 0, httpsPort: Number($('domHttpsPort').value) || 443, email: $('domEmail').value.trim(), redirectHttp: $('domRedirect').checked,
+    ddns: { provider: $('ddnsProvider').value, record: $('ddnsRecord').value.trim(), zoneId: $('ddnsZone').value.trim(), intervalMin: Number($('ddnsInterval').value) || 10 } };
+  if ($('domCert').value.trim()) o.certPem = $('domCert').value.trim(); if ($('domKey').value.trim()) o.keyPem = $('domKey').value.trim();
+  if ($('ddnsToken').value.trim()) o.ddns.token = $('ddnsToken').value.trim();
+  return o;
+}
+async function refreshDomain() { try { renderDomain(await ipc.invoke('domain:status')); } catch { /* ignore */ } }
+$('domHttps').onchange = domFormVisibility; $('ddnsProvider').onchange = domFormVisibility;
+$('btnDomSave').onclick = (e) => run(async () => {
+  const f = domForm(); // blank token / PEM fields keep the stored values (the backend merges)
+  renderDomain(await ipc.invoke('domain:save', f));
+  $('domCert').value = ''; $('domKey').value = ''; $('ddnsToken').value = '';
+  toast('Domain settings saved' + (webState && webState.running ? '. Restart the website to apply HTTPS changes.' : ''));
+  if (f.https !== 'off' && (f.httpPort || 0) !== 80 && f.https === 'letsencrypt') toast("Let's Encrypt needs HTTP on port 80: set \"Listen for HTTP on port\" to 80 and forward it.", true);
+  refreshNetwork && refreshNetwork().catch(() => {});
+}, e.target);
+$('btnDomIssue').onclick = (e) => run(async () => { toast('Requesting certificate, this takes up to a minute…'); renderDomain(await ipc.invoke('domain:issue', {})); toast('Certificate issued'); renderWeb(await ipc.invoke('website:status')); }, e.target);
+$('btnDdnsNow').onclick = (e) => run(async () => { renderDomain(await ipc.invoke('domain:updateDns')); toast('DNS updated'); }, e.target);
+ipc.on('domain:state', renderDomain);
+ipc.on('website:state', () => { refreshDomain(); });
+
+async function refreshWebsite() { refreshDomain(); renderWeb(await ipc.invoke('website:status')); loadWebForm(); refreshWebFiles(); refreshWebPreview(); }
 
 
 // ---------- health, alerts, crash reports ----------

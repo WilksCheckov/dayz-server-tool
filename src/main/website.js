@@ -1,6 +1,7 @@
 'use strict';
 // Built-in public website: status page, mods list, custom Markdown pages and a JSON API, served by the tool itself.
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -10,7 +11,7 @@ const rcon = require('./rcon');
 const mods = require('./mods');
 const scheduler = require('./scheduler');
 
-let srv = null;
+let srv = null, srvTls = null;
 let emitRef = () => {};
 let state = { running: false, port: 0, error: null, requests: 0, startedAt: null };
 let statusCache = { at: 0, data: null };
@@ -40,7 +41,7 @@ function localUrls(port) {
 
 function status() {
   const c = cfg();
-  return { ...state, config: c, urls: state.running ? localUrls(state.port) : localUrls(c.port), publicDir: publicDir(), site: siteInfo() };
+  return { ...state, config: c, urls: state.running ? localUrls(state.port) : localUrls(c.port), publicDir: publicDir(), site: siteInfo(), https: state.https || null, httpsError: state.httpsError || null };
 }
 
 // ---------- data ----------
@@ -250,6 +251,12 @@ async function handle(req, res) {
   const p = url.pathname.replace(/\/+$/, '') || '/';
   const send = (code, type, body) => { res.writeHead(code, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(body); };
   try {
+    { const dom = require('./domain'); const ch = dom.challengeResponse(p); if (ch) return send(200, 'text/plain', ch);
+      const dc = dom.cfg();
+      if (!req.socket.encrypted && srvTls && dc.redirectHttp && dc.name) {
+        const host = String(req.headers.host || '').split(':')[0].toLowerCase();
+        if (host === dc.name.toLowerCase()) { res.writeHead(301, { Location: `https://${dc.name}${Number(dc.httpsPort) === 443 ? '' : ':' + dc.httpsPort}${req.url}` }); return res.end(); }
+      } }
     if (p === '/dayz-status.js') return send(200, 'text/javascript', STATUS_JS);
     if (p === '/admin' || p.startsWith('/admin/')) return handleAdmin(req, res, p, c, send);
     // A dropped website wins over everything except the API.
@@ -286,15 +293,26 @@ function start(port) {
   return new Promise((resolve, reject) => {
     stop(true);
     const c = cfg();
-    const prt = Number(port || c.port) || 8080;
-    srv = http.createServer((req, res) => { handle(req, res).catch(() => { try { res.writeHead(500); res.end(); } catch { /* ignore */ } }); });
+    const dom = require('./domain'); const dc = dom.cfg();
+    const prt = Number(port || dc.httpPort || c.port) || 8080;
+    const onReq = (req, res) => { handle(req, res).catch(() => { try { res.writeHead(500); res.end(); } catch { /* ignore */ } }); };
+    srv = http.createServer(onReq);
+    // HTTPS listener when a certificate is available
+    const cert = dc.https !== 'off' ? dom.currentCert() : null;
+    if (cert) {
+      try {
+        srvTls = https.createServer({ cert: cert.cert, key: cert.key }, onReq);
+        srvTls.on('error', e => { emitRef('console', { source: 'website', line: 'HTTPS error: ' + (e.code === 'EADDRINUSE' ? 'port ' + dc.httpsPort + ' is already in use' : e.message) }); state.httpsError = e.message; srvTls = null; emitRef('website:state', status()); });
+        srvTls.listen(Number(dc.httpsPort) || 443, '0.0.0.0', () => { state.https = Number(dc.httpsPort) || 443; state.httpsError = null; emitRef('console', { source: 'website', line: `HTTPS running on port ${state.https} (${cert.source} certificate${cert.expires ? ', valid until ' + new Date(cert.expires).toLocaleDateString() : ''})` }); emitRef('website:state', status()); });
+      } catch (e) { state.httpsError = 'Certificate could not be loaded: ' + e.message; srvTls = null; emitRef('console', { source: 'website', line: state.httpsError }); }
+    } else if (dc.https !== 'off') { state.httpsError = dc.https === 'letsencrypt' ? 'No certificate yet. Use "Get certificate" on the Website page.' : 'Paste the certificate and key on the Website page.'; }
     srv.on('error', e => {
       state = { ...state, running: false, error: e.code === 'EADDRINUSE' ? `Port ${prt} is already in use.` : e.message };
       emitRef('website:state', status()); emitRef('console', { source: 'website', line: `Website error: ${state.error}` });
       reject(new Error(state.error));
     });
     srv.listen(prt, '0.0.0.0', () => {
-      state = { running: true, port: prt, error: null, requests: 0, startedAt: Date.now() };
+      state = { ...state, running: true, port: prt, error: null, requests: 0, startedAt: Date.now() };
       try { fs.mkdirSync(publicDir(), { recursive: true }); } catch { /* ignore */ }
       emitRef('website:state', status());
       emitRef('console', { source: 'website', line: `Website running on port ${prt} (${localUrls(prt).join(', ')})` });
@@ -305,6 +323,8 @@ function start(port) {
 
 function stop(silent = false) {
   if (srv) { try { srv.close(); } catch { /* ignore */ } srv = null; }
+  if (srvTls) { try { srvTls.close(); } catch { /* ignore */ } srvTls = null; }
+  state.https = null;
   const was = state.running;
   state = { ...state, running: false, startedAt: null };
   if (!silent) { emitRef('website:state', status()); if (was) emitRef('console', { source: 'website', line: 'Website stopped.' }); }

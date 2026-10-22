@@ -52,6 +52,7 @@
     }
   },
   "dependencies": {
+    "acme-client": "^5.4.0",
     "basic-ftp": "^6.2.3",
     "codemirror": "^5.65.21",
     "discord.js": "^14.27.0",
