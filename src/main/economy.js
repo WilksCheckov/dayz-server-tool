@@ -65,9 +65,8 @@ function backupAndWrite(abs, text) {
 
 // ---------- types ----------
 const FLAGS = ['count_in_cargo', 'count_in_hoarder', 'count_in_map', 'count_in_player', 'crafted', 'deloot'];
-function loadTypes(abs) {
-  abs = safe(abs);
-  const doc = xmlParser.parse(fs.readFileSync(abs, 'utf8'));
+function loadTypes(abs) { abs = safe(abs); return typesFromDoc(xmlParser.parse(fs.readFileSync(abs, 'utf8'))); }
+function typesFromDoc(doc) {
   if (!doc.types) throw new Error('Root element is not <types>.');
   return arr(doc.types.type).map(t => {
     const fl = arr(t.flags)[0] || {};
@@ -97,9 +96,8 @@ function saveTypes(abs, rows) { abs = safe(abs); const r = backupAndWrite(abs, t
 
 // ---------- events ----------
 const EFLAGS = ['deletable', 'init_random', 'remove_damaged'];
-function loadEvents(abs) {
-  abs = safe(abs);
-  const doc = xmlParser.parse(fs.readFileSync(abs, 'utf8'));
+function loadEvents(abs) { abs = safe(abs); return eventsFromDoc(xmlParser.parse(fs.readFileSync(abs, 'utf8'))); }
+function eventsFromDoc(doc) {
   if (!doc.events) throw new Error('Root element is not <events>.');
   return arr(doc.events.event).map(e => {
     const fl = arr(e.flags)[0] || {};
@@ -129,9 +127,8 @@ function eventsXml(rows) {
 function saveEvents(abs, rows) { abs = safe(abs); const r = backupAndWrite(abs, eventsXml(rows)); return { saved: rows.length, problems: r.problems, counts: r.counts }; }
 
 // ---------- spawnable types ----------
-function loadSpawnable(abs) {
-  abs = safe(abs);
-  const doc = xmlParser.parse(fs.readFileSync(abs, 'utf8'));
+function loadSpawnable(abs) { abs = safe(abs); return spawnableFromDoc(xmlParser.parse(fs.readFileSync(abs, 'utf8'))); }
+function spawnableFromDoc(doc) {
   if (!doc.spawnabletypes) throw new Error('Root element is not <spawnabletypes>.');
   const raw = v => v === undefined || v === null ? null : String(v); // keep the author's number formatting (0.20 stays 0.20)
   const group = g => ({ chance: raw(attr(g, 'chance')), preset: attr(g, 'preset') || null, items: arr(g.item).map(i => ({ name: attr(i, 'name') || '', chance: raw(attr(i, 'chance')) })) });
@@ -147,4 +144,83 @@ function spawnableXml(rows) {
 }
 function saveSpawnable(abs, rows) { abs = safe(abs); const r = backupAndWrite(abs, spawnableXml(rows)); return { saved: rows.length, problems: r.problems, counts: r.counts }; }
 
-module.exports = { files, limits, loadTypes, saveTypes, typesXml, loadEvents, saveEvents, eventsXml, loadSpawnable, saveSpawnable, spawnableXml, FLAGS, EFLAGS };
+// ---------- import from pasted / dropped text ----------
+const ROOTS = { types: 'types', events: 'events', spawnable: 'spawnabletypes' };
+const CHILD = { types: 'type', events: 'event', spawnable: 'type' };
+// Accepts a whole file, or a bare list of <type>/<event> elements copied from a mod's readme. Returns rows.
+function rowsFromText(kind, text) {
+  if (!ROOTS[kind]) throw new Error('Unknown kind ' + kind);
+  let t = String(text || '').replace(/^﻿/, '').trim();
+  if (!t) throw new Error('Nothing to import.');
+  t = t.replace(/<\?xml[^>]*\?>/i, '').trim();
+  const root = ROOTS[kind];
+  if (!new RegExp('<' + root + '[\\s>]', 'i').test(t)) t = '<' + root + '>' + t + '</' + root + '>';
+  let doc;
+  try { doc = xmlParser.parse(t); } catch (e) { throw new Error('Could not parse XML: ' + e.message); }
+  const rows = kind === 'types' ? typesFromDoc(doc) : kind === 'events' ? eventsFromDoc(doc) : spawnableFromDoc(doc);
+  if (!rows.length) throw new Error('No <' + CHILD[kind] + '> entries found.');
+  return rows;
+}
+
+// ---------- custom mission files (registered in cfgeconomycore.xml) ----------
+function economyCorePath() { return path.join(md(), 'cfgeconomycore.xml'); }
+function escRe(x) { return String(x).replace(/[.*+?^$()|[\]\\{}]/g, '\\$&'); }
+// Locate the <ce folder="X"> ... </ce> block.
+function ceBlock(core, folder) {
+  const re = new RegExp('<ce\\s+folder="' + escRe(folder) + '"[^>]*>', 'i');
+  const m = re.exec(core); if (!m) return null;
+  const close = core.indexOf('</ce>', m.index); if (close < 0) return null;
+  return { open: m.index + m[0].length, close, start: m.index };
+}
+// Create (if missing) and register a types / events / spawnabletypes file. rel is relative to the mission, e.g. "custom/mymod_types.xml".
+function createFile({ kind, rel }) {
+  if (!ROOTS[kind]) throw new Error('Unknown kind ' + kind);
+  rel = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+  if (!rel || !/\.xml$/i.test(rel)) throw new Error('Give a file name ending in .xml, e.g. custom/mymod_types.xml');
+  if (rel.includes('..')) throw new Error('Keep the file inside the mission folder.');
+  const m = md();
+  const abs = path.join(m, rel);
+  const folder = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
+  const name = path.posix.basename(rel);
+  if (!folder) throw new Error('Put custom files in a sub folder (for example custom/), the mission root is reserved for the vanilla files.');
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  if (!fs.existsSync(abs)) fs.writeFileSync(abs, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<' + ROOTS[kind] + '>\n</' + ROOTS[kind] + '>\n', 'utf8');
+  // register in cfgeconomycore.xml by editing the text, so comments and layout are kept
+  const corePath = economyCorePath();
+  let core = fs.existsSync(corePath) ? fs.readFileSync(corePath, 'utf8') : '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n<economycore>\n</economycore>\n';
+  const nl = core.includes('\r\n') ? '\r\n' : '\n';
+  const b = ceBlock(core, folder);
+  const already = !!(b && new RegExp('<file\\s+name="' + escRe(name) + '"[^>]*type="' + ROOTS[kind] + '"', 'i').test(core.slice(b.open, b.close)));
+  if (!already) {
+    const fileLine = '\t\t<file name="' + name + '" type="' + ROOTS[kind] + '" />';
+    if (b) { const before = core.slice(0, b.close).replace(/[ \t]*$/, ''); core = before + nl + fileLine + nl + '\t' + core.slice(b.close); }
+    else {
+      const blk = '\t<ce folder="' + folder + '">' + nl + fileLine + nl + '\t</ce>' + nl;
+      const e = core.search(/<\/economycore>/i);
+      core = e >= 0 ? core.slice(0, e) + blk + core.slice(e) : core + blk;
+    }
+    try { fs.copyFileSync(corePath, corePath + '.bak'); } catch { /* ignore */ }
+    fs.writeFileSync(corePath, core, 'utf8');
+  }
+  return { abs, registered: !already, files: files() };
+}
+// Remove a registration (the file itself is kept).
+function unregisterFile(abs) {
+  const m = md(); const rel = path.relative(m, abs).replace(/\\/g, '/');
+  const folder = path.posix.dirname(rel), name = path.posix.basename(rel);
+  const corePath = economyCorePath(); if (!fs.existsSync(corePath)) return files();
+  let core = fs.readFileSync(corePath, 'utf8');
+  const b = ceBlock(core, folder); if (!b) return files();
+  let inner = core.slice(b.open, b.close);
+  inner = inner.replace(new RegExp('[ \\t]*<file\\s+name="' + escRe(name) + '"[^>]*/>[ \\t]*(\\r?\\n)?', 'i'), '');
+  if (!/<file\s/i.test(inner)) {
+    const lineStart = core.lastIndexOf('\n', b.start) + 1;
+    let after = b.close + '</ce>'.length; if (core[after] === '\r') after++; if (core[after] === '\n') after++;
+    core = core.slice(0, lineStart) + core.slice(after);
+  } else core = core.slice(0, b.open) + inner + core.slice(b.close);
+  try { fs.copyFileSync(corePath, corePath + '.bak'); } catch { /* ignore */ }
+  fs.writeFileSync(corePath, core, 'utf8');
+  return files();
+}
+
+module.exports = { rowsFromText, createFile, unregisterFile, files, limits, loadTypes, saveTypes, typesXml, loadEvents, saveEvents, eventsXml, loadSpawnable, saveSpawnable, spawnableXml, FLAGS, EFLAGS };

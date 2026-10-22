@@ -282,12 +282,14 @@
               <button class="tab etab" data-etab="events">Events</button>
               <button class="tab etab" data-etab="spawnable">Spawnable types</button>
             </div>
-            <select id="ecoFile" class="input" style="width:280px"></select>
-            <span class="muted" id="ecoInfo"></span>
+            <select id="ecoFile" class="input eco-file"></select>
+            <button class="btn small" id="btnEcoNewFile" title="Create a custom types / events / spawnable types file in the mission and register it in cfgeconomycore.xml">New file…</button>
+            <button class="btn small" id="btnEcoImport" title="Paste XML or pick a file; entries are merged into the current file. You can also drop a file anywhere on this page.">Import…</button>
+            <span class="muted eco-info" id="ecoInfo"></span>
             <span class="grow"></span>
-            <button class="btn" id="btnEcoOpenEditor">Open in Config Editor</button>
-            <button class="btn" id="btnEcoRevert">Revert</button>
-            <button class="btn primary" id="btnEcoSave">Save</button>
+            <button class="btn small" id="btnEcoOpenEditor">Config Editor</button>
+            <button class="btn small" id="btnEcoRevert">Revert</button>
+            <button class="btn small primary" id="btnEcoSave">Save</button>
           </div>
           <div id="ecoBanner" class="banner" hidden></div>
 
@@ -303,7 +305,7 @@
               <span class="muted" id="tfCount"></span>
             </div>
             <div class="row gap wrap eco-bulk" id="ecoBulk">
-              <b id="bulkCount">0 selected</b>
+              <b id="bulkCount">0 selected</b><span class="muted eco-bulk-hint">tick rows to bulk edit</span>
               <select id="bulkField" class="input eco-sel"><option value="nominal">nominal</option><option value="min">min</option><option value="lifetime">lifetime</option><option value="restock">restock</option><option value="quantmin">quantmin</option><option value="quantmax">quantmax</option><option value="cost">cost</option></select>
               <select id="bulkOp" class="input eco-sel" style="width:110px"><option value="set">set to</option><option value="mul">multiply by</option><option value="add">add</option></select>
               <input id="bulkValue" class="input" type="number" step="any" style="width:100px">
@@ -333,8 +335,8 @@
             <div id="spList" class="sp-list"></div>
           </div>
 
-          <div class="problems-head row between"><span id="ecoProblemsTitle">Problems</span><span class="muted">Saving validates the file; problems are listed here and highlighted in the Config Editor.</span></div>
-          <div id="ecoProblems" class="problems" style="height:110px"></div>
+          <div class="problems-head row between" id="ecoProblemsHead" hidden><span id="ecoProblemsTitle">Problems</span><span class="muted">Saving validates the file; problems are highlighted in the Config Editor.</span></div>
+          <div id="ecoProblems" class="problems eco-problems" hidden></div>
         </section>
 
         <!-- MISSION -->
@@ -707,12 +709,12 @@
           </div>
           <div class="grid-2 grow">
             <div class="card list-card">
-              <div class="card-title row between"><span id="banLabel">Game bans <span class="muted">ban.txt</span></span><span class="muted" id="banFile"></span></div>
+              <div class="card-title row between"><span id="banLabel">Game bans <span class="muted">ban.txt</span></span><span class="muted path" id="banFile"></span></div>
               <p class="muted" id="banHelp"></p>
               <div class="table-wrap grow"><table class="table" id="banTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
             </div>
             <div class="card list-card">
-              <div class="card-title row between"><span>BattlEye bans <span class="muted">bans.txt</span></span><span class="row gap"><button class="btn small" id="btnBeLoadBans" title="Tell BattlEye to reload bans.txt (needs RCon)">loadBans via RCon</button><span class="muted" id="bebanFile"></span></span></div>
+              <div class="card-title row between"><span>BattlEye bans <span class="muted">bans.txt</span></span><span class="row gap"><button class="btn small" id="btnBeLoadBans" title="Tell BattlEye to reload bans.txt (needs RCon)">loadBans via RCon</button><span class="muted path" id="bebanFile"></span></span></div>
               <p class="muted" id="bebanHelp"></p>
               <div class="table-wrap grow"><table class="table" id="bebanTable"><thead><tr><th>GUID / IP</th><th>Minutes</th><th>Reason</th><th>Name</th><th></th></tr></thead><tbody></tbody></table></div>
             </div>
@@ -728,7 +730,7 @@
           </div>
           <div id="whitelistBanner" class="banner" hidden></div>
           <div class="card grow list-card">
-            <div class="card-title row between"><span>Whitelist <span class="muted">whitelist.txt</span></span><span class="muted" id="whitelistFile"></span></div>
+            <div class="card-title row between"><span>Whitelist <span class="muted">whitelist.txt</span></span><span class="muted path" id="whitelistFile"></span></div>
             <p class="muted" id="whitelistHelp"></p>
             <div class="table-wrap grow"><table class="table" id="whitelistTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
           </div>
@@ -742,7 +744,7 @@
             <button class="btn primary" id="btnAddPr">Add to priority queue</button>
           </div>
           <div class="card grow list-card">
-            <div class="card-title row between"><span>Priority queue <span class="muted">priority.txt</span></span><span class="muted" id="priorityFile"></span></div>
+            <div class="card-title row between"><span>Priority queue <span class="muted">priority.txt</span></span><span class="muted path" id="priorityFile"></span></div>
             <p class="muted" id="priorityHelp">Steam64 IDs that skip the login queue when the server is full.</p>
             <div class="table-wrap grow"><table class="table" id="priorityTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
           </div>

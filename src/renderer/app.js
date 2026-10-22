@@ -1472,7 +1472,7 @@ function renderTypes() {
   $('ecoBulk').classList.toggle('active', st.sel.size > 0);
   $('tfSelAll').checked = idx.length > 0 && idx.every(i => st.sel.has(i));
 }
-$('tBody').addEventListener('scroll', () => { if (eco.tab === 'types') renderTypes(); });
+$('tBody').addEventListener('scroll', () => { document.querySelector('.vhead').style.transform = `translateX(-${$('tBody').scrollLeft}px)`; if (eco.tab === 'types') renderTypes(); });
 ['tfSearch', 'tfCategory', 'tfUsage', 'tfValue', 'tfTag', 'tfZero', 'tfModified'].forEach(id => $(id).addEventListener('input', () => { $('tBody').scrollTop = 0; renderTypes(); }));
 $('tRows').addEventListener('change', e => {
   const row = e.target.closest('.vrow'); if (!row) return; const i = Number(row.dataset.i); const r = eco.types.rows[i];
@@ -1565,6 +1565,8 @@ $('spList').addEventListener('click', e => {
 });
 // ----- save / revert / problems -----
 function renderEcoProblems(problems, counts) {
+  const has = (problems && problems.length) || (counts && (counts.error || counts.warning));
+  $('ecoProblemsHead').hidden = !has; $('ecoProblems').hidden = !has;
   $('ecoProblemsTitle').textContent = counts ? `Problems — ${counts.error} errors, ${counts.warning} warnings` : 'Problems';
   $('ecoProblems').innerHTML = problems.length ? problems.map(p => `<div class="problem ${p.severity}"><span class="sev">${p.severity}</span><span class="pline">L${p.line}</span><span>${esc(p.message)}</span></div>`).join('') : (counts ? '<div class="ok">✓ Saved, no problems.</div>' : '');
 }
@@ -1576,6 +1578,65 @@ $('btnEcoSave').onclick = (e) => run(async () => {
   toast(`Saved ${r.saved} entries${r.counts.error ? ` with ${r.counts.error} error(s)` : ''}`, r.counts.error > 0);
 }, e.target);
 $('btnEcoRevert').onclick = (e) => run(async () => { const st = ecoState(); if (!st) return; if (ecoDirtyCount(st) && !(await showModal('Revert changes?', '', [{ label: 'Revert', value: true, primary: true }, { label: 'Cancel', value: false }]))) return; const s2 = ecoState(); if (s2) s2.abs = null; await ecoLoad(); }, e.target);
+// ----- import (paste / file / drop) -----
+function ecoKindLabel() { return eco.tab === 'types' ? 'types' : eco.tab === 'events' ? 'events' : 'spawnable types'; }
+async function ecoImportText(text, sourceName) {
+  const st = ecoState(); if (!st) { toast('Load a file first', true); return; }
+  let rows;
+  try { rows = await ipc.invoke('economy:parse', eco.tab, text); } catch (e) { toast(e.message, true); return; }
+  const existing = new Map(st.rows.map((r, i) => [r.name, i]));
+  const dup = rows.filter(r => existing.has(r.name)).length;
+  const mode = await showModal(`Import ${rows.length} ${ecoKindLabel()}${sourceName ? ' from ' + esc(sourceName) : ''}`,
+    `<p>${rows.length - dup} new, ${dup} already in this file.</p>${dup ? '<p class="muted">What should happen to the ones that already exist?</p>' : ''}`,
+    dup ? [{ label: 'Replace existing', value: 'replace', primary: true }, { label: 'Keep existing, add new only', value: 'skip' }, { label: 'Cancel', value: null }] : [{ label: 'Add', value: 'skip', primary: true }, { label: 'Cancel', value: null }]);
+  if (!mode) return;
+  let added = 0, replaced = 0;
+  for (const r of rows) {
+    if (existing.has(r.name)) { if (mode === 'replace') { st.rows[existing.get(r.name)] = r; replaced++; } }
+    else { st.rows.push(r); st.orig.push('\u0000new'); existing.set(r.name, st.rows.length - 1); added++; }
+  }
+  toast(`Imported: ${added} added, ${replaced} replaced. Save to write the file.`);
+  if (eco.tab === 'types') { $('tfSearch').value = ''; }
+  ecoRender();
+}
+$('btnEcoImport').onclick = () => run(async () => {
+  if (!ecoState()) { toast('Load a file first', true); return; }
+  const ok = await showModal(`Import ${ecoKindLabel()} into ${esc($('ecoFile').selectedOptions[0] ? $('ecoFile').selectedOptions[0].textContent : 'this file')}`,
+    `<p class="muted">Paste a whole file or just the entries (for example the \u003ctype\u003e blocks from a mod's readme), or pick a file. Entries are matched by name.</p><textarea id="mImport" class="input" rows="12" spellcheck="false" placeholder="&lt;type name=&quot;MyItem&quot;&gt; … &lt;/type&gt;"></textarea><div class="row gap"><button class="btn small" id="mImportPick">Choose file…</button><span class="muted">or drop a file anywhere on the Economy page</span></div>`,
+    [{ label: 'Import', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  const text = $('mImport') ? $('mImport').value : '';
+  if (!ok) return;
+  await ecoImportText(text, null);
+});
+document.addEventListener('click', async e => {
+  if (e.target && e.target.id === 'mImportPick') {
+    const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'XML', extensions: ['xml'] }] });
+    if (f) { try { $('mImport').value = await ipc.invoke('fs:readText', f); } catch (err) { toast(err.message, true); } }
+  }
+});
+{ const page = $('page-economy'); let depth = 0;
+  page.addEventListener('dragenter', e => { e.preventDefault(); depth++; page.classList.add('eco-drop'); });
+  page.addEventListener('dragover', e => { e.preventDefault(); });
+  page.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; page.classList.remove('eco-drop'); } });
+  page.addEventListener('drop', async e => {
+    e.preventDefault(); depth = 0; page.classList.remove('eco-drop');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
+    try { const text = await f.text(); await ecoImportText(text, f.name); } catch (err) { toast(err.message, true); }
+  });
+}
+// ----- new / custom mission files -----
+$('btnEcoNewFile').onclick = () => run(async () => {
+  const kind = eco.tab; const suffix = kind === 'types' ? 'types' : kind === 'events' ? 'events' : 'spawnabletypes';
+  const ok = await showModal(`New ${ecoKindLabel()} file`,
+    `<p class="muted">The file is created inside the mission folder and registered in cfgeconomycore.xml so the server loads it. Use a sub folder such as <code>custom/</code>. If the file already exists it is only registered.</p><label class="field">File (relative to the mission) <input id="mNewFile" class="input" value="custom/my_${suffix}.xml"></label>`,
+    [{ label: 'Create and register', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  const rel = $('mNewFile') ? $('mNewFile').value.trim() : '';
+  if (!ok || !rel) return;
+  const r = await ipc.invoke('economy:createFile', { kind, rel });
+  eco.files = r.files;
+  toast(r.registered ? 'File created and registered' : 'File already registered');
+  ecoSetTab(kind); $('ecoFile').value = r.abs; await ecoLoad();
+});
 $('btnEcoOpenEditor').onclick = () => { const st = ecoState(); if (!st) return; showPage('server'); setTimeout(() => openConfigFile(st.abs), 300); };
 
 
@@ -1746,9 +1807,9 @@ async function refreshLogList() {
 $('logFileList').addEventListener('click', e => { const f = e.target.closest('.file'); if (f) openLog(f.dataset.name); });
 $('btnRefreshLogs').onclick = refreshLogList;
 $('btnOpenProfiles').onclick = () => ipc.invoke('shell:openPath', state.paths.profilesDir);
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+document.querySelectorAll('.tab[data-tab]').forEach(t => t.onclick = () => {
   logTab = t.dataset.tab;
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.toggle('active', x === t));
   $('logRaw').hidden = logTab !== 'raw';
   $('logSummary').hidden = logTab !== 'summary';
   $('logCrashes').hidden = logTab !== 'crashes';

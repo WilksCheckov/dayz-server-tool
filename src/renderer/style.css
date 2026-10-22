@@ -401,3 +401,32 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 #page-launch > .card, #page-launch > .grid-2 > .card { flex-shrink: 0; }
 .cfg-form .check { align-self: end; padding-bottom: 9px; }
 .cfg-form .field { margin: 0; }
+
+/* economy: fit smaller windows */
+.eco-file { width: clamp(180px, 26vw, 300px); }
+.eco-info { white-space: nowrap; font-size: 11.5px; }
+.eco-filters .input { padding: 5px 9px; font-size: 12px; }
+.eco-filters #tfSearch { width: clamp(140px, 18vw, 220px); }
+.eco-sel { width: clamp(110px, 12vw, 150px); }
+.eco-bulk { padding: 5px 10px; }
+.eco-bulk:not(.active) > :not(#bulkCount):not(.eco-bulk-hint) { display: none; }
+.eco-bulk.active .eco-bulk-hint { display: none; }
+.eco-problems { height: auto; max-height: 120px; }
+.vtable { overflow-x: auto; }
+.vhead { overflow: hidden; }
+.vrow { min-width: 1040px; grid-template-columns: 30px minmax(150px, 1.3fr) 68px 58px 76px 70px 56px 56px 60px minmax(70px, 1fr) minmax(70px, 1fr) minmax(70px, 1fr) minmax(70px, 1fr); }
+.vbody { overflow: auto; }
+.vrows { min-width: 1040px; }
+#tSpacer { min-width: 1040px; }
+.eco-drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
+/* ---- fit smaller windows (UI pass) ---- */
+.grid-4 { grid-template-columns: repeat(auto-fit, minmax(198px, 1fr)); }
+.grid-2 > * { min-width: 0; }
+@media (max-width: 1020px) { .grid-2 { grid-template-columns: 1fr; } }
+.card-title.row.between { flex-wrap: wrap; gap: 6px; }
+.card-title .muted.path, .card-title > .muted:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.table th { white-space: nowrap; }
+#logInfo { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.page-toolbar > .muted { min-width: 0; }
+.card-title .path { max-width: 46%; }

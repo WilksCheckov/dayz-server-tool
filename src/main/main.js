@@ -134,6 +134,8 @@ function createWindow() {
     win.webContents.once('did-finish-load', () => setTimeout(async () => {
       if (process.env.DZ_THEME) await win.webContents.executeJavaScript('document.documentElement.dataset.theme = ' + JSON.stringify(process.env.DZ_THEME));
       if (process.env.DZ_PAGE) await win.webContents.executeJavaScript(`document.querySelector('[data-page="${process.env.DZ_PAGE}"]').click()`);
+      if (process.env.DZ_SIZE) { const [w, h] = process.env.DZ_SIZE.split('x').map(Number); win.setSize(w, h); await new Promise(r => setTimeout(r, 300)); }
+      if (process.env.DZ_CLICK) for (const sel of process.env.DZ_CLICK.split('||')) { await win.webContents.executeJavaScript(`(function(){ const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); })()`); await new Promise(r => setTimeout(r, 700)); }
       if (process.env.DZ_SCROLL) await win.webContents.executeJavaScript(`document.querySelector('.page.active').scrollTop = ${Number(process.env.DZ_SCROLL)}`);
       if (process.env.DZ_FAKE_LINES) for (const l of process.env.DZ_FAKE_LINES.split('||')) { const [source, line] = l.split('::'); emit('console', { source, line }); }
       await new Promise(r => setTimeout(r, Number(process.env.DZ_WAIT || 1500)));
@@ -258,6 +260,10 @@ handle('economy:loadEvents', (abs) => economy.loadEvents(abs));
 handle('economy:saveEvents', (abs, rows) => economy.saveEvents(abs, rows));
 handle('economy:loadSpawnable', (abs) => economy.loadSpawnable(abs));
 handle('economy:saveSpawnable', (abs, rows) => economy.saveSpawnable(abs, rows));
+handle('economy:parse', (kind, text) => economy.rowsFromText(kind, text));
+handle('economy:createFile', (opts) => economy.createFile(opts || {}));
+handle('economy:unregisterFile', (abs) => economy.unregisterFile(abs));
+handle('fs:readText', (abs) => fs.readFileSync(abs, 'utf8'));
 
 // App preferences + self-update
 handle('app:prefs', () => ({ ...appPrefs(), version: app.getVersion(), packaged: app.isPackaged, dataDir: app.getPath('userData'), loginItem: app.getLoginItemSettings().openAtLogin }));
