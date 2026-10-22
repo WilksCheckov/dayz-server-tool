@@ -392,6 +392,10 @@
 
         <!-- NETWORK -->
         <section class="page" id="page-network">
+          <div class="card" style="flex-shrink:0">
+            <div class="card-title row between"><span>Router port forwarding <span class="muted">UPnP: asks your router to send these ports to this PC</span></span><span class="row gap"><button class="btn small" id="btnUpnpCheck">Check router</button><button class="btn small primary" id="btnUpnpOpen" title="Forward every port below to this PC">Open all on router</button><button class="btn small" id="btnUpnpClose" title="Remove the forwards this tool created">Close all</button></span></div>
+            <div id="upnpBox" class="muted">Not checked yet. Needs UPnP enabled on the router; otherwise forward the ports by hand in the router's admin page.</div>
+          </div>
           <div class="page-toolbar"><span class="muted">Ports the server uses, whether something is listening on them, and Windows firewall rules. Router port forwarding must still be done on the router.</span><span class="grow"></span><button class="btn" id="btnNetRefresh">Refresh</button></div>
           <div class="grid-2">
             <div class="card">
@@ -944,7 +948,7 @@
             <button class="btn" id="btnWebStop" hidden>Stop website</button>
           </div>
           <div class="card" style="flex-shrink:0">
-            <div class="card-title row between"><span>Addresses <span class="muted">where this website (and the game server) can be reached</span></span><button class="btn small" id="btnWebAddrRefresh">Refresh</button></div>
+            <div class="card-title row between"><span>Addresses <span class="muted">where this website (and the game server) can be reached</span></span><span class="row gap"><button class="btn small primary" id="btnWebUpnp" title="Ask the router (UPnP) to forward the website port to this PC">Open website port on router</button><button class="btn small" id="btnWebAddrRefresh">Refresh</button></span></div>
             <div id="webAddresses" class="col gap"><div class="muted">Looking up addresses…</div></div>
           </div>
           <div class="grid-2">

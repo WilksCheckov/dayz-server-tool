@@ -56,6 +56,7 @@ const audit = require('./audit');
 const combat = require('./combat');
 const deathlog = require('./deathlog');
 const anticheat = require('./anticheat');
+const upnp = require('./upnp');
 const zip = require('./zip');
 const economy = require('./economy');
 const mission = require('./mission');
@@ -417,6 +418,9 @@ handle('tasks:run', (id) => { const t = tasks.all().find(x => x.id === id); if (
 
 // Network helper
 handle('network:report', () => network.report());
+handle('network:upnpStatus', () => upnp.status(network.ports()));
+handle('network:upnpMap', (names) => upnp.map(network.ports().filter(p => !names || !names.length || names.includes(p.name))));
+handle('network:upnpUnmap', (names) => upnp.unmap(network.ports().filter(p => !names || !names.length || names.includes(p.name))));
 handle('network:addresses', async () => ({ lan: network.lanIps(), publicIp: await network.publicIp(), port: (settings.load().website || {}).port || 8080, gamePort: settings.load().port || 2302 }));
 handle('logs:cleanup', (opts) => logs.cleanup(opts || {}));
 handle('logs:cleanupCfg', () => logs.cleanupCfg());

@@ -1259,12 +1259,27 @@ async function refreshWebAddresses() {
   for (const l of a.lan) { rows.push(row('Inward (LAN) IP', l.ip, l.name)); rows.push(row('Inward website', `http://${l.ip}:${a.port}/`, 'same network')); }
   if (!a.lan.length) rows.push(row('Inward (LAN) IP', null, 'no network adapter found'));
   rows.push(row('Outward (public) IP', a.publicIp, a.publicIp ? 'what the internet sees' : 'could not reach the lookup service'));
-  rows.push(row('Outward website', a.publicIp ? `http://${a.publicIp}:${a.port}/` : null, a.publicIp ? 'needs port ' + a.port + ' forwarded on your router' : ''));
+  rows.push(row('Outward website', a.publicIp ? `http://${a.publicIp}:${a.port}/` : null, a.publicIp ? 'needs port ' + a.port + ' forwarded on your router (button above); test it from outside your network, e.g. a phone on mobile data, since many routers refuse their own public address from inside' : ''));
   rows.push(row('Game server (public)', a.publicIp ? `${a.publicIp}:${a.gamePort}` : null, a.publicIp ? 'direct connect address for players' : ''));
   box.innerHTML = rows.join('');
   box.querySelectorAll('.addr-copy').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.value); toast('Copied ' + b.dataset.value); });
 }
 $('btnWebAddrRefresh').onclick = () => refreshWebAddresses();
+function upnpResultText(r) { return r.results.map(x => `${x.name} ${x.proto} ${x.port}: ${x.ok ? 'forwarded' : 'failed (' + x.error + ')'}`).join('\n'); }
+$('btnWebUpnp').onclick = (e) => run(async () => {
+  try { const r = await ipc.invoke('network:upnpMap', ['Website']); const ok = r.results.every(x => x.ok); toast((ok ? 'Router now forwards the website port to this PC' : upnpResultText(r)) + (r.externalIp ? ' · router reports public IP ' + r.externalIp : ''), !ok); }
+  catch (err) { toast(err.message, true); }
+}, e.target);
+async function refreshUpnp() {
+  const box = $('upnpBox'); box.textContent = 'Asking the router…';
+  try {
+    const st = await ipc.invoke('network:upnpStatus');
+    box.innerHTML = `<div>Router: <b>${esc(st.router)}</b> · this PC: <span class="mono">${esc(st.lan || '?')}</span>${st.externalIp ? ' · public IP ' + esc(st.externalIp) : ''}</div>` + st.ports.map(p => `<div class="row gap"><span style="width:150px">${esc(p.name)} ${p.proto} ${p.port}</span>${p.forwarded ? (p.toThisPc ? '<span class="badge ok">forwarded to this PC</span>' : '<span class="badge warn">forwarded to ' + esc(p.client) + '</span>') : '<span class="badge">not forwarded</span>'}</div>`).join('');
+  } catch (e) { box.textContent = e.message; }
+}
+$('btnUpnpCheck').onclick = () => refreshUpnp();
+$('btnUpnpOpen').onclick = (e) => run(async () => { try { const r = await ipc.invoke('network:upnpMap', []); toast(r.results.every(x => x.ok) ? 'All ports forwarded to this PC' : upnpResultText(r), !r.results.every(x => x.ok)); } catch (err) { toast(err.message, true); } refreshUpnp(); }, e.target);
+$('btnUpnpClose').onclick = (e) => run(async () => { try { const r = await ipc.invoke('network:upnpUnmap', []); toast(r.results.every(x => x.ok) ? 'Forwards removed' : upnpResultText(r), !r.results.every(x => x.ok)); } catch (err) { toast(err.message, true); } refreshUpnp(); }, e.target);
 
 // ---------- health, alerts, crash reports ----------
 function drawSpark(id, values, { max = null, color = '#4f8cff' } = {}) {
@@ -1930,6 +1945,7 @@ ipc.on('tasks:changed', () => { if (document.querySelector('#page-tasks.active')
 
 // ---------- network ----------
 async function refreshNetwork() {
+  refreshUpnp();
   $('netPublicIp').textContent = 'checking…';
   const r = await ipc.invoke('network:report');
   $('netPublicIp').textContent = r.publicIp ? `Public IP ${r.publicIp}` : 'Public IP unknown (offline?)';
