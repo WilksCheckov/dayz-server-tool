@@ -9,6 +9,9 @@ const recentList = [];
 const lastFired = {}; // kind -> timestamp, for de-duplication
 
 const KINDS = {
+  'server-critical': { label: 'Server critical error (from the server log)', color: 0xff5f5f, cooldownSec: 0 },
+  'server-major': { label: 'Server error (from the server log)', color: 0xf5b942, cooldownSec: 0 },
+  'server-minor': { label: 'Server warning (from the server log)', color: 0x8a94a6, cooldownSec: 0 },
   'crash': { label: 'Server crashed or exited unexpectedly', color: 0xff5f5f, cooldownSec: 60 },
   'crash-loop': { label: 'Crash loop detected, auto-restart paused', color: 0xff5f5f, cooldownSec: 600 },
   'restart': { label: 'Scheduled restart', color: 0x4f8cff, cooldownSec: 60 },
@@ -33,9 +36,9 @@ function cfg() {
   const c = { ...base, ...(s.alerts || {}), thresholds: { ...base.thresholds, ...((s.alerts || {}).thresholds || {}) } };
   // Sensible defaults: everything important goes to toast + Discord; noisy kinds off by default.
   for (const k of Object.keys(KINDS)) {
-    const def = !['server-up', 'update-done', 'test'].includes(k);
+    const def = !['server-up', 'update-done', 'test', 'server-minor', 'server-major'].includes(k);
     if (c.toast[k] === undefined) c.toast[k] = def;
-    if (c.discord[k] === undefined) c.discord[k] = def;
+    if (c.discord[k] === undefined) c.discord[k] = def || k === 'server-major';
     if (c.webhook[k] === undefined) c.webhook[k] = def;
   }
   return c;
@@ -51,7 +54,7 @@ async function alert(kind, title, details = '', { force = false } = {}) {
   const entry = { at: now, kind, title, details: String(details || '').slice(0, 1500) };
   recentList.push(entry); if (recentList.length > 200) recentList.shift();
   emitRef('alerts:new', entry);
-  emitRef('console', { source: 'alert', line: `${title}${details ? ' — ' + String(details).split('\n')[0] : ''}` });
+  if (!kind.startsWith('server-')) emitRef('console', { source: 'alert', line: `${title}${details ? ' — ' + String(details).split('\n')[0] : ''}` });
   const c = cfg();
   const jobs = [];
   if (c.toast[kind]) {
