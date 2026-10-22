@@ -368,7 +368,8 @@ $('btnCfgFormSave').onclick = (e) => run(async () => {
     const old = cfgFormData.values[f.key];
     let v;
     if (f.type === 'bool') v = el.checked; else if (f.type === 'array') v = el.value.split('\n').map(x => x.trim()).filter(Boolean); else if (f.type === 'string') v = el.value; else v = el.value === '' ? null : Number(el.value);
-    const same = f.type === 'array' ? JSON.stringify(v) === JSON.stringify(old || []) : (v === old || (v === null && old === null) || (f.type === 'string' && (old === null) && v === ''));
+    // a key that is not in the file yet counts as unchanged while the field is still blank / unticked
+    const same = f.type === 'array' ? JSON.stringify(v) === JSON.stringify(old || []) : (v === old || (v === null && old === null) || (old === null && (v === '' || v === false || v === null)));
     if (!same) changes[f.key] = v;
   }
   if (!Object.keys(changes).length) { toast('Nothing changed'); return; }

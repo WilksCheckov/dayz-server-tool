@@ -122,7 +122,7 @@ function num(v) { return v === undefined || v === null || v === '' ? NaN : Numbe
 
 // ---------- serverDZ.cfg ----------
 const CFG_KEYS = {
-  hostname: 'string', password: 'string', passwordAdmin: 'string', enableWhitelist: 'bool', maxPlayers: 'int:1:127',
+  hostname: 'string', password: 'string', passwordAdmin: 'string', description: 'string', enableWhitelist: 'bool', maxPlayers: 'int:1:127', thirdPersonView: 'int:0:2',
   verifySignatures: 'int:0:2', forceSameBuild: 'bool', disableVoN: 'bool', vonCodecQuality: 'int:0:30', disable3rdPerson: 'bool',
   disableCrosshair: 'bool', serverTime: 'string', serverTimeAcceleration: 'num:0:24', serverNightTimeAcceleration: 'num:0:64',
   serverTimePersistent: 'bool', guaranteedUpdates: 'int', loginQueueConcurrentPlayers: 'int', loginQueueMaxPlayers: 'int',
@@ -161,7 +161,7 @@ function validateCfg(text, abs) {
   // Unterminated strings per line
   const lines = text.split('\n');
   lines.forEach((l, i) => {
-    const noComment = l.replace(/\/\/.*$/, '');
+    const noComment = l.replace(/\/\/[^\r\n]*/, '');
     const quotes = (noComment.match(/(?<!\\)"/g) || []).length;
     if (quotes % 2) P(problems, 'error', i + 1, 'Unterminated string (odd number of quotes).');
   });
@@ -202,7 +202,7 @@ function validateCfg(text, abs) {
   }
   // Missing semicolons: a line that looks like key = value but has no ';' and is not a block opener
   lines.forEach((l, i) => {
-    const t = l.replace(/\/\/.*$/, '').trim();
+    const t = l.replace(/\/\/[^\r\n]*/, '').trim(); // "." never matches a carriage return, so CRLF files need the explicit class
     if (/^[A-Za-z_][A-Za-z0-9_]*\s*(\[\])?\s*=\s*[^{]*[^;{\s]\s*$/.test(t) && !t.endsWith(',')) P(problems, 'error', i + 1, 'Missing semicolon at end of statement.');
     if (/^\}\s*$/.test(t)) P(problems, 'error', i + 1, 'Closing brace of a class must be followed by a semicolon: };');
   });
@@ -515,7 +515,7 @@ function validateInitC(text) {
   if (/class\s+CustomMission\s*:\s*MissionServer/.test(src) && !/Mission\s+CreateCustomMission\s*\(\s*string\s+path\s*\)/.test(src)) P(problems, 'warning', 1, 'CustomMission exists but CreateCustomMission(string path) signature looks off.');
   // Lines ending without semicolon that look like statements
   text.split('\n').forEach((l, i) => {
-    const t = l.replace(/\/\/.*$/, '').trim();
+    const t = l.replace(/\/\/[^\r\n]*/, '').trim();
     if (/^(return|break|continue)\b[^;]*$/.test(t)) P(problems, 'error', i + 1, 'Missing semicolon.');
     if (/\b(GetGame\(\)|CreateObject|SetPosition|SetOrientation)\b.*[^;{}\s,(]\s*$/.test(t) && !/\)\s*$/.test(t)) P(problems, 'warning', i + 1, 'Possible missing semicolon.');
   });
@@ -581,6 +581,7 @@ const CFG_FORM_FIELDS = [
   { key: 'hostname', label: 'Server name', type: 'string', group: 'Basics' },
   { key: 'password', label: 'Join password', type: 'string', group: 'Basics', hint: 'blank = public' },
   { key: 'passwordAdmin', label: 'Admin password (#login)', type: 'string', group: 'Basics' },
+  { key: 'description', label: 'Description (shown in the server browser)', type: 'string', group: 'Basics' },
   { key: 'maxPlayers', label: 'Max players', type: 'int', group: 'Basics', min: 1, max: 127 },
   { key: 'instanceId', label: 'Instance ID', type: 'int', group: 'Basics', hint: 'storage folder number under mpmissions\\<mission>\\storage_N' },
   { key: 'steamQueryPort', label: 'Steam query port', type: 'int', group: 'Basics', min: 1, max: 65535 },
@@ -592,7 +593,7 @@ const CFG_FORM_FIELDS = [
   { key: 'disablePrioritylist', label: 'Ignore priority.txt', type: 'bool', group: 'Access' },
   { key: 'loginQueueConcurrentPlayers', label: 'Login queue: concurrent', type: 'int', group: 'Access' },
   { key: 'loginQueueMaxPlayers', label: 'Login queue: max', type: 'int', group: 'Access' },
-  { key: 'disable3rdPerson', label: 'First person only', type: 'bool', group: 'Gameplay' },
+  { key: 'thirdPersonView', label: 'Third person view (0 off, 1 on, 2 vehicles only)', type: 'int', group: 'Gameplay', min: 0, max: 2 },
   { key: 'disableCrosshair', label: 'No crosshair', type: 'bool', group: 'Gameplay' },
   { key: 'disableVoN', label: 'Disable voice', type: 'bool', group: 'Gameplay' },
   { key: 'vonCodecQuality', label: 'Voice quality', type: 'int', group: 'Gameplay', min: 0, max: 30 },
