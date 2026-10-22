@@ -138,7 +138,8 @@ function createWindow() {
   win.on('closed', () => { win = null; });
   // Dev helper: DZ_SCREENSHOT=<file.png> captures the window after load and quits.
   if (process.env.DZ_SCREENSHOT) {
-    win.webContents.once('did-finish-load', () => setTimeout(async () => {
+    win.webContents.once('did-finish-load', () => { toollog.info(`startup: window loaded after ${Date.now() - T0} ms; init times: ${initTimes.filter(([, ms]) => ms >= 5).sort((a, b) => b[1] - a[1]).map(([n, ms]) => n + ' ' + ms + 'ms').join(', ') || 'all under 5 ms'}`); });
+  win.webContents.once('did-finish-load', () => setTimeout(async () => {
       if (process.env.DZ_THEME) await win.webContents.executeJavaScript('document.documentElement.dataset.theme = ' + JSON.stringify(process.env.DZ_THEME));
       if (process.env.DZ_PAGE) await win.webContents.executeJavaScript(`document.querySelector('[data-page="${process.env.DZ_PAGE}"]').click()`);
       if (process.env.DZ_SIZE) { const [w, h] = process.env.DZ_SIZE.split('x').map(Number); win.setSize(w, h); await new Promise(r => setTimeout(r, 300)); }
@@ -461,33 +462,36 @@ try {
   if (!fs.existsSync(newDir) && fs.existsSync(oldDir)) fs.renameSync(oldDir, newDir);
 } catch { /* ignore */ }
 
+const T0 = Date.now(); const initTimes = [];
+function timed(name, fn) { const t = Date.now(); try { fn(); } finally { initTimes.push([name, Date.now() - t]); } }
 app.whenReady().then(() => {
   toollog.init();
-  alerts.init(emit);
+  toollog.info(`startup: process had been running for ${Math.round(process.uptime() * 1000)} ms before Electron was ready`);
+  timed('alerts', () => alerts.init(emit));
   try { if (steamcmd.loadSavedCredentials()) emit('console', { source: 'steamcmd', line: `Using remembered Steam login for ${settings.load().steamUser}.` }); } catch { /* ignore */ }
-  crashes.init(emit);
-  mods.init(emit);
-  server.init(emit);
-  updater.init(emit);
-  backups.init(emit);
-  scheduler.init(emit);
-  rcon.init(emit);
-  discord.init(emit);
-  website.init(emit);
-  health.init(emit);
+  timed('crashes', () => crashes.init(emit));
+  timed('mods', () => mods.init(emit));
+  timed('server', () => server.init(emit));
+  timed('updater', () => updater.init(emit));
+  timed('backups', () => backups.init(emit));
+  timed('scheduler', () => scheduler.init(emit));
+  timed('rcon', () => rcon.init(emit));
+  timed('discord', () => discord.init(emit));
+  timed('website', () => website.init(emit));
+  timed('health', () => health.init(emit));
   initUpdater();
   mission.init(emit); tasks.init(emit); offsite.init(emit);
   // Optional: bring the DayZ server up a few seconds after the tool starts (for unattended reboots).
   if (appPrefs().autoStartServer) setTimeout(() => { try { if (!server.status().running) { emit('console', { source: 'server', line: 'Auto-starting the server (Settings → start with the tool).' }); server.start(); } } catch (e) { emit('console', { source: 'server', line: 'Auto-start failed: ' + e.message }); } }, Math.max(3, Number(appPrefs().autoStartDelaySec) || 10) * 1000);
   if (appPrefs().closeToTray || process.argv.includes('--minimized')) buildTray();
   setInterval(refreshTray, 15000);
-  players.init(emit);
-  steambans.init(emit);
-  accounts.init(emit);
-  domain.init(emit);
-  heat.init(emit);
-  stats.init(emit);
-  audit.init(emit);
+  timed('players', () => players.init(emit));
+  timed('steambans', () => steambans.init(emit));
+  timed('accounts', () => accounts.init(emit));
+  timed('domain', () => domain.init(emit));
+  timed('heat', () => heat.init(emit));
+  timed('stats', () => stats.init(emit));
+  timed('audit', () => audit.init(emit));
   createWindow();
 });
 

@@ -100,6 +100,8 @@ Output lands in `dist\` (NSIS installer and a portable exe).
 
 ## Notes
 
+- **Startup speed**: the portable exe unpacks itself (about 85 MB) into a temp folder on every launch, which costs several seconds, and running it from a OneDrive folder adds more. Use the installer (`DayZ-Server-Tool-Setup-<version>.exe`) for day-to-day use: it starts in a second or two and updates itself in place. The tool's own initialisation takes well under a second; the rest is Electron starting.
+
 - The server app installs with an anonymous Steam login. Workshop mods require a Steam account that owns DayZ; enter it on the Install page. The password is kept in memory only.
 - Mods are stored under `<install dir>\steamcmd\steamapps\workshop\content\221100\<id>` and linked into `<install dir>\server\@Name` with a directory junction, so no files are duplicated.
 - Settings live in `%APPDATA%\dayz-server-tool\settings.json`.
