@@ -26,6 +26,7 @@ const KINDS = {
   'bot-offline': { label: 'Discord bot went offline', color: 0xf5b942, cooldownSec: 300 },
   'web-stack': { label: 'Vulnerable PHP / web server running on this machine', color: 0xff5f5f, cooldownSec: 3600 },
   'steam-guard': { label: 'Steam Guard code needed', color: 0xf5b942, cooldownSec: 600 },
+  'suspicious-activity': { label: 'Suspicious combat activity (possible cheating)', color: 0xff5f5f, cooldownSec: 300 },
   'suspicious-player': { label: 'Flagged player joined (possible alt or banned account)', color: 0xf5b942, cooldownSec: 60 },
   'steam-ban': { label: 'Player picked up a Steam ban', color: 0xff5f5f, cooldownSec: 0 },
   'test': { label: 'Test alert', color: 0x4f8cff, cooldownSec: 0 }
