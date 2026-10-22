@@ -458,7 +458,7 @@
               <div><div class="card-title">Body parts hit</div><canvas id="chParts" height="200"></canvas></div>
             </div>
           </div>
-          <div class="card"><div class="card-title">Suspicious activity <span class="muted">automatic flags from combat patterns; a lead to review, not a verdict</span></div><div id="combatSuspicious" class="table-wrap" style="max-height:260px"></div></div>
+          <div class="card"><div class="card-title row between"><span>Suspicious activity <span class="muted">automatic flags; a lead to review, not a verdict</span></span><select id="susRange" class="input" style="width:140px"><option value="24">Last 24 h</option><option value="168" selected>Last 7 days</option><option value="720">Last 30 days</option><option value="all">All time</option></select></div><div id="combatSuspicious" class="table-wrap" style="max-height:300px"></div></div>
           <div id="combatBoards" class="stats-boards"></div>
           <div id="statsBoards" class="stats-boards"></div>
         </section>

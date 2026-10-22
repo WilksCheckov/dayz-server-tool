@@ -14,13 +14,14 @@ function player(key, name) { const d = load(); if (!d.players[key]) d.players[ke
 
 // ---------- suspicious activity ----------
 // Thresholds (settings.combatFlags) and what they catch. None of this is proof; it points an admin at a replay or a closer look.
-function flagCfg() { try { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, ...(require('./settings').load().combatFlags || {}) }; } catch { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3 }; }
+function flagCfg() { try { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20, ...(require('./settings').load().combatFlags || {}) }; } catch { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20 }; }
 }
-const FLAG_WEIGHT = { 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2 };
+const FLAG_WEIGHT = { 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4 };
 function raise(p, reason, detail, ts) {
   p.flags[reason] = (p.flags[reason] || 0) + 1;
   p.flagScore = Object.entries(p.flags).reduce((a, [r, n]) => a + (FLAG_WEIGHT[r] || 1) * Math.min(n, 5), 0);
   p.lastFlag = { reason, detail, ts }; p.lastFlagAt = ts;
+  p.flagEvents = p.flagEvents || []; p.flagEvents.push([ts, reason, String(detail || '').slice(0, 120)]); if (p.flagEvents.length > 300) p.flagEvents.shift();
   const c = flagCfg();
   if (p.flagScore >= c.alertScore) { try { require('./alerts').alert('suspicious-activity', `Suspicious combat: ${p.name}`, `${reason}: ${detail}\nScore ${p.flagScore}: ${Object.entries(p.flags).map(([r, n]) => r + ' ×' + n).join(', ')}`); } catch { /* ignore */ } }
   emitRef('players:changed', {});
@@ -47,7 +48,18 @@ function parseAttack(body) {
 function record(ev) {
   if (!ev || !ev.body) return;
   // a respawn, login or logout legitimately moves a player anywhere: forget the last position so it is not read as teleporting
-  if (ev.type === 'connect' || ev.type === 'disconnect') { const p = load().players[ev.id || ev.name]; if (p) { p.lastPos = null; save(); } return; }
+  if (ev.type === 'connect' || ev.type === 'disconnect') {
+    const p = player(ev.id || ev.name, ev.name); const c = flagCfg(); const ts = ev.ts || Date.now();
+    p.lastPos = null;
+    if (ev.type === 'connect') {
+      // relog duping needs fast repeated relogs: count connects inside the window
+      p.relogs = (p.relogs || []).filter(t => ts - t <= c.relogWindowMs); p.relogs.push(ts);
+      if (p.relogs.length >= c.relogCount && !(p.lastRelogFlagAt && ts - p.lastRelogFlagAt < c.relogWindowMs)) { p.lastRelogFlagAt = ts; raise(p, 'rapid relogs', `${p.relogs.length} logins within ${Math.round(c.relogWindowMs / 60000)} min`, ts); }
+    } else if (p.lastHitTakenAt && ts - p.lastHitTakenAt <= c.combatLogSec * 1000) {
+      raise(p, 'combat logging', `logged out ${Math.round((ts - p.lastHitTakenAt) / 1000)} s after being hit by ${p.lastHitTakenBy || 'a player'}`, ts);
+    }
+    save(); return;
+  }
   if (ev.type !== 'hit' && ev.type !== 'kill' && ev.type !== 'death' && ev.type !== 'build') return;
   const d = load(); const vkey = ev.id || ev.name;
   if (ev.type === 'build') { player(vkey, ev.name).builds++; save(); return; }
@@ -59,6 +71,7 @@ function record(ev) {
       const dmg = a.damage || 0; att.dealt += dmg; att.hits++; victim.taken += dmg; victim.hitsTaken++;
       if (a.part && /head/i.test(a.part)) att.headshots++;
       if (a.part) att.parts[a.part] = (att.parts[a.part] || 0) + 1;
+      victim.lastHitTakenAt = ev.ts || Date.now(); victim.lastHitTakenBy = a.attackerName;
       if (a.distance !== null) { att.hitDistSum += a.distance; att.hitDistN++; }
       d.totals.hits++; d.totals.damage += dmg;
       { const c = flagCfg(); const ts = ev.ts || Date.now();
@@ -113,12 +126,36 @@ function overview() {
     favouriteWeapons: players.filter(p => p.kills > 0).sort((a, b) => b.kills - a.kills).slice(0, 10).map(p => ({ name: p.name, value: Object.entries(p.killsBy).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([w, n]) => `${w} ×${n}`).join(', ') }))
   };
 }
+// BattlEye kick lines from the RPT / server console, e.g. "Player Bob kicked by BattlEye: Script Restriction #58"
+const BE_RE = /BattlEye[^:]*:\s*(Script Restriction #\d+|Game Restriction #\d+|Global Ban|Admin Ban|Corrupted Memory #\d+|Corrupted Data #\d+|Bad Player Name|Client not responding|Invalid GUID|Failed to update|Query Timeout)/i;
+function beKick(line, ts = Date.now()) {
+  const m = BE_RE.exec(line || ''); if (!m) return null;
+  const reason = m[1];
+  if (/Client not responding|Query Timeout|Failed to update/i.test(reason)) return null; // connectivity, not cheating
+  const nm = line.match(/Player\s+(?:#\d+\s+)?"?([^"(]+?)"?\s*(?:\(|kicked|\-|$)/i); const name = nm ? nm[1].trim() : 'unknown';
+  const d = load(); const p = Object.values(d.players).find(x => x.name === name) || player(name, name);
+  raise(p, 'BattlEye kick', reason, ts); save();
+  return { name, reason };
+}
+function countSince(p, since) { return (p.flagEvents || []).filter(e => e[0] >= since).length; }
+function windows(p) { const now = Date.now(); return { day: countSince(p, now - 86400000), week: countSince(p, now - 7 * 86400000), month: countSince(p, now - 30 * 86400000), all: (p.flagEvents || []).length || Object.values(p.flags || {}).reduce((a, b) => a + b, 0) }; }
 function accuracyOf(p) {
   const total = Object.values(p.parts || {}).reduce((a, b) => a + b, 0);
   return { hitsPerKill: p.kills ? +(p.hits / p.kills).toFixed(1) : null, headshotPct: p.hits ? Math.round(100 * p.headshots / p.hits) : null, avgHitDist: p.hitDistN ? Math.round(p.hitDistSum / p.hitDistN) : null, parts: Object.entries(p.parts || {}).sort((a, b) => b[1] - a[1]).map(([part, n]) => ({ part, n, pct: total ? Math.round(100 * n / total) : 0 })) };
 }
-function forPlayer(keyOrName) { const d = load(); const p = d.players[keyOrName] || Object.values(d.players).find(x => x.name === keyOrName); if (!p) return null; return { dealt: Math.round(p.dealt), taken: Math.round(p.taken), hits: p.hits, hitsTaken: p.hitsTaken, headshots: p.headshots, longestKill: Math.round(p.longestKill), avgKillDist: p.distN ? Math.round(p.distSum / p.distN) : null, favourite: Object.entries(p.killsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), deathsBy: Object.entries(p.deathsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), builds: p.builds, accuracy: accuracyOf(p), flags: Object.entries(p.flags || {}).map(([reason, n]) => ({ reason, n })), flagScore: p.flagScore || 0, lastFlag: p.lastFlag || null }; }
-function suspicious() { const d = load(); return Object.values(d.players).filter(p => (p.flagScore || 0) > 0).sort((a, b) => b.flagScore - a.flagScore).slice(0, 25).map(p => ({ name: p.name, score: p.flagScore, flags: Object.entries(p.flags).map(([r, n]) => `${r} ×${n}`).join(', '), last: p.lastFlag ? `${p.lastFlag.reason}: ${p.lastFlag.detail}` : '', lastAt: p.lastFlagAt, hits: p.hits, headshotPct: p.hits ? Math.round(100 * p.headshots / p.hits) : 0 })); }
+function forPlayer(keyOrName) { const d = load(); const p = d.players[keyOrName] || Object.values(d.players).find(x => x.name === keyOrName); if (!p) return null; return { dealt: Math.round(p.dealt), taken: Math.round(p.taken), hits: p.hits, hitsTaken: p.hitsTaken, headshots: p.headshots, longestKill: Math.round(p.longestKill), avgKillDist: p.distN ? Math.round(p.distSum / p.distN) : null, favourite: Object.entries(p.killsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), deathsBy: Object.entries(p.deathsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), builds: p.builds, accuracy: accuracyOf(p), flags: Object.entries(p.flags || {}).map(([reason, n]) => ({ reason, n })), flagScore: p.flagScore || 0, lastFlag: p.lastFlag || null, flagWindows: windows(p), flagHistory: (p.flagEvents || []).slice(-20).reverse().map(e => ({ ts: e[0], reason: e[1], detail: e[2] })) }; }
+// since = epoch ms (0 = all time): flags and score counted only inside the window
+function suspicious(since = 0) {
+  const d = load();
+  return Object.values(d.players).map(p => {
+    const evs = (p.flagEvents || []).filter(e => e[0] >= since);
+    const counts = {}; for (const e of evs) counts[e[1]] = (counts[e[1]] || 0) + 1;
+    const useAll = !since && !evs.length && p.flagScore; // records from before the history existed
+    const flags = useAll ? p.flags : counts;
+    const score = useAll ? p.flagScore : Object.entries(counts).reduce((a, [r, n]) => a + (FLAG_WEIGHT[r] || 1) * Math.min(n, 5), 0);
+    return { name: p.name, score, count: useAll ? Object.values(p.flags).reduce((a, b) => a + b, 0) : evs.length, flags: Object.entries(flags).map(([r, n]) => `${r} ×${n}`).join(', '), last: p.lastFlag ? `${p.lastFlag.reason}: ${p.lastFlag.detail}` : '', lastAt: p.lastFlagAt, hits: p.hits, headshotPct: p.hits ? Math.round(100 * p.headshots / p.hits) : 0, windows: windows(p) };
+  }).filter(p => p.score > 0).sort((a, b) => b.score - a.score).slice(0, 30);
+}
 function clear() { db = null; try { fs.unlinkSync(file()); } catch { /* ignore */ } load(); }
 // Re-read every admin log on disk.
 function rebuild() {
@@ -130,4 +167,4 @@ function rebuild() {
   save(); return { files: files.length, events: n };
 }
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, record, overview, forPlayer, rebuild, clear, parseAttack, suspicious, flagCfg };
+module.exports = { init, record, overview, forPlayer, rebuild, clear, parseAttack, suspicious, flagCfg, beKick };

@@ -107,7 +107,7 @@ async function ensureFirewall() {
   } catch (e) { emit('console', { source: 'network', line: 'Firewall rules not added: ' + e.message + '. Add them on the Network page.' }); }
 }
 function emit(channel, data) {
-  if (channel === 'console' && data) { try { servererrors.handleLine(data.source, data.line); } catch { /* ignore */ } }
+  if (channel === 'console' && data) { try { servererrors.handleLine(data.source, data.line); } catch { /* ignore */ } if ((data.source === 'rpt' || data.source === 'server') && /BattlEye/i.test(data.line || '')) { try { const k = combat.beKick(data.line); if (k) audit.log('system', 'BattlEye', 'kick', `${k.name}: ${k.reason}`); } catch { /* ignore */ } } }
   if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') && !/(0 failed)|0 error|no error|failed: 0\b|fails?: ?0\b/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
   else if (channel === 'alerts:new' && data) toollog.warn(`alert ${data.kind}: ${data.title} ${data.details || ''}`);
   if (channel === 'health:sample' && data) stats.recordSample(data);
@@ -350,6 +350,7 @@ handle('stats:summaryText', () => stats.summaryText());
 handle('stats:postSummary', () => stats.postSummaryNow());
 handle('audit:list', (o) => audit.list(o || {}));
 handle('combat:overview', () => combat.overview());
+handle('combat:suspicious', (since) => combat.suspicious(Number(since) || 0));
 handle('combat:rebuild', () => combat.rebuild());
 // ---- diagnostics: the tool's own log and a shareable bundle ----
 handle('app:openLogDir', () => { const p = toollog.path(); if (p && fs.existsSync(p)) shell.showItemInFolder(p); else shell.openPath(app.getPath('userData')); return p; });
