@@ -38,12 +38,9 @@ function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<':
 // ---------- console ----------
 const consoleHidden = new Set();
 // Pinned strip of the last critical lines from the server, so they do not scroll away in a busy console.
-const CRITICAL_RE = /crash|fatal|exception|access violation|out of memory|cannot (open|load|find|create)|failed to (load|open|start|bind|create)|script error|no entry|missing|not found|bad version|signature|be(?:server)? ?(?:init|start) ?fail|cannot bind|address already|invalid (?:config|mission|argument)|error/i;
-const CRITICAL_IGNORE = /warning|0 error|no error|error summary/i;
 const criticalLines = [];
 function pinCritical(source, line) {
-  if (source !== 'server' && source !== 'rpt') return;
-  if (!CRITICAL_RE.test(line) || CRITICAL_IGNORE.test(line)) return;
+  // called from alerts:new for server-critical / server-major only
   const key = line.replace(/^\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '').trim();
   const existing = criticalLines.find(c => c.key === key);
   if (existing) { existing.count++; existing.at = Date.now(); }
@@ -59,12 +56,11 @@ function renderCritical() {
 $('btnClearCritical').onclick = () => { criticalLines.length = 0; renderCritical(); };
 ipc.on('server:status', st => { if (st && st.running && st.startedAt && Date.now() - st.startedAt < 3000) { criticalLines.length = 0; renderCritical(); } });
 function logLine({ source, line }) {
-  pinCritical(source, line);
   const pre = $('console');
   const span = document.createElement('span');
   span.dataset.src = ['server', 'rpt', 'steamcmd'].includes(source) ? source : 'other';
   if (consoleHidden.has(span.dataset.src)) span.hidden = true;
-  const cls = /error|fail|invalid|exception|can't|cannot/i.test(line) ? 'err' : /warn/i.test(line) ? 'warn' : '';
+  const cls = /error|fail|invalid|exception|can't|cannot/i.test(line) && !/(0 failed)|0 error|no error|failed: 0/i.test(line) ? 'err' : /warn/i.test(line) ? 'warn' : '';
   span.innerHTML = `<span class="src src-${esc(source)}">[${esc(source)}]</span> <span class="${cls}">${esc(line)}</span>\n`;
   pre.appendChild(span);
   while (pre.childNodes.length > 3000) pre.removeChild(pre.firstChild);
@@ -1241,7 +1237,7 @@ async function refreshAlertList() {
   const list = await ipc.invoke('alerts:recent');
   $('alertList').innerHTML = list.length ? list.slice(0, 20).map(al => `<div class="alert-item"><span class="alert-ic k-${esc(al.kind)}"></span><div><div class="alert-title">${al.kind === 'server-critical' ? '<span class="badge bad">critical</span> ' : al.kind === 'server-major' ? '<span class="badge warn">major</span> ' : al.kind === 'server-minor' ? '<span class="badge">minor</span> ' : ''}${esc(al.title)}</div>${al.details ? `<div class="muted alert-details">${esc(al.details.split('\n')[0])}</div>` : ''}</div><span class="muted alert-time">${new Date(al.at).toLocaleTimeString()}</span></div>`).join('') : '<div class="muted">No alerts yet.</div>';
 }
-ipc.on('alerts:new', (al) => { refreshAlertList(); if (['crash', 'crash-loop', 'backup-failed', 'update-failed', 'server-critical'].includes(al.kind)) toast(al.title, true); });
+ipc.on('alerts:new', (al) => { if (al.kind === 'server-critical' || al.kind === 'server-major') pinCritical(al.kind === 'server-critical' ? 'critical' : 'major', al.details || al.title); refreshAlertList(); if (['crash', 'crash-loop', 'backup-failed', 'update-failed', 'server-critical'].includes(al.kind)) toast(al.title, true); });
 $('btnAlertsPage').onclick = () => showPage('alerts');
 let alertsCfg = null;
 async function loadAlertsPage() {

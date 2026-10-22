@@ -101,7 +101,7 @@ async function ensureFirewall() {
 }
 function emit(channel, data) {
   if (channel === 'console' && data) { try { servererrors.handleLine(data.source, data.line); } catch { /* ignore */ } }
-  if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
+  if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') && !/(0 failed)|0 error|no error|failed: 0/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
   else if (channel === 'alerts:new' && data) toollog.warn(`alert ${data.kind}: ${data.title} ${data.details || ''}`);
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
