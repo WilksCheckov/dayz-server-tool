@@ -60,7 +60,7 @@ function logLine({ source, line }) {
   const span = document.createElement('span');
   span.dataset.src = ['server', 'rpt', 'steamcmd'].includes(source) ? source : 'other';
   if (consoleHidden.has(span.dataset.src)) span.hidden = true;
-  const cls = /error|fail|invalid|exception|can't|cannot/i.test(line) && !/(0 failed)|0 error|no error|failed: 0/i.test(line) ? 'err' : /warn/i.test(line) ? 'warn' : '';
+  const cls = /error|fail|invalid|exception|can't|cannot/i.test(line) && !/(0 failed)|0 error|no error|failed: 0\b|fails?: ?0\b/i.test(line) ? 'err' : /warn/i.test(line) ? 'warn' : '';
   span.innerHTML = `<span class="src src-${esc(source)}">[${esc(source)}]</span> <span class="${cls}">${esc(line)}</span>\n`;
   pre.appendChild(span);
   while (pre.childNodes.length > 3000) pre.removeChild(pre.firstChild);

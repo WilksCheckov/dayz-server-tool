@@ -6,7 +6,7 @@ const alerts = require('./alerts');
 
 const RULES = [
   // critical: the server will not run or is about to die
-  { level: 'critical', re: /crash|fatal|access violation|unhandled exception|out of memory|stack overflow|cannot bind|address already in use|port .* in use|battleye.*(fail|not (?:found|installed))|be(?:server)?.*init.*fail|bad version|wrong version|mission (?:not found|failed to load)|cannot (?:open|load) mission|verifysignatures|signature (?:check )?fail|no space left|disk full|steam.*(?:not running|init.*fail)/i, title: 'Server critical error' },
+  { level: 'critical', re: /\bcrash(?:ed|es|ing)?\b|fatal|access violation|unhandled exception|out of memory|stack overflow|cannot bind|address already in use|port .* in use|battleye.*(fail|not (?:found|installed))|be(?:server)?.*init.*fail|bad version|wrong version|mission (?:not found|failed to load)|cannot (?:open|load) mission|verifysignatures|signature (?:check )?fail|no space left|disk full|steam.*(?:not running|init.*fail)/i, title: 'Server critical error' },
   // major: something is broken that players will notice (missing files, mod and script failures)
   { level: 'major', re: /script error|script\(e\)|\bSCRIPT\s+\(E\)|cannot open file|cannot load|failed to (?:load|open|read|parse|start)|file .* not found|missing (?:addon|pbo|file|key|mod)|addon .* (?:requires|not found)|no such file|invalid (?:config|xml|json|mission|argument)|xml.*(?:error|invalid)|json.*(?:error|invalid)|\[CE\].*(?:failed: [1-9]|\berror)|error (?:loading|reading|parsing)|exception/i, title: 'Server error' },
   // minor: warnings and bad data that the server works around
