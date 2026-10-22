@@ -1,7 +1,7 @@
 {
   "name": "dayz-server-tool",
   "productName": "DayZ Server Tool",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Desktop app to install, update, run and monitor a DayZ Standalone dedicated server with Steam Workshop mod management.",
   "main": "src/main/main.js",
   "author": "chris",
