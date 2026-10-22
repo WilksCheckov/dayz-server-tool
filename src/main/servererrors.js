@@ -8,15 +8,18 @@ const RULES = [
   // critical: the server will not run or is about to die
   { level: 'critical', re: /crash|fatal|access violation|unhandled exception|out of memory|stack overflow|cannot bind|address already in use|port .* in use|battleye.*(fail|not (?:found|installed))|be(?:server)?.*init.*fail|bad version|wrong version|mission (?:not found|failed to load)|cannot (?:open|load) mission|verifysignatures|signature (?:check )?fail|no space left|disk full|steam.*(?:not running|init.*fail)/i, title: 'Server critical error' },
   // major: something is broken that players will notice (missing files, mod and script failures)
-  { level: 'major', re: /script error|script\(e\)|\bSCRIPT\s+\(E\)|cannot open file|cannot load|failed to (?:load|open|read|parse|start)|file .* not found|missing (?:addon|pbo|file|key|mod)|addon .* (?:requires|not found)|no such file|invalid (?:config|xml|json|mission|argument)|xml.*(?:error|invalid)|json.*(?:error|invalid)|\[CE\].*(?:error|fail)|error (?:loading|reading|parsing)|exception/i, title: 'Server error' },
+  { level: 'major', re: /script error|script\(e\)|\bSCRIPT\s+\(E\)|cannot open file|cannot load|failed to (?:load|open|read|parse|start)|file .* not found|missing (?:addon|pbo|file|key|mod)|addon .* (?:requires|not found)|no such file|invalid (?:config|xml|json|mission|argument)|xml.*(?:error|invalid)|json.*(?:error|invalid)|\[CE\].*(?:failed: [1-9]|\berror)|error (?:loading|reading|parsing)|exception/i, title: 'Server error' },
   // minor: warnings and bad data that the server works around
-  { level: 'minor', re: /warning|no entry|unsupported (?:type|value)|duplicate|deprecated|unknown (?:class|type|key)|not defined|cannot find (?:class|type|variable)|invalid (?:type|value|count|quantity)|out of (?:range|bounds)|skipping/i, title: 'Server warning' }
+  // minor only counts when the line is about server-operator content (mission files, CE, XML/JSON, scripts, mods), not engine assets
+  { level: 'minor', re: /warning|no entry|unsupported (?:type|value)|duplicate|deprecated|unknown (?:class|type|key)|not defined|cannot find (?:class|type|variable)|invalid (?:type|value|count|quantity)|out of (?:range|bounds)|skipping/i, title: 'Server warning', only: /mpmissions|\.xml|\.json|\[CE\]|\bCE\b|SCRIPT|init\.c|\bmission\b|\btypes\b|\bevents\b|spawnable|economy|\bloot\b|@\w|serverDZ|cfggameplay|storage_/i }
 ];
 const IGNORE = /0 error|no error|error summary|errors?: 0\b|average server fps|logging|player .* connected|disconnected|\[BE\]|battleye server: (?:updating|downloading|update attempt|registered)/i;
+// Vanilla DayZ prints these on every start; they are engine noise, not problems with the server.
+const VANILLA_NOISE = /Warning Message: (?:No entry 'config\.bin|Trying to access error value|Size: '\/' not an array|Cannot open object|Bad simulation)|Localization not present|Unrecognized CfgNonAIVehicles|\b(?:ANIMATION|RESOURCES|AUDIO|MATERIAL|TEXTURE|SHADER|PHYSICS)\s*\(E\)|\[Inputs\] Cannot (?:load|save)|Cannot register unknown string|Creating \S+ for class|Unsupported language|Error: selected object|does not have a cfgVehicles entry|Ragdoll: no bones|Failed to open file, line 0, column 0|Cannot load font|ca\\\\ui\\\\|Duplicate HitPoints|Unknown animation source|SpawnNearPlayers|Invalid hitZone|Sound set .* references missing|CfgSurfaces|^\s*Running .* (?:GUI|renderer)/i;
 
 function classify(line) {
-  if (!line || IGNORE.test(line)) return null;
-  for (const r of RULES) if (r.re.test(line)) return { level: r.level, title: r.title };
+  if (!line || IGNORE.test(line) || VANILLA_NOISE.test(line)) return null;
+  for (const r of RULES) if (r.re.test(line) && (!r.only || r.only.test(line))) return { level: r.level, title: r.title };
   return null;
 }
 

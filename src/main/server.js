@@ -77,7 +77,7 @@ function pollRpt() {
     rptOffset += len;
     const lines = (rptRest + buf.toString('utf8')).split(/\r?\n/); rptRest = lines.pop() || '';
     let n = 0;
-    for (const l of lines) { if (!l.trim()) continue; if (++n > 200) { emitRef('console', { source: 'rpt', line: `(… ${lines.length - 200} more lines, open the Logs page for the full file)` }); break; } emitRef('console', { source: 'rpt', line: l }); }
+    for (const l of lines) { if (!l.trim()) continue; if (++n > 1500) { emitRef('console', { source: 'rpt', line: `(… ${lines.length - 1500} more lines, open the Logs page for the full file)` }); break; } emitRef('console', { source: 'rpt', line: l }); }
   } catch { /* file not readable yet */ }
 }
 
