@@ -8,13 +8,31 @@ const RULE_PREFIX = 'DayZ Server Tool';
 
 function ps(cmd, { elevated = false } = {}) {
   return new Promise((resolve, reject) => {
-    const args = elevated
-      ? ['-NoProfile', '-NonInteractive', '-Command', `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-Command',${JSON.stringify(cmd.replace(/'/g, "''"))}`]
-      : ['-NoProfile', '-NonInteractive', '-Command', cmd];
-    const p = spawn('powershell.exe', args, { windowsHide: true });
-    let out = '', err = '';
-    p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { err += d; });
-    p.on('close', code => code === 0 ? resolve(out) : reject(new Error(err.trim() || out.trim() || `exit ${code}`)));
+    if (!elevated) {
+      const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { windowsHide: true });
+      let out = '', err = '';
+      p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { err += d; });
+      p.on('close', code => code === 0 ? resolve(out) : reject(new Error(err.trim() || out.trim() || `exit ${code}`)));
+      p.on('error', reject);
+      return;
+    }
+    // Elevated: write the script to a file so no quoting survives two PowerShell layers, and have it
+    // record its output and errors in a result file we read back (an elevated window cannot be piped).
+    const os = require('os'); const fs = require('fs'); const path = require('path');
+    const stamp = Date.now();
+    const script = path.join(os.tmpdir(), `dzst-fw-${stamp}.ps1`), result = path.join(os.tmpdir(), `dzst-fw-${stamp}.txt`);
+    fs.writeFileSync(script, `$ErrorActionPreference = 'Continue'\r\n$out = @()\r\ntry {\r\n${cmd}\r\n} catch { $out += ('ERROR: ' + $_.Exception.Message) }\r\n$out += 'DONE'\r\n$out | Out-File -FilePath '${result.replace(/'/g, "''")}' -Encoding utf8\r\n`, 'utf8');
+    const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${script.replace(/'/g, "''")}'`], { windowsHide: true });
+    let err = '';
+    p.stderr.on('data', d => { err += d; });
+    p.on('close', code => {
+      let out = ''; try { out = fs.readFileSync(result, 'utf8'); } catch { /* no result: the UAC prompt was declined or the script never ran */ }
+      try { fs.unlinkSync(script); } catch { /* ignore */ } try { fs.unlinkSync(result); } catch { /* ignore */ }
+      if (code !== 0) return reject(new Error(/canceled|cancelled|denied/i.test(err) ? 'Administrator permission was declined.' : (err.trim() || `exit ${code}`)));
+      if (!out.includes('DONE')) return reject(new Error('The elevated command did not run (permission declined?).'));
+      const errors = out.split(/\r?\n/).filter(l => l.startsWith('ERROR:'));
+      errors.length ? reject(new Error(errors.join('; '))) : resolve(out);
+    });
     p.on('error', reject);
   });
 }
@@ -34,17 +52,21 @@ function ports() {
 
 async function rules() {
   try {
-    const out = await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX}*' | ForEach-Object { $pf = $_ | Get-NetFirewallPortFilter; "$($_.DisplayName)|$($_.Enabled)|$($pf.Protocol)|$($pf.LocalPort)" }`);
+    const out = await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' | ForEach-Object { $pf = $_ | Get-NetFirewallPortFilter; "$($_.DisplayName)|$($_.Enabled)|$($pf.Protocol)|$($pf.LocalPort)" }`);
     return out.trim().split(/\r?\n/).filter(Boolean).map(l => { const [name, enabled, proto, port] = l.split('|'); return { name, enabled: enabled === 'True', proto, port }; });
   } catch { return []; }
 }
 
 async function addRules() {
-  const cmds = ports().map(p => `New-NetFirewallRule -DisplayName '${RULE_PREFIX} ${p.name} ${p.proto} ${p.port}' -Direction Inbound -Action Allow -Protocol ${p.proto} -LocalPort ${p.port} -Profile Any -ErrorAction SilentlyContinue | Out-Null`);
-  await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX}*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule; ${cmds.join('; ')}`, { elevated: true });
-  return rules();
+  const cmds = ports().map(p => `New-NetFirewallRule -DisplayName '${RULE_PREFIX} ${p.name} ${p.proto} ${p.port}' -Direction Inbound -Action Allow -Protocol ${p.proto} -LocalPort ${p.port} -Profile Any -ErrorAction Stop | Out-Null`);
+  await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue\r\n${cmds.join('\r\n')}`, { elevated: true });
+  // verify: the rules must now exist, otherwise report it instead of pretending
+  const have = await rules();
+  const missing = ports().filter(p => !have.some(r => String(r.port) === String(p.port) && r.proto === p.proto));
+  if (missing.length) throw new Error('Rules were not created for ' + missing.map(p => p.proto + ' ' + p.port).join(', '));
+  return have;
 }
-async function removeRules() { await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX}*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule`, { elevated: true }); return rules(); }
+async function removeRules() { await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule`, { elevated: true }); return rules(); }
 
 async function publicIp() {
   for (const url of ['https://api.ipify.org?format=json', 'https://ifconfig.me/all.json']) {

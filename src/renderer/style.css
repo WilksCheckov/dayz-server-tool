@@ -398,3 +398,6 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .critical-title { font-weight: 600; color: var(--bad); }
 .critical-line { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; padding: 2px 0; border-top: 1px solid color-mix(in srgb, var(--bad) 20%, transparent); }
 .critical-line:first-child { border-top: 0; margin-top: 4px; }
+#page-launch > .card, #page-launch > .grid-2 > .card { flex-shrink: 0; }
+.cfg-form .check { align-self: end; padding-bottom: 9px; }
+.cfg-form .field { margin: 0; }

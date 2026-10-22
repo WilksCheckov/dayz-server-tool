@@ -134,6 +134,7 @@ function createWindow() {
     win.webContents.once('did-finish-load', () => setTimeout(async () => {
       if (process.env.DZ_THEME) await win.webContents.executeJavaScript('document.documentElement.dataset.theme = ' + JSON.stringify(process.env.DZ_THEME));
       if (process.env.DZ_PAGE) await win.webContents.executeJavaScript(`document.querySelector('[data-page="${process.env.DZ_PAGE}"]').click()`);
+      if (process.env.DZ_SCROLL) await win.webContents.executeJavaScript(`document.querySelector('.page.active').scrollTop = ${Number(process.env.DZ_SCROLL)}`);
       if (process.env.DZ_FAKE_LINES) for (const l of process.env.DZ_FAKE_LINES.split('||')) { const [source, line] = l.split('::'); emit('console', { source, line }); }
       await new Promise(r => setTimeout(r, Number(process.env.DZ_WAIT || 1500)));
       if (process.env.DZ_DEBUG) console.log('[shot] page:', await win.webContents.executeJavaScript("document.querySelector('.page.active').id + ' title=' + document.getElementById('pageTitle').textContent + ' navbtn=' + !!document.querySelector('[data-page=' + JSON.stringify(" + JSON.stringify(process.env.DZ_PAGE || '') + ") + ']')"));
