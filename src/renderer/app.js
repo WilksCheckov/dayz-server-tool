@@ -130,6 +130,7 @@ const NAV = [
     { page: 'stats', label: 'Statistics', sub: 'Deaths, players online, leaderboards and server health over time', icon: 'stats' },
     { page: 'players', label: 'Online', sub: 'Live players via RCon: message, kick, ban', icon: 'players' },
     { page: 'database', label: 'Database', sub: 'Every player seen in the admin logs: playtime, kills, sessions, notes', icon: 'database' },
+    { page: 'deathlog', label: 'Death log', sub: 'Every death: cause, killer, weapon, range, damage per body part, gear carried, refunds', icon: 'database' },
     { page: 'bans', label: 'Bans', sub: 'Game bans and BattlEye bans', icon: 'bans' },
     { page: 'whitelist', label: 'Whitelist', sub: 'Who may join when enableWhitelist is on (whitelist.txt)', icon: 'lists' },
     { page: 'priority', label: 'Priority queue', sub: 'Who skips the login queue (priority.txt)', icon: 'priority' },
@@ -183,6 +184,7 @@ function showPage(name) {
   if (name === 'audit') refreshAudit();
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
+  if (name === 'deathlog') refreshDeathLog();
   if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); requestAnimationFrame(() => { if ($('consoleAutoscroll').checked) $('console').scrollTop = $('console').scrollHeight; }); }
   if (name === 'discord') requestAnimationFrame(() => { const p = $('discordLog'); p.scrollTop = p.scrollHeight; });
   if (name === 'players') requestAnimationFrame(() => { const p = $('rconMessages'); p.scrollTop = p.scrollHeight; });
@@ -1066,13 +1068,13 @@ function loadDiscordForm() {
   $('dcStatusFormat').value = c.statusFormat || 'Server Online | {count}/{max} Players'; $('dcOfflineStatus').value = c.offlineStatus || 'Server Offline';
   $('dcAuto').checked = !!c.autoStart;
   $('dcSummaryChannel').value = c.summaryChannelId || ''; $('dcSummaryTime').value = c.summaryTime || '09:00';
-  $('dcTicketCategory').value = c.ticketCategoryId || ''; $('dcTicketLog').value = c.ticketLogChannelId || ''; $('dcKillFeed').value = c.killFeedChannelId || ''; $('dcJoinFeed').value = c.joinFeedChannelId || '';
+  $('dcTicketCategory').value = c.ticketCategoryId || ''; $('dcTicketLog').value = c.ticketLogChannelId || ''; $('dcKillFeed').value = c.killFeedChannelId || ''; $('dcDeathLog').value = c.deathLogChannelId || ''; $('dcJoinFeed').value = c.joinFeedChannelId || '';
   $('dcLiveChannel').value = c.liveLogChannelId || '';
   const kinds = c.liveLogKinds || ['adm'];
   $('dcLiveAdm').checked = kinds.includes('adm'); $('dcLiveRpt').checked = kinds.includes('rpt'); $('dcLiveErrors').checked = !!c.liveLogErrorsOnly;
 }
 function discordForm() {
-  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked, summaryChannelId: $('dcSummaryChannel').value.trim(), summaryTime: $('dcSummaryTime').value.trim() || '09:00', ticketCategoryId: $('dcTicketCategory').value.trim(), ticketLogChannelId: $('dcTicketLog').value.trim(), killFeedChannelId: $('dcKillFeed').value.trim(), joinFeedChannelId: $('dcJoinFeed').value.trim() };
+  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked, summaryChannelId: $('dcSummaryChannel').value.trim(), summaryTime: $('dcSummaryTime').value.trim() || '09:00', ticketCategoryId: $('dcTicketCategory').value.trim(), ticketLogChannelId: $('dcTicketLog').value.trim(), killFeedChannelId: $('dcKillFeed').value.trim(), deathLogChannelId: $('dcDeathLog').value.trim(), joinFeedChannelId: $('dcJoinFeed').value.trim() };
 }
 $('btnDiscordSave').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); await ipc.invoke('discord:applyLiveLog'); toast('Bot settings saved'); renderDiscord(await ipc.invoke('discord:status')); }, e.target);
 $('btnDiscordStart').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); toast('Starting bot…'); renderDiscord(await ipc.invoke('discord:start')); toast('Bot online'); }, e.target);
@@ -1427,10 +1429,22 @@ function renderPdbDetail(r) {
       ${r.steamId ? `<button class="btn small" id="pdSteam">Steam profile</button>` : ''}
       <button class="btn small danger" id="pdRemove" title="Delete this record (it will be rebuilt from the logs if the player appears again)">Delete record</button>
     </div>
+    <div class="muted" style="margin-top:4px">In-game actions (needs the bridge script and the player online)</div>
+    <div class="row gap wrap">
+      <button class="btn small pd-heal" data-what="all" ${r.online ? '' : 'disabled'}>Heal everything</button>
+      <button class="btn small pd-heal" data-what="health" ${r.online ? '' : 'disabled'}>Health &amp; blood</button>
+      <button class="btn small pd-heal" data-what="bleeding" ${r.online ? '' : 'disabled'}>Stop bleeding</button>
+      <button class="btn small pd-heal" data-what="bones" ${r.online ? '' : 'disabled'}>Fix bones</button>
+      <button class="btn small pd-heal" data-what="cure" ${r.online ? '' : 'disabled'}>Cure diseases</button>
+      <button class="btn small pd-heal" data-what="food" ${r.online ? '' : 'disabled'}>Food &amp; water</button>
+      <button class="btn small" id="pdTpDeath" ${r.online ? '' : 'disabled'} title="Teleport them back to where they last died">Teleport to last death</button>
+    </div>
     <label class="field">Notes <textarea id="pdNotes" class="input" rows="3">${esc(r.note || '')}</textarea></label>
     <div class="row gap"><button class="btn small primary" id="pdSaveNote">Save note</button></div>
     <div class="card-title mt">Recent sessions</div>
     <div class="table-wrap" style="max-height:220px"><table class="table"><thead><tr><th>Start</th><th>End</th><th>Length</th></tr></thead><tbody>${sessions.map(s => `<tr><td>${fmtDate(s.start)}</td><td>${fmtDate(s.end)}</td><td>${fmtPlaytime((s.end - s.start) / 1000)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No completed sessions.</td></tr>'}</tbody></table></div>`;
+  box.querySelectorAll('.pd-heal').forEach(b => b.onclick = (e) => run(async () => { const res = await ipc.invoke('deathlog:heal', r.key, b.dataset.what); toast(res.status === 'done' ? `${r.name} healed (${b.textContent.trim().toLowerCase()})` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed (Death log page) and the server running?', res.status !== 'done'); }, e.target));
+  const tpd = box.querySelector('#pdTpDeath'); if (tpd) tpd.onclick = (e) => run(async () => { const last = (await ipc.invoke('deathlog:forPlayer', r.key))[0]; if (!last) return toast('No recorded death for ' + r.name, true); const res = await ipc.invoke('deathlog:teleportToDeath', last.id); toast(res.status === 'done' ? `${r.name} teleported to ${Math.round(res.pos[0])}, ${Math.round(res.pos[1])}` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed and the server running?', res.status !== 'done'); }, e.target);
   box.querySelectorAll('.pd-act').forEach(b => b.onclick = (e) => run(async () => { const kind = b.dataset.kind; const rr = kind === 'ban' ? await askReason(`Ban ${r.name} (ban.txt)`) : { reason: '' }; if (!rr) return; await ipc.invoke('lists:add', kind, { id: r.steamId || r.id }, { name: r.name, note: rr.reason }); toast(`Added to ${kind}`); refreshPdb(); }, e.target));
   const ac = box.querySelector('#pdAccCheck'); if (ac) ac.onclick = (e) => run(async () => { const st = await ipc.invoke('steam:state'); if (!st.hasKey) { toast('Set a Steam Web API key on the Discord Bot page first', true); return; } const res = await ipc.invoke('accounts:check', r.steamId); toast(res ? 'Account checked' : 'Steam gave no answer', !res); refreshPdb(); }, e.target);
   const bm = box.querySelector('#pdBm'); if (bm) bm.onclick = () => ipc.invoke('shell:openExternal', r.account.battlemetricsUrl);
@@ -1453,6 +1467,64 @@ $('btnSteamCheck').onclick = (e) => run(async () => {
 }, e.target);
 $('btnPdbRebuild').onclick = (e) => run(async () => { const ok = await showModal('Rebuild the player database?', '<p>Records are re-read from the newest admin logs. Notes stored on the player lists are kept; notes typed only here are lost.</p>', [{ label: 'Rebuild', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('players:rebuild'); toast('Rebuilt'); refreshPdb(); }, e.target);
 ipc.on('players:changed', () => { if (document.querySelector('#page-database.active')) refreshPdb(); });
+
+// ---------- death log ----------
+let dlSelected = null;
+function fmtShort(ms) { const d = new Date(ms); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
+function fmtRange(m) { return m !== null && m !== undefined ? Math.round(m) + ' m' : '—'; }
+async function refreshDeathLog() {
+  const range = Number($('dlRange').value);
+  const rows = await ipc.invoke('deathlog:list', { q: $('dlQuery').value.trim(), cause: $('dlCause').value, since: range ? Date.now() - range : 0, limit: 400 });
+  const st = await ipc.invoke('deathlog:stats'); $('dlStats').textContent = `${st.deaths} deaths recorded · ${st.snapshots} gear snapshots for ${st.players} players`;
+  const tb = $('dlTable').querySelector('tbody');
+  tb.innerHTML = rows.length ? rows.map(r => `<tr data-id="${r.id}" class="${r.id === dlSelected ? 'selected' : ''}"><td class="mono" title="${esc(fmtDate(r.ts))}">${esc(fmtShort(r.ts))}</td><td><b>${esc(r.name)}</b>${r.online ? ' <span class="badge ok">online</span>' : ''}</td><td>${esc(r.cause)}</td><td>${r.killer ? esc(r.killer.name) : '<span class="muted">—</span>'}</td><td>${esc(r.weapon || '—')}</td><td>${fmtRange(r.distance)}</td><td>${r.hitCount ? `${Math.round(r.totalDamage)} (${r.hitCount} hit${r.hitCount === 1 ? '' : 's'})` : '—'}</td><td>${r.gearCount === null ? '<span class="muted">none</span>' : `${r.gearCount} items${r.refunds ? ` · refunded ×${r.refunds}` : ''}`}</td></tr>`).join('') : '<tr><td colspan="8" class="muted">No deaths match.</td></tr>';
+  tb.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => { dlSelected = Number(tr.dataset.id); tb.querySelectorAll('tr').forEach(x => x.classList.toggle('selected', x === tr)); showDeath(dlSelected); });
+  refreshBridgeState();
+}
+async function refreshBridgeState() {
+  const st = await ipc.invoke('deathlog:bridgeStatus'); const b = $('dlBridgeState');
+  b.className = 'badge ' + (st.upToDate ? 'ok' : st.installed ? 'warn' : 'bad');
+  b.textContent = st.error ? st.error : st.upToDate ? `installed (v${st.version})` : st.installed ? `installed v${st.version}, update available` : 'not installed';
+  const s = await ipc.invoke('settings:get'); $('dlBridgeAuto').checked = ((s.deathlog || {}).bridge !== false);
+}
+async function showDeath(id) {
+  const r = await ipc.invoke('deathlog:get', id); const box = $('dlDetail');
+  if (!r) { box.innerHTML = '<div class="empty">Record not found.</div>'; return; }
+  const parts = Object.entries(r.byPart || {}).sort((a, b) => b[1].damage - a[1].damage);
+  const maxDmg = Math.max(1, ...parts.map(p => p[1].damage));
+  const hits = r.hits.slice().reverse();
+  const groups = {}; for (const g of (r.gear || [])) { const k = g.p || 'On the player'; (groups[k] = groups[k] || []).push(g); }
+  const gearHtml = r.gear && r.gear.length ? Object.entries(groups).map(([k, items]) => `<div class="muted" style="margin-top:4px">${esc(k)}</div>` + items.map(g => `<div class="row between"><span class="mono">${esc(g.c)}</span><span class="muted">${g.q >= 0 ? 'qty ' + Math.round(g.q * 100) / 100 + ' · ' : ''}${Math.round(g.h * 100)}% hp</span></div>`).join('')).join('') : '<div class="muted">No gear snapshot for this death. The bridge script records gear only while it is installed and the server has been restarted since.</div>';
+  box.innerHTML = `
+    <div class="row between"><b style="font-size:15px">${esc(r.name)}</b>${r.online ? '<span class="badge ok">online</span>' : '<span class="badge">offline</span>'}</div>
+    <div class="muted">${esc(fmtDate(r.ts))} · record #${r.id}${r.pos ? ` · at ${Math.round(r.pos.x)}, ${Math.round(r.pos.z)}` : ''}</div>
+    <div><b>${esc(r.cause === 'player' && r.killer ? `Killed by ${r.killer.name}` : r.causeText)}</b>${r.cause === 'player' ? `${r.weapon ? ' with ' + esc(r.weapon) : ''}${r.ammo ? ' (' + esc(r.ammo) + ')' : ''}${r.distance !== null && r.distance !== undefined ? ' from ' + fmtRange(r.distance) : ''}${r.finalPart ? ', final hit to the ' + esc(r.finalPart) + (r.finalDamage ? ' for ' + Math.round(r.finalDamage) + ' damage' : '') : ''}` : ''}</div>
+    ${parts.length ? `<div class="muted" style="margin-top:6px">Damage by body part · ${r.hits.length} hit${r.hits.length === 1 ? '' : 's'}, ${Math.round(r.totalDamage)} total</div>` + parts.map(([p, v]) => `<div class="row gap" style="align-items:center"><span style="width:90px">${esc(p)}</span><div class="bar grow"><div class="bar-fill" style="width:${Math.round(100 * v.damage / maxDmg)}%"></div></div><span class="mono" style="width:120px;text-align:right">${Math.round(v.damage)} dmg · ${v.hits} hit${v.hits === 1 ? '' : 's'}</span></div>`).join('') : '<div class="muted" style="margin-top:6px">No hits recorded before this death.</div>'}
+    ${r.attackers && r.attackers.length > 1 ? '<div class="muted" style="margin-top:6px">Attackers</div>' + r.attackers.map(a => `<div class="row between"><span>${esc(a.name)}</span><span class="muted">${a.hits} hits · ${Math.round(a.damage)} dmg</span></div>`).join('') : ''}
+    ${hits.length ? `<details style="margin-top:6px"><summary class="muted">Every hit (${hits.length})</summary><div class="table-wrap" style="max-height:220px"><table class="table compact"><thead><tr><th>Time</th><th>By</th><th>Part</th><th>Dmg</th><th>Range</th><th>Weapon</th></tr></thead><tbody>${hits.map(h => `<tr><td class="mono">${esc(new Date(h.ts).toLocaleTimeString())}</td><td>${esc(h.by)}</td><td>${esc(h.part || '—')}</td><td>${Math.round(h.damage)}</td><td>${fmtRange(h.distance)}</td><td>${esc(h.weapon || h.ammo || '—')}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+    <div class="row between" style="margin-top:8px"><b>Gear${r.gear ? ` (${r.gear.length} items, ${r.gearFromCorpse ? 'from the body' : 'last snapshot ' + Math.round((r.ts - r.gearTs) / 1000) + ' s before death'})` : ''}</b>
+      <span class="row gap"><button class="btn small" id="btnDlTp" ${r.online && r.deathPos ? '' : 'disabled'} title="${!r.deathPos ? 'No position recorded' : r.online ? 'Teleport the player back to where they died' : 'The player must be online'}">Teleport back here</button><button class="btn small" id="btnDlRefund" ${r.gear && r.gear.length && r.online ? '' : 'disabled'} title="${!r.gear || !r.gear.length ? 'No gear recorded' : r.online ? 'Spawn every item in pristine condition at the player\'s feet' : 'The player must be online'}">Refund gear</button></span></div>
+    <div style="max-height:260px;overflow:auto">${gearHtml}</div>
+    ${r.refunds && r.refunds.length ? '<div class="muted" style="margin-top:6px">Refunds</div>' + r.refunds.map(f => `<div class="row between"><span>${esc(fmtDate(f.ts))} by ${esc(f.by)}</span><span class="muted">${f.ok}/${f.items} spawned${f.fail ? `, ${f.fail} failed` : ''}${f.status !== 'done' ? ' (' + esc(f.status) + ')' : ''}</span></div>`).join('') : ''}`;
+  const tp = $('btnDlTp');
+  if (tp) tp.onclick = (e) => run(async () => { const res = await ipc.invoke('deathlog:teleportToDeath', r.id); toast(res.status === 'done' ? `${r.name} teleported to ${Math.round(res.pos[0])}, ${Math.round(res.pos[1])}` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed and the server running?', res.status !== 'done'); }, e.target);
+  const btn = $('btnDlRefund');
+  if (btn) btn.onclick = (e) => run(async () => {
+    const ok = await showModal('Refund gear', `<p>Spawn the ${r.gear.length} items ${esc(r.name)} had when they died, in pristine condition, at their feet now?</p><p class="muted">Weapons come without their attachments fitted; attachments, magazines and cargo are spawned as separate items.</p>`, [{ label: 'Refund', value: true, primary: true }, { label: 'Cancel', value: false }]);
+    if (!ok) return;
+    const res = await ipc.invoke('deathlog:refund', r.id);
+    toast(res.status === 'done' ? `Spawned ${res.ok} of ${res.items} items at ${r.name}'s feet${res.fail ? ` (${res.fail} failed)` : ''}` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed and the server running?', res.status !== 'done');
+    showDeath(r.id); refreshDeathLog();
+  }, e.target);
+}
+$('btnDlRefresh').onclick = () => refreshDeathLog();
+let dlTimer = null; $('dlQuery').oninput = () => { clearTimeout(dlTimer); dlTimer = setTimeout(refreshDeathLog, 250); };
+$('dlCause').onchange = $('dlRange').onchange = () => refreshDeathLog();
+$('dlBridgeAuto').onchange = () => saveSettings({ deathlog: { bridge: $('dlBridgeAuto').checked } });
+$('btnDlInstall').onclick = (e) => run(async () => { const st = await ipc.invoke('deathlog:installBridge'); toast(st.installed ? 'Bridge script written to init.c. Restart the server for it to load.' : 'Could not install'); refreshBridgeState(); }, e.target);
+$('btnDlRemove').onclick = (e) => run(async () => { if (!await showModal('Remove bridge script', '<p>Remove the bridge script from init.c? Gear snapshots and refunds stop at the next server start. Turn off "Keep it installed" as well, or it comes back on the next start.</p>', [{ label: 'Remove', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('deathlog:removeBridge'); refreshBridgeState(); }, e.target);
+$('btnDlOpenDir').onclick = () => ipc.invoke('deathlog:openBridgeDir');
+ipc.on('deathlog:changed', () => { if (document.querySelector('#page-deathlog.active')) refreshDeathLog(); });
 
 
 // ---------- economy editor ----------

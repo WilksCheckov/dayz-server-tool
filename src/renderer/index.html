@@ -769,6 +769,34 @@
           </div>
         </section>
 
+        <!-- DEATH LOG -->
+        <section class="page" id="page-deathlog">
+          <div class="card" style="flex-shrink:0">
+            <div class="row between wrap gap">
+              <div style="max-width:720px"><b>Bridge script</b> <span id="dlBridgeState" class="badge">checking…</span>
+                <div class="muted">A small script the tool writes into the mission's <code>init.c</code> between markers. It records every player's gear every few seconds and at the moment of death, and spawns refunds at a player's feet. It takes effect at the next server start. Without it the death log still records causes, hits and damage, but gear and refunds are unavailable.</div></div>
+              <div class="row gap wrap">
+                <label class="check"><input type="checkbox" id="dlBridgeAuto"> Keep it installed before each start</label>
+                <button class="btn small" id="btnDlInstall">Install / update</button>
+                <button class="btn small" id="btnDlRemove">Remove</button>
+                <button class="btn small" id="btnDlOpenDir" title="Open the folder where the script writes its gear log and reads refund commands">Open bridge folder</button>
+              </div>
+            </div>
+          </div>
+          <div class="page-toolbar">
+            <input id="dlQuery" class="input" placeholder="Search player, killer, weapon or cause" style="width:270px">
+            <select id="dlCause" class="input" style="width:150px"><option value="">All causes</option><option value="player">Player</option><option value="infected">Infected</option><option value="animal">Animal</option><option value="bleeding">Bleeding</option><option value="suicide">Suicide</option><option value="fall">Fall</option><option value="explosion">Explosion</option><option value="fire">Fire</option><option value="vehicle">Vehicle</option><option value="gas">Gas</option><option value="starvation">Starvation</option><option value="dehydration">Dehydration</option><option value="environment">Environment</option><option value="unknown">Unknown</option></select>
+            <select id="dlRange" class="input" style="width:130px"><option value="86400000">Last 24 h</option><option value="604800000" selected>Last 7 days</option><option value="2592000000">Last 30 days</option><option value="0">All time</option></select>
+            <span class="grow"></span>
+            <span class="muted" id="dlStats"></span>
+            <button class="btn" id="btnDlRefresh">Refresh</button>
+          </div>
+          <div class="pdb-layout dl-layout">
+            <div class="card list-card"><div class="table-wrap grow"><table class="table" id="dlTable"><thead><tr><th>Time</th><th>Player</th><th>Cause</th><th>Killed by</th><th>Weapon</th><th>Range</th><th>Damage</th><th>Gear</th></tr></thead><tbody></tbody></table></div></div>
+            <div class="card pdb-detail" id="dlDetail"><div class="empty">Select a death to see every hit, the damage per body part and the gear carried.</div></div>
+          </div>
+        </section>
+
         <!-- BANS -->
         <section class="page" id="page-bans">
           <div class="page-toolbar">
@@ -862,6 +890,7 @@
                 <label class="field">Ticket category ID (each ticket gets a private channel here; /ticketpanel posts the button) <input id="dcTicketCategory" class="input" placeholder="optional"></label>
                 <label class="field">Ticket log channel ID (transcript posted on close; falls back to the log channel) <input id="dcTicketLog" class="input" placeholder="optional"></label>
                 <label class="field">Kill feed channel ID (kills and deaths from the admin log) <input id="dcKillFeed" class="input" placeholder="optional"></label>
+                <label class="field">Death log channel ID (one detailed embed per death: hits, body parts, gear) <input id="dcDeathLog" class="input" placeholder="optional"></label>
                 <label class="field">Daily summary channel ID (players, deaths, kills, FPS, uptime) <input id="dcSummaryChannel" class="input" placeholder="optional"></label>
                 <label class="field">Daily summary time (24h) <input id="dcSummaryTime" class="input" placeholder="09:00" style="width:110px"></label>
                 <label class="field">Join / leave feed channel ID <input id="dcJoinFeed" class="input" placeholder="optional"></label>

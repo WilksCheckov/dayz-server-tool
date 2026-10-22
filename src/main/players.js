@@ -63,8 +63,8 @@ function parseLine(line, ctx) {
   if (/is connected/.test(body)) { ev.type = 'connect'; const idAfter = body.match(/is connected\s*\(id=([^\s)]+)/); if (idAfter) ev.id = ev.id || idAfter[1]; }
   else if (/has been disconnected|disconnected/.test(body)) ev.type = 'disconnect';
   else if (/killed by Player\s+"([^"]+)"\s*\(id=([^\s)]+)/.test(body)) { const k = body.match(/killed by Player\s+"([^"]+)"\s*\(id=([^\s)]+)[^)]*\)(?:\s+with\s+(.+?))?(?:\s+from|\s*$)/); ev.type = 'kill'; ev.killer = { name: k[1], id: k[2] }; ev.weapon = k[3] || null; }
-  else if (ev.dead || /\bdied\b|bled out|committed suicide|killed by\b/.test(body)) ev.type = 'death';
   else if (/\bhit by\b/.test(body)) ev.type = 'hit';
+  else if (ev.dead || /\bdied\b|bled out|committed suicide|killed by\b/.test(body)) ev.type = 'death';
   else if (/placed|built|dismantled|folded|unpacked/.test(body)) ev.type = 'build';
   else ev.type = 'other';
   return ev;
@@ -89,6 +89,7 @@ function applyEvent(ev, d) {
 
 // Read new bytes from the newest ADM files and apply them.
 function ingest() {
+  try { require('./deathlog').ingestGear(); } catch { /* bridge not installed */ }
   const d = load();
   const p = settings.paths();
   let files = [];
@@ -107,7 +108,7 @@ function ingest() {
       const lines = (meta.rest + buf.toString('utf8', 0, n)).split(/\r?\n/);
       meta.rest = lines.pop() || '';
       const ctx = { date: meta.date, lastSec: meta.lastSec };
-      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } try { require('./combat').record(ev); } catch { /* ignore */ } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch { /* ignore */ } } }
+      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } try { require('./combat').record(ev); } catch { /* ignore */ } try { require('./deathlog').record(ev); } catch { /* ignore */ } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch { /* ignore */ } } }
       meta.date = ctx.date; meta.lastSec = ctx.lastSec;
     } finally { fs.closeSync(fd); }
     d.files[x.f] = meta;

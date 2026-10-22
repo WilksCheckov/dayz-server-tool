@@ -2,6 +2,31 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+// Keep the data from a previous app name (the userData folder is named after productName). Electron creates the new
+// folder for its caches before this code runs, so "does it exist" is no test: copy the tool's own files across once,
+// whenever the old folder has settings and the new one has not been migrated yet. settings.json is only taken from the
+// old folder while the new one still holds untouched defaults.
+try {
+  const newDir = app.getPath('userData');
+  const marker = path.join(newDir, '.migrated');
+  if (!fs.existsSync(marker)) {
+    for (const old of ['DayZ Server Tool', 'DayZ Admin Tool']) {
+      const oldDir = path.join(path.dirname(newDir), old);
+      if (!fs.existsSync(path.join(oldDir, 'settings.json'))) continue;
+      fs.mkdirSync(newDir, { recursive: true });
+      const newSettings = path.join(newDir, 'settings.json');
+      let fresh = true; try { const cur = JSON.parse(fs.readFileSync(newSettings, 'utf8')); fresh = !cur.mods || !cur.mods.length && !cur.rcon && !cur.discord; } catch { fresh = true; }
+      for (const name of fs.readdirSync(oldDir)) {
+        if (!/^(settings\.json|.*\.json|audit\.log|tool\.log(\.\d+)?|\.updaterId)$/.test(name)) continue;
+        const src = path.join(oldDir, name), dst = path.join(newDir, name);
+        if (name === 'settings.json' ? !fresh : fs.existsSync(dst)) continue;
+        try { fs.copyFileSync(src, dst); } catch { /* keep going */ }
+      }
+      fs.writeFileSync(marker, old + ' ' + new Date().toISOString());
+      break;
+    }
+  }
+} catch { /* ignore */ }
 const settings = require('./settings');
 const steamcmd = require('./steamcmd');
 const server = require('./server');
@@ -29,6 +54,7 @@ const lootmap = require('./lootmap');
 const stats = require('./stats');
 const audit = require('./audit');
 const combat = require('./combat');
+const deathlog = require('./deathlog');
 const zip = require('./zip');
 const economy = require('./economy');
 const mission = require('./mission');
@@ -114,7 +140,7 @@ function emit(channel, data) {
   if (channel === 'alerts:new' && data && (data.kind === 'crash' || data.kind === 'crash-loop')) stats.recordCrash();
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
-  if (channel === 'server:status') { refreshTray(); if (data && !data.running) { rcon.stopAuto(); if (rcon.status().connected) rcon.disconnect(true); } if (data && data.running) { rcon.autoConnectLoop(); servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
+  if (channel === 'server:status') { refreshTray(); if (data && !data.running) { try { deathlog.housekeeping(); } catch { /* ignore */ } rcon.stopAuto(); if (rcon.status().connected) rcon.disconnect(true); } if (data && data.running) { rcon.autoConnectLoop(); servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
 }
 
 function createWindow() {
@@ -350,6 +376,19 @@ handle('stats:summaryText', () => stats.summaryText());
 handle('stats:postSummary', () => stats.postSummaryNow());
 handle('audit:list', (o) => audit.list(o || {}));
 handle('combat:overview', () => combat.overview());
+handle('deathlog:list', (q) => deathlog.list(q || {}));
+handle('deathlog:get', (id) => deathlog.get(id));
+handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
+handle('deathlog:stats', () => deathlog.stats());
+handle('deathlog:clear', () => deathlog.clear());
+handle('deathlog:refund', (id, items) => deathlog.refund(id, { by: 'app', items: items || null }));
+handle('deathlog:bridgeStatus', () => deathlog.bridgeStatus());
+handle('deathlog:heal', (key, what) => deathlog.heal(key, what || 'all', { by: 'app' }));
+handle('deathlog:teleport', (key, pos) => deathlog.teleport(key, pos, { by: 'app' }));
+handle('deathlog:teleportToDeath', (id) => deathlog.teleportToDeath(id, { by: 'app' }));
+handle('deathlog:installBridge', () => deathlog.installBridge());
+handle('deathlog:removeBridge', () => deathlog.removeBridge());
+handle('deathlog:openBridgeDir', () => { const d = deathlog.bridgeDir(); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
 handle('combat:suspicious', (since) => combat.suspicious(Number(since) || 0));
 handle('combat:rebuild', () => combat.rebuild());
 // ---- diagnostics: the tool's own log and a shareable bundle ----
@@ -502,11 +541,6 @@ handle('updater:runNow', (opts) => updater.runNow(opts || {}));
 handle('updater:check', () => updater.check());
 handle('updater:runIfNeeded', () => updater.runIfNeeded());
 
-// Keep settings from the previous app name (the userData folder is named after productName).
-try {
-  const newDir = app.getPath('userData');
-  for (const old of ['DayZ Server Tool', 'DayZ Admin Tool']) { const oldDir = path.join(path.dirname(newDir), old); if (!fs.existsSync(newDir) && fs.existsSync(oldDir)) { fs.renameSync(oldDir, newDir); break; } }
-} catch { /* ignore */ }
 
 const T0 = Date.now(); const initTimes = [];
 function timed(name, fn) { const t = Date.now(); try { fn(); } finally { initTimes.push([name, Date.now() - t]); } }
@@ -539,6 +573,7 @@ app.whenReady().then(() => {
   timed('stats', () => stats.init(emit));
   timed('audit', () => audit.init(emit));
   timed('combat', () => combat.init(emit));
+  timed('deathlog', () => deathlog.init(emit));
   createWindow();
 });
 

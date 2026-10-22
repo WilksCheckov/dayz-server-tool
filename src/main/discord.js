@@ -29,7 +29,7 @@ function cfg() {
     token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', priorityRoleId: '', bannedRoleId: '', mutedRoleId: '', steamApiKey: '',
     statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
     logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
-    ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '', summaryChannelId: '', summaryTime: '09:00',
+    ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '', deathLogChannelId: '', summaryChannelId: '', summaryTime: '09:00',
     ...(s.discord || {})
   };
 }
@@ -119,7 +119,12 @@ function buildCommands() {
       .addSubcommand(s => s.setName('add').setDescription('Add a member to this ticket').addUserOption(o => o.setName('discord_user').setDescription('Member').setRequired(true)))
       .addSubcommand(s => s.setName('list').setDescription('Show open tickets')),
     new SlashCommandBuilder().setName('maintenance').setDescription('Re-check everyone against Steam for VAC / game / trade bans and refresh the application embeds'),
-    new SlashCommandBuilder().setName('backup').setDescription('Take a backup now')
+    new SlashCommandBuilder().setName('backup').setDescription('Take a backup now'),
+    new SlashCommandBuilder().setName('deaths').setDescription('Recent deaths from the death log').addStringOption(o => o.setName('player').setDescription('Player name, or part of it')).addIntegerOption(o => o.setName('count').setDescription('How many (default 10, max 25)')),
+    new SlashCommandBuilder().setName('death').setDescription('Full detail of one death: hits, body parts, gear').addIntegerOption(o => o.setName('id').setDescription('Death record number (see /deaths)').setRequired(true)),
+    new SlashCommandBuilder().setName('heal').setDescription('Heal an online player: health, bleeding, broken bones, diseases, food and water').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('what').setDescription('What to fix (default: everything)').addChoices({ name: 'everything', value: 'all' }, { name: 'health, blood and shock', value: 'health' }, { name: 'bleeding and cuts', value: 'bleeding' }, { name: 'broken bones', value: 'bones' }, { name: 'diseases and infections', value: 'cure' }, { name: 'food and water', value: 'food' })),
+    new SlashCommandBuilder().setName('teleport').setDescription('Teleport an online player back to where they died, or to coordinates').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addIntegerOption(o => o.setName('death_id').setDescription('Death record number (see /deaths); default: their latest death')).addNumberOption(o => o.setName('x').setDescription('X coordinate (with z: go there instead of the death position)')).addNumberOption(o => o.setName('z').setDescription('Z coordinate')),
+    new SlashCommandBuilder().setName('refund').setDescription('Spawn the gear a player had when they died at their feet (they must be online)').addIntegerOption(o => o.setName('id').setDescription('Death record number (see /deaths); default: the player\'s latest death')).addStringOption(o => o.setName('player').setDescription('Player name, used when no id is given'))
   ].map(c => { const j = c.setDMPermission(false).toJSON(); if (j.default_member_permissions === undefined) j.default_member_permissions = String(PermissionFlagsBits.Administrator); return j; });
 }
 
@@ -281,6 +286,22 @@ async function canTouchTicket(interaction, t) { return isAllowed(interaction) ||
 
 // ---------- kill / join feeds from the admin log ----------
 const feedQueue = {}; let feedTimer = null;
+function deathLine(r) {
+  const range = r.distance !== null && r.distance !== undefined ? ` from ${Math.round(r.distance)} m` : '';
+  return r.cause === 'player' && r.killer ? `killed by **${r.killer.name}**${r.weapon ? ` with ${r.weapon}` : ''}${range}${r.finalPart ? ` (${r.finalPart})` : ''}` : r.causeText;
+}
+function deathEmbed(r) {
+  const e = new EmbedBuilder().setColor(r.cause === 'player' ? 0x8b0000 : 0x6b7280).setTitle(`Death #${r.id}: ${r.name}`).setDescription(deathLine(r)).setTimestamp(new Date(r.ts));
+  const parts = Object.entries(r.byPart || {}).sort((a, b) => b[1].damage - a[1].damage).map(([p, v]) => `${p}: ${v.hits} hit${v.hits === 1 ? '' : 's'}, ${Math.round(v.damage)} dmg`).join('\n');
+  if (parts) e.addFields({ name: `Damage by body part (${r.hits.length} hits, ${Math.round(r.totalDamage)} total)`, value: parts.slice(0, 1000) });
+  if (r.attackers && r.attackers.length > 1) e.addFields({ name: 'Attackers', value: r.attackers.map(a => `${a.name}: ${a.hits} hits, ${Math.round(a.damage)} dmg`).join('\n').slice(0, 1000) });
+  if (r.gear && r.gear.length) { const counts = {}; for (const g of r.gear) counts[g.c] = (counts[g.c] || 0) + 1; e.addFields({ name: `Gear (${r.gear.length} items, ${r.gearFromCorpse ? 'from the body' : 'last snapshot before death'})`, value: Object.entries(counts).map(([c, n]) => n > 1 ? `${c} ×${n}` : c).join(', ').slice(0, 1000) }); }
+  else e.addFields({ name: 'Gear', value: 'No snapshot (bridge script not running when they died)' });
+  if (r.refunds && r.refunds.length) e.addFields({ name: 'Refunds', value: r.refunds.map(f => `<t:${Math.floor(f.ts / 1000)}:R> by ${f.by}: ${f.ok}/${f.items} items`).join('\n').slice(0, 1000) });
+  e.setFooter({ text: `/refund id:${r.id} spawns this gear at the player's feet while they are online` });
+  return e;
+}
+async function postDeath(r) { const c = cfg(); if (!state.running || !c.deathLogChannelId || !r) return; const ch = await channel(c.deathLogChannelId); if (ch) ch.send({ embeds: [deathEmbed(r)] }).catch(() => {}); }
 function feedEvent(ev) {
   if (!client || !state.running || !ev || !ev.type) return;
   if (ev.ts < Date.now() - 2 * 60 * 1000) return; // replayed history, not live
@@ -469,6 +490,8 @@ async function execute(name, sub, opt, user) {
       '**/mute add|remove|list** — Give a member the muted role for a duration (30m, 2h, 3d); it is removed when time is up. *(Admin)*',
       '**/ban permanent|temporary** — Ban a player (game + Discord), with a reason prompt. **/ban battleye** for GUID/IP bans, **/ban remove** to lift, **/ban list**. *(Admin)*',
       '**/search** — Player dossier: application, whitelist, bans, notes. *(Admin)*',
+      '**/heal player [what]** — Heal an online player: everything, or just health, bleeding, broken bones, diseases or food. **/teleport player [death_id | x z]** — send them back to where they died, or to coordinates. *(Admin)*',
+      '**/deaths**, **/death id**, **/refund** — Death log: recent deaths, the full detail of one (every hit, damage per body part, gear carried) and spawning a player\'s lost gear at their feet while they are online. *(Admin)*',
       '**/players**, **/kick**, **/say** — Live via RCon. *(Admin)*',
       '**/server start|stop|restart**, **/backup** — Control the server. *(Admin)*',
       '**/status** — Server status and player count.',
@@ -567,6 +590,45 @@ async function execute(name, sub, opt, user) {
     if (!rcon.status().connected) return { content: '⚠️ RCon is not connected in the admin tool.' };
     await rcon.say(opt.message);
     return { content: `📢 Sent: ${opt.message}`, ephemeral: false, log: `${who}: say ${opt.message}` };
+  }
+  if (name === 'deaths') {
+    const dl = require('./deathlog');
+    const rows = dl.list({ q: opt.player || '', limit: Math.min(25, Math.max(1, Number(opt.count) || 10)) });
+    if (!rows.length) return { content: 'No deaths recorded' + (opt.player ? ` for "${opt.player}"` : '') + '.' };
+    const lines = rows.map(r => `#${r.id}  <t:${Math.floor(r.ts / 1000)}:R>  **${r.name}** — ${deathLine(r)}${r.gearCount ? ` · ${r.gearCount} items` : ''}`);
+    return { embeds: [new EmbedBuilder().setColor(0x8b0000).setTitle('Death log').setDescription(lines.join('\n').slice(0, 4000)).setFooter({ text: '/death id:<number> for the detail, /refund id:<number> to give the gear back' })] };
+  }
+  if (name === 'death') {
+    const r = require('./deathlog').get(opt.id);
+    if (!r) return { content: `No death record #${opt.id}.` };
+    return { embeds: [deathEmbed(r)] };
+  }
+  if (name === 'heal' || name === 'teleport') {
+    const dl = require('./deathlog');
+    const p = dl.findPlayer(opt.player); if (!p) return { content: `No player called "${opt.player}" in the player database.` };
+    if (!p.online) return { content: `${p.name} is not online.` };
+    try {
+      let res, what;
+      if (name === 'heal') { what = opt.what || 'all'; res = await dl.heal(p.key, what, { by: who }); }
+      else if (opt.x !== undefined && opt.x !== null && opt.z !== undefined && opt.z !== null) { res = await dl.teleport(p.key, [opt.x, opt.z], { by: who }); res.pos = [opt.x, opt.z]; }
+      else { let r = opt.death_id ? dl.get(opt.death_id) : null; if (!r) { const s0 = dl.forPlayer(p.key, 1)[0]; if (s0) r = dl.get(s0.id); } if (!r) return { content: `No recorded death for ${p.name}.` }; if (r.key !== p.key) return { content: `Death #${r.id} belongs to ${r.name}, not ${p.name}.` }; res = await dl.teleportToDeath(r.id, { by: who }); }
+      if (res.status === 'done') { const msg = name === 'heal' ? `💚 Healed **${p.name}** (${dl.HEAL_KINDS[what]})` : `📍 Teleported **${p.name}** to ${Math.round(res.pos[0])}, ${Math.round(res.pos[1])}`; await postLog(`${msg} by ${who}`); return { content: msg }; }
+      if (res.status === 'offline') return { content: `${p.name} is not in game right now (they must be online and alive).` };
+      return { content: 'The server did not answer in time. Is the bridge script installed (Death log page) and the server running?' };
+    } catch (e) { return { content: '⚠️ ' + e.message }; }
+  }
+  if (name === 'refund') {
+    const dl = require('./deathlog');
+    let r = opt.id ? dl.get(opt.id) : null;
+    if (!r && opt.player) { const s0 = dl.list({ q: opt.player, limit: 1 })[0]; if (s0) r = dl.get(s0.id); }
+    if (!r) return { content: 'Give a death record number (see /deaths) or the name of a player with a recorded death.' };
+    if (!r.gear || !r.gear.length) return { content: `Death #${r.id} of ${r.name} has no gear snapshot (the bridge script was not running).` };
+    try {
+      const res = await dl.refund(r.id, { by: who });
+      if (res.status === 'done') { await postLog(`↩️ ${who} refunded ${res.ok}/${res.items} items to ${r.name} (death #${r.id})`); return { content: `✅ Refunded ${res.ok} of ${res.items} items to **${r.name}** at their feet${res.fail ? ` (${res.fail} could not be spawned)` : ''}.` }; }
+      if (res.status === 'offline') return { content: `${r.name} is not in game right now; they must be online and alive to receive a refund.` };
+      return { content: 'The server did not answer in time. Is the bridge script installed (Death log page) and the server running?' };
+    } catch (e) { return { content: '⚠️ ' + e.message }; }
   }
   if (name === 'status') {
     const st = server.status(), sc = scheduler.state();
@@ -913,4 +975,4 @@ async function stop(silent = false) {
 function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
 function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
 
-module.exports = { postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, openTicket, closeTicket, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, openTicket, closeTicket, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
