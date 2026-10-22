@@ -120,11 +120,38 @@ function a2sInfo(host, port, timeoutMs = 4000) {
   });
 }
 
+// ---------- local web stacks (PHP / Apache / IIS) that could expose this machine ----------
+// Minimum PHP releases that fix CVE-2026-109618 / CVE-2026-109619 ("php2shell", CISA alert of 2026-10-21).
+const PHP_FIXED = { '8.5': '8.5.12', '8.4': '8.4.27', '8.3': '8.3.36', '8.2': '8.2.35' };
+function verCmp(a, b) { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; }
+function phpVersion(exe) { try { const out = require('child_process').execFileSync(exe, ['-v'], { windowsHide: true, timeout: 5000 }).toString(); const m = out.match(/PHP\s+(\d+\.\d+\.\d+)/); return m ? m[1] : null; } catch { return null; } }
+async function webStacks() {
+  const fs = require('fs'); const path = require('path');
+  const found = [];
+  const candidates = [['XAMPP', 'C:\\xampp', 'C:\\xampp\\php\\php.exe'], ['WampServer', 'C:\\wamp64', null], ['WampServer', 'C:\\wamp', null], ['Laragon', 'C:\\laragon', null], ['PHP', 'C:\\php', 'C:\\php\\php.exe'], ['PHP', 'C:\\Program Files\\PHP', null]];
+  for (const [name, dir, exe] of candidates) {
+    if (!fs.existsSync(dir)) continue;
+    let php = exe && fs.existsSync(exe) ? exe : null;
+    if (!php) { try { for (const sub of fs.readdirSync(dir)) { const p = path.join(dir, sub, 'php.exe'); if (fs.existsSync(p)) { php = p; break; } const bin = path.join(dir, 'bin', 'php'); if (fs.existsSync(bin)) for (const v of fs.readdirSync(bin)) { const p2 = path.join(bin, v, 'php.exe'); if (fs.existsSync(p2)) { php = p2; break; } } if (php) break; } } catch { /* ignore */ } }
+    const version = php ? phpVersion(php) : null;
+    const branch = version ? version.split('.').slice(0, 2).join('.') : null;
+    const fixed = branch ? PHP_FIXED[branch] : null;
+    const vulnerable = version ? (fixed ? verCmp(version, fixed) < 0 : true) : null; // unsupported branches (8.1 and older) count as vulnerable
+    found.push({ name, dir, php, version, fixed: fixed || (branch ? 'unsupported branch, upgrade' : null), vulnerable });
+  }
+  try { const out = require('child_process').execSync('where php', { windowsHide: true, timeout: 5000 }).toString().trim(); if (out && !found.some(f => f.php && f.php.toLowerCase() === out.split(/\r?\n/)[0].toLowerCase())) { const php = out.split(/\r?\n/)[0]; const version = phpVersion(php); const branch = version ? version.split('.').slice(0, 2).join('.') : null; const fixed = branch ? PHP_FIXED[branch] : null; found.push({ name: 'PHP on PATH', dir: path.dirname(php), php, version, fixed: fixed || 'unsupported branch, upgrade', vulnerable: version ? (fixed ? verCmp(version, fixed) < 0 : true) : null }); } } catch { /* not on PATH */ }
+  let running = [];
+  try { const out = require('child_process').execSync('tasklist /FO CSV /NH', { windowsHide: true, timeout: 8000 }).toString(); running = [...new Set(out.split(/\r?\n/).map(l => (l.split('","')[0] || '').replace(/^"/, '').toLowerCase()).filter(n => /^(php|php-cgi|httpd|apache|nginx|w3wp|xampp)/.test(n)))]; } catch { /* ignore */ }
+  let iis = false; try { require('child_process').execSync('sc query W3SVC', { windowsHide: true, timeout: 5000 }); iis = true; } catch { iis = false; }
+  return { found, running, iis, advisory: 'CISA alert 2026-10-21: CVE-2026-109618 / CVE-2026-109619, unauthenticated remote code execution in PHP. Fixed in 8.5.12, 8.4.27, 8.3.36, 8.2.35; older branches are unsupported.' };
+}
+
 async function report() {
   const [ip, rl, ls] = await Promise.all([publicIp(), rules(), listening()]);
   const qport = Number(settings.load().steamQueryPort) || 27016;
   const [queryLocal, queryPublic] = await Promise.all([a2sInfo('127.0.0.1', qport), ip ? a2sInfo(ip, qport) : Promise.resolve(null)]);
-  return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080), queryPort: qport, queryLocal, queryPublic };
+  let stacks = null; try { stacks = await webStacks(); } catch { stacks = null; }
+  return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080), queryPort: qport, queryLocal, queryPublic, stacks };
 }
 
-module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, tcpCheck, a2sInfo };
+module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, tcpCheck, a2sInfo, webStacks };

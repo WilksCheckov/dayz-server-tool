@@ -105,6 +105,7 @@ Output lands in `dist\` (NSIS installer and a portable exe).
 - The public website serves files only from the website folder (path traversal is rejected), sends nosniff / frame-deny / no-referrer headers, and the /admin panel uses a salted-hash password with constant-time comparison, a 15-minute lock-out after five failed logins, HttpOnly SameSite=Strict cookies (Secure over HTTPS) and an origin check on every state-changing request. Logins and admin actions go to the audit log.
 - Shell commands are run with argument arrays, not strings; the only free-form command execution is the "command line" task type, which you write yourself.
 - The Discord bot checks Administrator permission or your admin role IDs on every admin command; applicants and ticket openers can only act on their own records.
+- **Other web software check** (Network page): looks for PHP installs (XAMPP, WAMP, Laragon, plain PHP, IIS) on the machine, reads their PHP version, compares it with the releases that fix the October 2026 "php2shell" remote code execution bugs (CISA alert, CVE-2026-109618 / CVE-2026-109619), and shows whether any of it is running. If a vulnerable PHP is running when the game server starts, an alert is raised. The tool itself contains no PHP.
 - Known dependency advisory: node-forge (pulled in by the Let's Encrypt client) has an advisory about RSA signature verification. The tool only uses it to generate keys and certificate requests locally and never verifies signatures with it, so the affected code path is not reachable.
 
 ## Notes
