@@ -183,7 +183,9 @@ function showPage(name) {
   if (name === 'audit') refreshAudit();
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
-  if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); }
+  if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); requestAnimationFrame(() => { if ($('consoleAutoscroll').checked) $('console').scrollTop = $('console').scrollHeight; }); }
+  if (name === 'discord') requestAnimationFrame(() => { const p = $('discordLog'); p.scrollTop = p.scrollHeight; });
+  if (name === 'players') requestAnimationFrame(() => { const p = $('rconMessages'); p.scrollTop = p.scrollHeight; });
   if (name === 'discord') { loadDiscordForm(); refreshDiscordCommands(); ipc.invoke('discord:status').then(renderDiscord); }
   if (name === 'mods') refreshMods();
   if (name === 'workshop') { refreshMods(); wsEnsureStarted(); }
