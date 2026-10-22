@@ -151,7 +151,6 @@ function attachGear(rec) {
   if (best) { rec.gear = best.items; rec.gearTs = best.ts; rec.gearFromCorpse = best.dead; }
   return !!best;
 }
-function latestGear(key) { const list = load().gear[key] || []; return list.length ? list[list.length - 1] : null; }
 
 // ---------- refunds ----------
 function online(key) {
@@ -239,7 +238,6 @@ function list({ q = '', cause = '', since = 0, limit = 300 } = {}) {
 function get(id) { const r = load().deaths.find(x => x.id === Number(id)); return r ? { ...r, online: online(r.key), deathPos: deathPos(r) } : null; }
 function forPlayer(key, limit = 20) { return load().deaths.filter(r => r.key === key || r.name === key).slice(-limit).reverse().map(summary); }
 function stats() { const d = load(); const causes = {}; for (const r of d.deaths) causes[r.cause] = (causes[r.cause] || 0) + 1; return { deaths: d.deaths.length, causes, snapshots: Object.values(d.gear).filter(Array.isArray).reduce((n, l) => n + l.length, 0), players: Object.keys(d.gear).filter(k => !k.startsWith('steam:')).length }; }
-function clear() { db = null; try { fs.unlinkSync(file()); } catch { /* ignore */ } load(); emitRef('deathlog:changed', {}); }
 
 // ---------- bridge script in the mission's init.c ----------
 const BRIDGE_VERSION = 1;
@@ -317,4 +315,4 @@ function housekeeping() {
 }
 
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, record, ingestGear, list, get, forPlayer, stats, clear, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, latestGear, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, BRIDGE_SCRIPT, bridgeDir, online };
+module.exports = { init, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };

@@ -7,7 +7,7 @@ const path = require('path');
 const { app } = require('electron');
 const settings = require('./settings');
 
-let db = null, emitRef = () => {}, timer = null, wasRunning = null;
+let db = null, timer = null, wasRunning = null;
 const file = () => path.join(app.getPath('userData'), 'stats.json');
 function load() { if (!db) { try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = { days: {}, lastSummary: null }; } db.days = db.days || {}; } return db; }
 let saveTimer = null;
@@ -87,5 +87,5 @@ async function maybePostSummary() {
 }
 async function postSummaryNow() { const dc = (settings.load().discord || {}); if (!dc.summaryChannelId) throw new Error('Set a summary channel on the Discord Bot page first.'); await require('./discord').postAlert({ title: 'Daily server summary', description: summaryText(), color: 0x4f8cff, channelId: dc.summaryChannelId }); return true; }
 
-function init(emit) { emitRef = emit; load(); clearInterval(timer); timer = setInterval(tick, 60000); }
+function init() { load(); clearInterval(timer); timer = setInterval(tick, 60000); }
 module.exports = { init, recordEvent, recordSample, recordCrash, overview, totals, summaryText, postSummaryNow };

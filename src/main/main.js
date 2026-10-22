@@ -192,7 +192,7 @@ function createWindow() {
 }
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
-const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan|removeBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:cleanup)$/;
+const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:cleanup)$/;
 function handle(channel, fn) {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
@@ -236,19 +236,12 @@ handle('server:status', () => server.status());
 handle('server:start', () => server.start());
 handle('server:stop', () => server.stop());
 handle('server:restart', () => server.restart());
-handle('server:args', () => server.buildArgs(settings.load()));
 handle('server:readConfig', () => {
   const p = settings.paths();
   return fs.existsSync(p.configPath) ? fs.readFileSync(p.configPath, 'utf8') : null;
 });
 handle('cfgform:read', () => configs.cfgFormRead());
 handle('cfgform:write', (changes) => configs.cfgFormWrite(changes || {}));
-handle('server:writeConfig', (text) => {
-  const p = settings.paths();
-  fs.mkdirSync(path.dirname(p.configPath), { recursive: true });
-  fs.writeFileSync(p.configPath, text, 'utf8');
-  return true;
-});
 
 // Mods
 handle('mods:list', () => mods.list());
@@ -259,10 +252,7 @@ handle('mods:updateAll', (onlyOutdated) => mods.updateAll(onlyOutdated !== false
 handle('mods:remove', (id, opts) => mods.remove(id, opts));
 handle('mods:setFlags', (id, flags) => mods.setFlags(id, flags));
 handle('mods:reorder', (ids) => mods.reorder(ids));
-handle('mods:autoSort', () => mods.autoSort());
 handle('mods:checkUpdates', () => mods.checkUpdates());
-handle('mods:relink', (id) => mods.link(id));
-handle('mods:details', (ids) => mods.fetchDetails(ids));
 handle('mods:scanUnmanaged', () => mods.scanUnmanaged());
 handle('mods:autoOrganize', () => mods.autoOrganize());
 handle('mods:dependents', (id) => mods.dependents(id));
@@ -298,7 +288,6 @@ handle('steam:all', () => steambans.all());
 handle('steam:check', (id) => steambans.check(id));
 handle('steam:checkAll', () => steambans.checkAll());
 handle('accounts:check', (id) => accounts.checkSteam(id));
-handle('accounts:stats', () => accounts.stats());
 
 // Economy editor
 handle('economy:files', () => economy.files());
@@ -380,11 +369,9 @@ handle('deathlog:list', (q) => deathlog.list(q || {}));
 handle('deathlog:get', (id) => deathlog.get(id));
 handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
 handle('deathlog:stats', () => deathlog.stats());
-handle('deathlog:clear', () => deathlog.clear());
 handle('deathlog:refund', (id, items) => deathlog.refund(id, { by: 'app', items: items || null }));
 handle('deathlog:bridgeStatus', () => deathlog.bridgeStatus());
 handle('deathlog:heal', (key, what) => deathlog.heal(key, what || 'all', { by: 'app' }));
-handle('deathlog:teleport', (key, pos) => deathlog.teleport(key, pos, { by: 'app' }));
 handle('deathlog:teleportToDeath', (id) => deathlog.teleportToDeath(id, { by: 'app' }));
 handle('deathlog:installBridge', () => deathlog.installBridge());
 handle('deathlog:removeBridge', () => deathlog.removeBridge());
@@ -410,7 +397,6 @@ handle('app:exportDiagnostics', async () => {
 handle('audit:export', () => { const p = path.join(app.getPath('userData'), 'audit-export.csv'); fs.writeFileSync(p, audit.exportCsv()); shell.showItemInFolder(p); return p; });
 handle('heat:rebuild', () => heat.rebuild());
 handle('heat:clear', () => heat.clear());
-handle('mission:mapSources', () => mission.mapSources());
 handle('mission:openMapsDir', () => { const d = mission.mapInfo().mapsDir; fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
 
 // Scheduled tasks
@@ -424,12 +410,10 @@ handle('network:report', () => network.report());
 handle('logs:cleanup', (opts) => logs.cleanup(opts || {}));
 handle('logs:cleanupCfg', () => logs.cleanupCfg());
 handle('steam:forgetPassword', () => { settings.save({ steamPassEnc: '' }); return steamcmd.status(); });
-handle('tasks:types', () => tasks.TYPES);
 handle('network:addRules', () => network.addRules());
 handle('network:removeRules', () => network.removeRules());
 
 // Off-site backups
-handle('offsite:config', () => offsite.cfg());
 handle('offsite:test', (c) => offsite.testFtp(c));
 
 // Mod checks
@@ -450,7 +434,6 @@ handle('domain:updateDns', () => domain.updateDns({ force: true }));
 handle('website:start', (port) => website.start(port));
 handle('website:stop', () => website.stop());
 handle('website:preview', (slug) => website.preview(slug));
-handle('website:defaults', () => website.DEFAULT_PAGES);
 handle('website:files', () => website.listFiles());
 handle('website:addFiles', async (subdir) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'], title: 'Add files to the website folder' });
@@ -490,20 +473,15 @@ handle('configs:validateAll', () => configs.validateAll());
 handle('rcon:status', () => rcon.status());
 handle('rcon:connect', (opts) => rcon.connect(opts || {}));
 handle('rcon:ensure', (o) => rcon.ensureConfigured(o || {}));
-handle('rcon:readBe', () => rcon.readBe());
 handle('rcon:disconnect', () => rcon.disconnect());
 handle('rcon:command', (cmd) => rcon.command(cmd));
 handle('rcon:players', () => rcon.players());
-handle('rcon:bans', () => rcon.bans());
 handle('rcon:say', (msg, player) => rcon.say(msg, player ?? -1));
 handle('rcon:kick', (num, reason) => rcon.kick(num, reason));
 handle('rcon:ban', (num, minutes, reason) => rcon.ban(num, minutes, reason));
-handle('rcon:addBan', (guid, minutes, reason) => rcon.addBan(guid, minutes, reason));
-handle('rcon:removeBan', (num) => rcon.removeBan(num));
 
 // Player lists
 handle('lists:all', () => lists.allLists());
-handle('lists:read', (kind) => lists.read(kind));
 handle('lists:add', (kind, entry, meta) => lists.add(kind, entry, meta));
 handle('lists:remove', (kind, id) => lists.remove(kind, id));
 handle('lists:recentPlayers', () => lists.recentPlayers());
@@ -539,7 +517,6 @@ handle('logs:summary', (name) => logs.summarize(name));
 handle('updater:state', () => updater.state());
 handle('updater:runNow', (opts) => updater.runNow(opts || {}));
 handle('updater:check', () => updater.check());
-handle('updater:runIfNeeded', () => updater.runIfNeeded());
 
 
 const T0 = Date.now(); const initTimes = [];
@@ -570,7 +547,7 @@ app.whenReady().then(() => {
   timed('accounts', () => accounts.init(emit));
   timed('domain', () => domain.init(emit));
   timed('heat', () => heat.init(emit));
-  timed('stats', () => stats.init(emit));
+  timed('stats', () => stats.init());
   timed('audit', () => audit.init(emit));
   timed('combat', () => combat.init(emit));
   timed('deathlog', () => deathlog.init(emit));

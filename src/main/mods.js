@@ -542,4 +542,4 @@ function init(emit) {
   };
 }
 
-module.exports = { init, list, add, plan, update, updateAll, remove, setFlags, reorder, autoSort, autoOrganize, launchLines, writeLaunchFiles, checkUpdates, dependents, modParam, link, fetchDetails, scanUnmanaged, importUnmanaged, fetchRequiredItems };
+module.exports = { init, list, add, plan, update, updateAll, remove, setFlags, reorder, autoOrganize, launchLines, writeLaunchFiles, checkUpdates, dependents, modParam, link, fetchDetails, scanUnmanaged, importUnmanaged, fetchRequiredItems };

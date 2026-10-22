@@ -185,6 +185,7 @@
               <label class="check"><input type="checkbox" id="steamRemember"> Remember the password on this computer (encrypted, needed for unattended mod updates)</label>
               <div class="row gap mt">
                 <button class="btn primary" id="btnSaveCreds">Save credentials</button>
+                <button class="btn" id="btnForgetPass" hidden title="Remove the remembered Steam password from this PC">Forget saved password</button>
                 <span class="muted" id="credStatus"></span>
               </div>
             </div>
@@ -282,6 +283,7 @@
               <button class="tab etab" data-etab="spawnable">Spawnable types</button>
             </div>
             <select id="ecoFile" class="input eco-file"></select>
+            <button class="btn small" id="btnEcoUnregister" title="Remove the selected custom file from cfgeconomycore.xml (the file is kept)">Unregister</button>
             <button class="btn small" id="btnEcoNewFile" title="Create a custom types / events / spawnable types file in the mission and register it in cfgeconomycore.xml">New file…</button>
             <button class="btn small" id="btnEcoImport" title="Paste XML or pick a file; entries are merged into the current file. You can also drop a file anywhere on this page.">Import…</button>
             <span class="muted eco-info" id="ecoInfo"></span>
@@ -303,7 +305,7 @@
               <label class="check"><input type="checkbox" id="tfModified"> modified only</label>
               <span class="muted" id="tfCount"></span>
             </div>
-            <div class="row gap wrap eco-brush" id="ecoBrush">
+            <div class="row gap wrap eco-brush">
               <b>Brush</b>
               <select id="brushKind" class="input eco-sel" style="width:110px"><option value="value">Tier</option><option value="usage">Usage</option><option value="tag">Tag</option><option value="category">Category</option></select>
               <span id="brushChips" class="row gap wrap"></span>
@@ -509,7 +511,7 @@
         <!-- WORKSHOP -->
         <section class="page" id="page-workshop">
           <div class="card browser-card grow">
-            <div class="row gap browser-bar">
+            <div class="row gap">
               <input id="wsQuery" class="input grow" placeholder="Search the DayZ workshop…">
               <select id="wsSort" class="input" style="width:170px">
                 <option value="trend">Trending</option>
@@ -809,7 +811,7 @@
           </div>
           <div class="grid-2 grow">
             <div class="card list-card">
-              <div class="card-title row between"><span id="banLabel">Game bans <span class="muted">ban.txt</span></span><span class="muted path" id="banFile"></span></div>
+              <div class="card-title row between"><span>Game bans <span class="muted">ban.txt</span></span><span class="muted path" id="banFile"></span></div>
               <p class="muted" id="banHelp"></p>
               <div class="table-wrap grow"><table class="table" id="banTable"><thead><tr><th>ID</th><th>Name</th><th>Note</th><th>Added</th><th>Steam</th><th></th></tr></thead><tbody></tbody></table></div>
             </div>

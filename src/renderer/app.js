@@ -145,11 +145,11 @@ let navCollapsed = {};
 try { navCollapsed = JSON.parse(localStorage.getItem('navCollapsed') || '{}'); } catch { navCollapsed = {}; }
 function renderNav() {
   const btn = (it) => `<button class="nav-btn ${it.page === 'dashboard' ? 'active' : ''}" data-page="${it.page}">${ICONS[it.icon] || ''}<span>${esc(it.label)}</span></button>`;
-  const group = (g, level) => !g.title ? (g.items || []).map(btn).join('') : `<div class="nav-group level-${level} ${navCollapsed[g.title] ? 'collapsed' : ''}" data-key="${esc(g.title)}">
-      <div class="nav-cat level-${level}">${esc(g.title)}</div>
-      <div class="nav-children">${(g.items || []).map(btn).join('')}${(g.groups || []).map(sg => group(sg, level + 1)).join('')}</div>
+  const group = (g) => !g.title ? (g.items || []).map(btn).join('') : `<div class="nav-group ${navCollapsed[g.title] ? 'collapsed' : ''}" data-key="${esc(g.title)}">
+      <div class="nav-cat">${esc(g.title)}</div>
+      <div class="nav-children">${(g.items || []).map(btn).join('')}${(g.groups || []).map(group).join('')}</div>
     </div>`;
-  $('nav').innerHTML = NAV.map(g => group(g, 1)).join('');
+  $('nav').innerHTML = NAV.map(group).join('');
   $('nav').querySelectorAll('.nav-cat').forEach(h => h.onclick = () => {
     const g = h.closest('.nav-group'); g.classList.toggle('collapsed');
     navCollapsed[g.dataset.key] = g.classList.contains('collapsed');
@@ -259,8 +259,9 @@ async function refreshSteam() {
     (b ? `<br>Build ${esc(b.buildId)} · last updated ${fmtDate(b.lastUpdated)}` : '');
   $('statInstall').textContent = st.serverInstalled ? 'Server installed' : (st.steamcmdInstalled ? 'SteamCMD ready, server not installed' : 'Nothing installed yet');
   $('statBuild').textContent = b ? `Build ${b.buildId} · ${fmtDate(b.lastUpdated)}` : st.paths.serverDir;
-  $('credStatus').textContent = st.loggedIn ? `Using account ${st.steamUser}${st.savedPassword ? ' (password remembered)' : ''}` : 'No Steam login set (workshop downloads disabled)';
+  $('btnForgetPass').hidden = !st.savedPassword; $('credStatus').textContent = st.loggedIn ? `Using account ${st.steamUser}${st.savedPassword ? ' (password remembered)' : ''}` : 'No Steam login set (workshop downloads disabled)';
 }
+$('btnForgetPass').onclick = (e) => run(async () => { await ipc.invoke('steam:forgetPassword'); toast('Saved Steam password forgotten'); await refreshSteam(); }, e.target);
 $('btnSaveCreds').onclick = () => run(async () => {
   await ipc.invoke('steam:setCredentials', { user: $('steamUser').value, pass: $('steamPass').value, guard: $('steamGuard').value, remember: $('steamRemember').checked });
   toast('Credentials set for this session'); refreshSteam();
@@ -684,8 +685,8 @@ $('btnAddMod').onclick = (e) => run(async () => {
   const raw = $('modIdInput').value.trim();
   const id = parseModId(raw);
   if (!id) return toast('Paste a workshop ID or URL', true);
-  // A collection URL adds every item in it.
-  if (/collection|filedetails/i.test(raw) || true) {
+  // A collection adds every item in it; a single mod returns no items and falls through.
+  {
     const items = await ipc.invoke('workshop:collection', id).catch(() => []);
     if (items.length) {
       const ok = await showModal(`Add collection (${items.length} items)`, items.map(i => `<div class="dep"><span>${esc(i.title)}</span><span class="muted">${i.added ? 'already added' : fmtBytes(i.size)}</span></div>`).join(''), [{ label: `Add ${items.filter(i => !i.added).length} mods`, value: true, primary: true }, { label: 'Cancel', value: false }]);
@@ -903,7 +904,6 @@ ipc.on('scheduler:state', refreshSchedule);
 
 // ---------- server management: rcon / players ----------
 let rconState = null;
-let onlinePlayers = [];
 function renderRcon(st) {
   rconState = st;
   $('dotRcon').className = 'dot ' + (st.connected ? 'ok' : '');
@@ -948,7 +948,6 @@ async function refreshPlayers() {
   try { const r = await ipc.invoke('rcon:players'); renderPlayers(r.players); } catch (e) { $('playersCount').textContent = e.message; }
 }
 function renderPlayers(list) {
-  onlinePlayers = list;
   $('playersCount').textContent = rconState && rconState.connected ? `${list.length} online` : 'connect RCon to see live players';
   $('playersTable').querySelector('tbody').innerHTML = list.map(p => `
     <tr data-num="${p.num}" data-guid="${esc(p.guid)}" data-name="${esc(p.name)}">
@@ -1212,14 +1211,13 @@ $('btnSiteRemove').onclick = (e) => run(async () => {
 }, e.target);
 
 // ----- domain / HTTPS / dynamic DNS -----
-let domState = null;
 function domFormVisibility() {
   const mode = $('domHttps').value; document.querySelectorAll('.dom-manual').forEach(x => { x.hidden = mode !== 'manual'; }); document.querySelectorAll('.dom-le').forEach(x => { x.hidden = mode === 'off'; });
   document.querySelectorAll('.ddns-cf').forEach(x => { x.hidden = $('ddnsProvider').value !== 'cloudflare'; });
   $('btnDomIssue').hidden = mode !== 'letsencrypt';
 }
 function renderDomain(st) {
-  domState = st; const c = st.config;
+  const c = st.config;
   $('domName').value = c.name || ''; $('domHttps').value = c.https || 'off'; $('domHttpPort').value = c.httpPort || ''; $('domHttpsPort').value = c.httpsPort || 443; $('domEmail').value = c.email || ''; $('domRedirect').checked = c.redirectHttp !== false;
   $('domCert').placeholder = c.certPem ? '(certificate set; paste to replace)' : '-----BEGIN CERTIFICATE-----'; $('domKey').placeholder = c.keyPem ? '(key set; paste to replace)' : '-----BEGIN PRIVATE KEY-----';
   $('ddnsProvider').value = c.ddns.provider || 'none'; $('ddnsRecord').value = c.ddns.record || ''; $('ddnsZone').value = c.ddns.zoneId || ''; $('ddnsInterval').value = c.ddns.intervalMin || 10; $('ddnsToken').placeholder = c.ddns.token ? '(token set; paste to replace)' : 'API token';
@@ -1559,6 +1557,12 @@ function ecoSetTab(tab) {
   ecoRender();
 }
 $('ecoFile').onchange = () => ecoLoad();
+$('btnEcoUnregister').onclick = (e) => run(async () => {
+  const abs = $('ecoFile').value; const f = (eco.files ? [].concat(eco.files.types, eco.files.events, eco.files.spawnable) : []).find(x => x.abs === abs);
+  if (!f || /\(vanilla\)/.test(f.label)) return toast('Only custom files can be unregistered', true);
+  if (!await showModal('Unregister file', `<p>Remove <b>${esc(f.label)}</b> from cfgeconomycore.xml? The file itself is kept.</p>`, [{ label: 'Unregister', value: true, primary: true }, { label: 'Cancel', value: false }])) return;
+  await ipc.invoke('economy:unregisterFile', abs); toast('Unregistered'); await refreshEconomy();
+}, e.target);
 async function ecoLoad() {
   const abs = $('ecoFile').value; if (!abs) return;
   return run(async () => {
@@ -1839,9 +1843,7 @@ $('btnOpenLogDir').onclick = () => ipc.invoke('app:openLogDir');
 $('btnExportDiag').onclick = (e) => run(async () => { const f = await ipc.invoke('app:exportDiagnostics'); if (f) toast('Diagnostics bundle saved: ' + f); }, e.target);
 $('btnExportSettings').onclick = (e) => run(async () => { const f = await ipc.invoke('app:exportSettings'); if (f) toast('Exported to ' + f); }, e.target);
 $('btnImportSettings').onclick = (e) => run(async () => { const ok = await ipc.invoke('app:importSettings'); if (ok) { toast('Settings imported'); await loadSettings(); } }, e.target);
-let updateInfo = null;
 function renderUpdate(u, p) {
-  updateInfo = u;
   const cur = (p && p.version) || u.current;
   const text = { idle: `Version ${cur}.`, checking: 'Checking for updates…', none: `Version ${cur} is up to date.`, available: `Version ${u.version} is available (you have ${cur}).`, downloading: `Downloading ${u.version}… ${u.progress || 0}%`, downloaded: `Version ${u.version} is downloaded. Restart to install.`, error: `Update check failed: ${u.error}` }[u.status] || `Version ${cur}.`;
   $('updateInfo').textContent = text + (p && !p.packaged ? ' (running from source: updates are disabled)' : '');
@@ -1880,7 +1882,7 @@ let wipeArmTimer = null;
 function setWipeArmed(on) { for (const id of ['btnWipeAll', 'btnWipeWorld', 'btnWipePlayers']) $(id).disabled = !on; $('wipeArm').checked = on; clearTimeout(wipeArmTimer); if (on) wipeArmTimer = setTimeout(() => setWipeArmed(false), 60000); }
 $('wipeArm').onchange = () => setWipeArmed($('wipeArm').checked);
 $('btnMissionRefresh').onclick = () => run(refreshMission);
-$('btnOpenMissionFolder').onclick = () => run(async () => { const info = await ipc.invoke('mission:mapInfo'); const r = await ipc.invoke('configs:list'); if (r.missionDir) ipc.invoke('shell:openPath', r.missionDir); else toast('No active mission folder', true); });
+$('btnOpenMissionFolder').onclick = () => run(async () => { const r = await ipc.invoke('configs:list'); if (r.missionDir) ipc.invoke('shell:openPath', r.missionDir); else toast('No active mission folder', true); });
 
 // ---------- scheduled tasks ----------
 let taskTypes = {};

@@ -223,4 +223,4 @@ function unregisterFile(abs) {
   return files();
 }
 
-module.exports = { rowsFromText, createFile, unregisterFile, files, limits, loadTypes, saveTypes, typesXml, loadEvents, saveEvents, eventsXml, loadSpawnable, saveSpawnable, spawnableXml, FLAGS, EFLAGS };
+module.exports = { rowsFromText, createFile, unregisterFile, files, limits, loadTypes, saveTypes, loadEvents, saveEvents, loadSpawnable, saveSpawnable };

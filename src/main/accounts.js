@@ -138,4 +138,4 @@ async function joined(guid, name) {
 function stats() { const d = load(); return { tracked: Object.keys(d.ips).length, steamChecked: Object.keys(d.steam).length, hasKey: !!apiKey() }; }
 function init(emit) { emitRef = emit; load(); }
 
-module.exports = { init, record, checkSteam, checkMany, summary, sharedIps, beGuid, stats, cfg };
+module.exports = { init, record, checkSteam, checkMany, summary, stats, cfg };

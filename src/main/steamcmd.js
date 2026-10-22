@@ -31,7 +31,6 @@ function loadSavedCredentials() {
   try { const { safeStorage } = require('electron'); creds.user = s.steamUser; creds.pass = safeStorage.decryptString(Buffer.from(s.steamPassEnc, 'base64')); return true; }
   catch { return false; }
 }
-function hasSavedPassword() { return !!settings.load().steamPassEnc; }
 
 function hasCredentials() {
   return !!(creds.user && creds.pass);
@@ -143,7 +142,6 @@ async function updateServer(emit, { validate = false } = {}) {
   const s = settings.load();
   const p = settings.paths(s);
   fs.mkdirSync(p.serverDir, { recursive: true });
-  emit('task', { name: 'server-update', state: 'running' });
   const r = await runScript([
     '@ShutdownOnFailedCommand 1',
     '@NoPromptForPassword 1',
@@ -153,7 +151,6 @@ async function updateServer(emit, { validate = false } = {}) {
     'quit'
   ], emit, { allowCodes: [0, 6, 7] });
   const ok = !r.error && r.output.some(l => /Success! App '\d+' fully installed/i.test(l));
-  emit('task', { name: 'server-update', state: ok ? 'done' : 'error', error: r.error });
   if (!ok) throw new Error(r.error || 'Server update did not report success. See console.');
   // After a fresh install, give the user a config file to start with.
   const defaultCfg = path.join(p.serverDir, 'serverDZ.cfg');
@@ -171,7 +168,6 @@ async function downloadWorkshopItem(id, emit, { retries = 3 } = {}) {
   if (!hasCredentials()) {
     throw new Error('Workshop downloads need a Steam account that owns DayZ. Enter your Steam login on the Install page.');
   }
-  emit('task', { name: `mod-download-${id}`, state: 'running' });
   let last = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
     emit('console', { source: 'steamcmd', line: `Downloading workshop item ${id} (attempt ${attempt}/${retries})` });
@@ -184,12 +180,10 @@ async function downloadWorkshopItem(id, emit, { retries = 3 } = {}) {
     ], emit, { allowCodes: [0, 6, 7] });
     const ok = last.output.some(l => /Success\. Downloaded item/i.test(l));
     if (ok) {
-      emit('task', { name: `mod-download-${id}`, state: 'done' });
       return path.join(p.workshopDir, String(id));
     }
     if (last.error && !/timeout/i.test(last.error)) break;
   }
-  emit('task', { name: `mod-download-${id}`, state: 'error', error: last && last.error });
   throw new Error((last && last.error) || `Workshop item ${id} did not download.`);
 }
 
@@ -241,4 +235,4 @@ function status() {
   };
 }
 
-module.exports = { setCredentials, loadSavedCredentials, hasSavedPassword, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getServerBuild, getLatestBuild, status, cancel, runScript };
+module.exports = { setCredentials, loadSavedCredentials, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getLatestBuild, status, cancel };

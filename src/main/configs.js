@@ -716,4 +716,4 @@ function cfgFormWrite(changes) {
   return cfgFormRead();
 }
 
-module.exports = { cfgFormRead, cfgFormWrite, CFG_FORM_FIELDS, listFiles, read, write, createFile, validate, validateAll, missionDir, xmlParser, loadLimits, loadTypeNames };
+module.exports = { cfgFormRead, cfgFormWrite, listFiles, read, write, createFile, validate, validateAll, missionDir, xmlParser };

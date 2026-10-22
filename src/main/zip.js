@@ -16,7 +16,6 @@ function tar(args) {
 // Zip the contents of a directory (not the directory itself).
 const zipDir = (dir, zipPath) => tar(['-a', '-c', '-f', zipPath, '-C', dir, '.']);
 // Zip specific files/folders relative to a base directory.
-const zipPaths = (baseDir, relPaths, zipPath) => tar(['-a', '-c', '-f', zipPath, '-C', baseDir, ...relPaths]);
 const unzip = (zipPath, destDir) => tar(['-x', '-f', zipPath, '-C', destDir]);
 
-module.exports = { tar, zipDir, zipPaths, unzip };
+module.exports = { tar, zipDir, unzip };

@@ -167,4 +167,4 @@ function rebuild() {
   save(); return { files: files.length, events: n };
 }
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, record, overview, forPlayer, rebuild, clear, parseAttack, suspicious, flagCfg, beKick };
+module.exports = { init, record, overview, forPlayer, rebuild, clear, parseAttack, suspicious, beKick };

@@ -43,4 +43,4 @@ function handleLine(source, line) {
 }
 function reset() { seen.clear(); }
 
-module.exports = { classify, handleLine, reset, RULES };
+module.exports = { handleLine, reset };

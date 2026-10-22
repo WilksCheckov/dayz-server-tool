@@ -57,7 +57,7 @@ function heatSince() { const r = $('mapRange').value; return r === 'all' ? 0 : D
 async function heatData() { const since = heatSince(); const key = String(since); if (heatCache.data && heatCache.key === key && Date.now() - heatCache.at < 5000) return heatCache.data; try { heatCache = { at: Date.now(), key, data: await ipc.invoke('heat:summary', since) }; } catch { heatCache = { at: Date.now(), key, data: null }; } return heatCache.data; }
 function heatColor(t) { const stops = [[60, 120, 255], [60, 220, 120], [255, 220, 60], [255, 60, 30]]; const p = t * (stops.length - 1); const i = Math.min(stops.length - 2, Math.floor(p)); const f = p - i; return stops[i].map((v, k) => Math.round(v + (stops[i + 1][k] - v) * f)); }
 function drawHeatGrid(ctx, c, N, cells, max, alpha) {
-  const size = worldSize(); const cellW = size / N; const [x0, y0] = toScreen(c, 0, size); const [x1, y1] = toScreen(c, cellW, size - cellW); const cellPx = Math.max(2, x1 - x0); const r = cellPx * 1.6;
+  const size = worldSize(); const cellW = size / N; const [x0] = toScreen(c, 0, size); const [x1] = toScreen(c, cellW, size - cellW); const cellPx = Math.max(2, x1 - x0); const r = cellPx * 1.6;
   for (const [i, n] of cells) {
     const gx = i % N, gz = Math.floor(i / N); const t = Math.log(1 + n) / Math.log(1 + max); const [cr, cg, cb] = heatColor(t);
     const [x, y] = toScreen(c, (gx + 0.5) * cellW, (gz + 0.5) * cellW);

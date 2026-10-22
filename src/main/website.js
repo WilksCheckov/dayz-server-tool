@@ -190,7 +190,6 @@ function adminCfg() {
   }
   return ac;
 }
-function setAdminPassword(pw) { const salt = crypto.randomBytes(8).toString('hex'); return { passwordHash: hashPw(pw, salt), salt }; }
 function adminToken(req) { const m = (req.headers.cookie || '').match(/dzadmin=([a-f0-9]+)/); const t = m && m[1]; return t && adminSessions.get(t) > Date.now() ? t : null; }
 function adminPage(c, body, { loggedIn = false, error = '' } = {}) {
   return layout(c, '/admin', 'Admin', loggedIn ? body : `<h1>Admin</h1>${error ? `<p style="color:#ff5f5f">${esc(error)}</p>` : ''}<form method="post" action="/admin/login" class="card" style="max-width:380px"><label>Password<br><input type="password" name="password" style="width:100%;padding:8px;margin:6px 0 12px;border-radius:8px;border:1px solid #333;background:#0b0d12;color:#fff"></label><button class="btn" type="submit" style="margin:0">Log in</button></form>`);
@@ -547,4 +546,4 @@ async function preview(slug) {
   return page ? customPage(c, page) : '<p>Not found</p>';
 }
 
-module.exports = { setAdminPassword, hashPw, adminCfg, init, start, stop, status, cfg, preview, markdown, DEFAULT_PAGES, listFiles, addFiles, removeFile, writeStarter, publicDir, importSite, removeSite, siteInfo, siteDir, findSiteRoot };
+module.exports = { init, start, stop, status, cfg, preview, listFiles, addFiles, removeFile, writeStarter, publicDir, importSite, removeSite, siteDir };

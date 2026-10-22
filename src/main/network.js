@@ -156,4 +156,4 @@ async function report() {
   return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080), queryPort: qport, queryLocal, queryPublic, stacks };
 }
 
-module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, tcpCheck, a2sInfo, webStacks };
+module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, webStacks };

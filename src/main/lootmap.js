@@ -102,4 +102,4 @@ function spawns(itemName) {
   return { item, buildings, points, spots: result, top, tiers: !!c.area, totalBuildings: c.groups.length };
 }
 
-module.exports = { items, spawns, ensure };
+module.exports = { items, spawns };

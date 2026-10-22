@@ -342,8 +342,8 @@ async function revokeWhitelist({ steamId, discordId }) {
   if (m && c.whitelistRoleId) m.roles.remove(c.whitelistRoleId).catch(() => {});
 }
 
+const u = v => v === null || v === undefined ? 'Unknown' : v;
 function steamFields(steamInfo) {
-  const u = v => v === null || v === undefined ? 'Unknown' : v;
   return [
     { name: 'VAC Ban', value: steamInfo ? (steamInfo.vacBanned ? `Yes (${steamInfo.vacBans})` : 'No') : 'Unknown (no Steam API key)', inline: true },
     { name: 'Trade Ban', value: steamInfo ? (steamInfo.tradeBanned ? 'Yes' : 'No') : u(null), inline: true },
@@ -385,7 +385,6 @@ async function rolesFor(discordIds) {
   return out;
 }
 function applicationEmbed(interaction, { steamId, character, biography, bansText, rules, steamInfo }) {
-  const u = v => v === null || v === undefined ? 'Unknown' : v;
   return new EmbedBuilder().setColor(0x4f8cff)
     .setAuthor({ name: `${interaction.member.displayName}'s Application`, iconURL: interaction.member.displayAvatarURL() })
     .setDescription(`**Biography:**\n${biography}`)
@@ -975,4 +974,4 @@ async function stop(silent = false) {
 function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
 function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
 
-module.exports = { postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, openTicket, closeTicket, syncRoles, muteUser, unmuteUser, parseDuration, init, start, stop, status, execute, buildCommands, isAllowed, cfg, applyLiveLog, notify, updatePresence, banUser, unbanUser, store, _tail: { pollLogs, flushLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };

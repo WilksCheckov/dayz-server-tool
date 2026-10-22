@@ -112,4 +112,4 @@ function init(emit) {
   setTimeout(() => { const st = state(); if (apiKey() && (!st.lastCheck || Date.now() - st.lastCheck > 20 * 3600 * 1000)) checkAll().catch(() => {}); }, 60 * 1000);
 }
 
-module.exports = { init, get, all, check, checkAll, state, summary, flagged, knownIds };
+module.exports = { init, get, all, check, checkAll, state, summary, flagged };

@@ -185,4 +185,4 @@ function buildAsync(opts, onProgress) {
   });
 }
 
-module.exports = { readPbo, decodePaa, lzo1x, pngEncode, findWorldData, steamLibraries, build, buildAsync };
+module.exports = { findWorldData, build, buildAsync };

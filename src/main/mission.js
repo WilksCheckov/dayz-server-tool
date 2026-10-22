@@ -130,4 +130,4 @@ function setMapImage(src) {
 }
 
 function init(emit) { emitRef = emit; }
-module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage, buildMapImage, mapSources };
+module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage, buildMapImage };

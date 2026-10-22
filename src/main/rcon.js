@@ -148,7 +148,6 @@ const say = (msg, player = -1) => command(`say ${player} ${msg}`);
 const kick = (num, reason = '') => command(`kick ${num} ${reason}`.trim());
 const ban = (num, minutes = 0, reason = '') => command(`ban ${num} ${minutes} ${reason}`.trim());
 const addBan = (guid, minutes = 0, reason = '') => command(`addBan ${guid} ${minutes} ${reason}`.trim());
-const removeBan = (num) => command(`removeBan ${num}`);
 
 // ---------- automatic configuration from battleye\BEServer_x64.cfg ----------
 // BattlEye reads RConPassword / RConPort from that file when the server starts (DayZ may rename it to
@@ -205,4 +204,4 @@ function init(emit) {
   if (cfg().autoConnect && cfg().password) setTimeout(() => connect().catch(() => {}), 3000);
 }
 
-module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, removeBan, cfg, crc32, packet, ensureConfigured, readBe, autoConnectLoop, stopAuto };
+module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto };

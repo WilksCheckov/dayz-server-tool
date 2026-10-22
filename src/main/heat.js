@@ -94,4 +94,4 @@ function rebuild() {
 }
 
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, record, summary, deathsSince, clear, rebuild, causeOf, N, KIND };
+module.exports = { init, record, summary, deathsSince, clear, rebuild, causeOf, N };

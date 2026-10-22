@@ -136,4 +136,4 @@ function state() {
 
 function init(emit) { emitRef = emit; schedule(); }
 
-module.exports = { init, schedule, runNow, runIfNeeded, check, state };
+module.exports = { init, schedule, runNow, check, state };

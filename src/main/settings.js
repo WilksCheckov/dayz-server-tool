@@ -86,4 +86,4 @@ function paths(s = load()) {
   };
 }
 
-module.exports = { DEFAULTS, load, save, paths };
+module.exports = { load, save, paths };

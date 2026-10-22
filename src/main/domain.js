@@ -148,4 +148,4 @@ function applyTimers() {
 }
 function init(emit) { emitRef = emit; applyTimers(); }
 
-module.exports = { init, cfg, saveCfg, status, currentCert, challengeResponse, issue, renewIfNeeded, updateDns, applyTimers, certExpiry };
+module.exports = { init, cfg, saveCfg, status, currentCert, challengeResponse, issue, updateDns, applyTimers };

@@ -160,4 +160,4 @@ async function restart() {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, start, stop, restart, status, buildArgs, _tail: { startRptTail, stopRptTail } };
+module.exports = { init, start, stop, restart, status, _tail: { startRptTail, stopRptTail } };
