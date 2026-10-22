@@ -1792,3 +1792,7 @@ try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch { /* ignore *
   renderDiscord(await ipc.invoke('discord:status'));
   logLine({ source: 'app', line: 'DayZ Server Tool ready.' });
 })().catch(e => toast(e.message, true));
+
+// Report renderer errors to the main process log (tool.log in the data folder).
+window.addEventListener('error', e => { try { ipc.invoke('app:rendererError', `${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}`).catch(() => {}); } catch { /* ignore */ } });
+window.addEventListener('unhandledrejection', e => { try { ipc.invoke('app:rendererError', 'unhandled: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)).catch(() => {}); } catch { /* ignore */ } });

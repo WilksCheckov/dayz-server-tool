@@ -7,6 +7,7 @@ const steamcmd = require('./steamcmd');
 const server = require('./server');
 const mods = require('./mods');
 const logs = require('./logs');
+const toollog = require('./toollog');
 const updater = require('./updater');
 const backups = require('./backups');
 const configs = require('./configs');
@@ -98,6 +99,8 @@ async function ensureFirewall() {
   } catch (e) { emit('console', { source: 'network', line: 'Firewall rules not added: ' + e.message + '. Add them on the Network page.' }); }
 }
 function emit(channel, data) {
+  if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
+  else if (channel === 'alerts:new' && data) toollog.warn(`alert ${data.kind}: ${data.title} ${data.details || ''}`);
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
   if (channel === 'server:status') { refreshTray(); if (data && data.running) { ensureFirewall(); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
@@ -145,7 +148,7 @@ function createWindow() {
 function handle(channel, fn) {
   ipcMain.handle(channel, async (event, ...args) => {
     try { return { ok: true, data: await fn(...args) }; }
-    catch (e) { return { ok: false, error: e.message || String(e) }; }
+    catch (e) { toollog.error(`ipc ${channel}: ${e && e.stack || e}`); return { ok: false, error: e.message || String(e) }; }
   });
 }
 
@@ -262,6 +265,7 @@ handle('app:setPrefs', (prefs) => {
   return p;
 });
 handle('app:openDataDir', () => shell.openPath(app.getPath('userData')));
+handle('app:rendererError', (msg) => { toollog.error(`renderer: ${msg}`); return true; });
 handle('app:exportSettings', async () => {
   const r = await dialog.showSaveDialog(win, { defaultPath: 'dayz-server-tool-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
   if (r.canceled) return null;
@@ -419,6 +423,7 @@ try {
 } catch { /* ignore */ }
 
 app.whenReady().then(() => {
+  toollog.init();
   alerts.init(emit);
   try { if (steamcmd.loadSavedCredentials()) emit('console', { source: 'steamcmd', line: `Using remembered Steam login for ${settings.load().steamUser}.` }); } catch { /* ignore */ }
   crashes.init(emit);
