@@ -180,7 +180,7 @@
               </div>
             </div>
           </div>
-          <div class="card">
+          <div class="card" style="flex-shrink:0">
             <div class="card-title">Server install / update</div>
             <div class="muted" id="installStatus">—</div>
             <label class="check mt"><input type="checkbox" id="validateInstall"> Validate files (slower, repairs corrupt files)</label>
@@ -189,6 +189,10 @@
               <button class="btn" id="btnInstallSteamcmd">Install SteamCMD only</button>
               <button class="btn danger" id="btnCancelSteam">Cancel</button>
             </div>
+          </div>
+          <div class="card" style="flex:1;min-height:220px">
+            <div class="card-title row between"><span>SteamCMD output <span class="muted">server and mod downloads, Steam login</span></span><span class="row gap"><label class="check"><input type="checkbox" id="steamConsoleAutoscroll" checked> Autoscroll</label><button class="btn small" id="btnClearSteamConsole">Clear</button></span></div>
+            <pre class="console" id="steamConsole"></pre>
           </div>
         </section>
 

@@ -44,9 +44,18 @@ function logLine({ source, line }) {
   pre.appendChild(span);
   while (pre.childNodes.length > 3000) pre.removeChild(pre.firstChild);
   if ($('consoleAutoscroll').checked) pre.scrollTop = pre.scrollHeight;
+  // SteamCMD lines are mirrored to the Installation page so downloads can be watched where they are started.
+  if (source === 'steamcmd' || source === 'mods' || source === 'updater') {
+    const sp = $('steamConsole');
+    const s2 = span.cloneNode(true);
+    sp.appendChild(s2);
+    while (sp.childNodes.length > 1500) sp.removeChild(sp.firstChild);
+    if ($('steamConsoleAutoscroll').checked) sp.scrollTop = sp.scrollHeight;
+  }
 }
 ipc.on('console', logLine);
 $('btnClearConsole').onclick = () => { $('console').textContent = ''; };
+$('btnClearSteamConsole').onclick = () => { $('steamConsole').textContent = ''; };
 
 // ---------- navigation ----------
 // Sidebar structure: category -> optional subcategory -> pages. Collapsed state is remembered per group.
