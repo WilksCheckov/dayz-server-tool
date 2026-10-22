@@ -451,3 +451,14 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .wipe-arm { margin-bottom: 4px; }
 
 .input.mono { font-family: var(--mono); font-size: 11.5px; }
+
+.wipe-list { display: flex; flex-direction: column; gap: 6px; }
+.wipe-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.wipe-row .muted { font-size: 11.5px; }
+.wipe-row .btn { flex-shrink: 0; min-width: 120px; }
+
+.cfg-fold { grid-column: 1 / -1; }
+.cfg-fold > summary { cursor: pointer; list-style: none; }
+.cfg-fold > summary::before { content: "\25B8 "; }
+.cfg-fold[open] > summary::before { content: "\25BE "; }
+.cfg-fold .cfg-form { margin-top: 6px; }

@@ -65,14 +65,6 @@ function logLine({ source, line }) {
   pre.appendChild(span);
   while (pre.childNodes.length > 3000) pre.removeChild(pre.firstChild);
   if ($('consoleAutoscroll').checked) pre.scrollTop = pre.scrollHeight;
-  // SteamCMD lines are mirrored to the Installation page so downloads can be watched where they are started.
-  if (source === 'steamcmd' || source === 'mods' || source === 'updater') {
-    const sp = $('steamConsole');
-    const s2 = span.cloneNode(true);
-    sp.appendChild(s2);
-    while (sp.childNodes.length > 1500) sp.removeChild(sp.firstChild);
-    if ($('steamConsoleAutoscroll').checked) sp.scrollTop = sp.scrollHeight;
-  }
 }
 ipc.on('console', logLine);
 $('btnClearConsole').onclick = () => { $('console').textContent = ''; };
@@ -80,7 +72,6 @@ document.querySelectorAll('.console-filters input[data-src]').forEach(cb => cb.o
   if (cb.checked) consoleHidden.delete(cb.dataset.src); else consoleHidden.add(cb.dataset.src);
   $('console').querySelectorAll('span[data-src]').forEach(sp => { sp.hidden = consoleHidden.has(sp.dataset.src); });
 });
-$('btnClearSteamConsole').onclick = () => { $('steamConsole').textContent = ''; };
 
 // ---------- navigation ----------
 // Sidebar structure: category -> optional subcategory -> pages. Collapsed state is remembered per group.
@@ -183,7 +174,7 @@ function showPage(name) {
   if (name === 'mission') refreshMission();
   if (name === 'tasks') refreshTasks();
   if (name === 'network') refreshNetwork();
-  if (name === 'map') { loadMapInfo().then(() => drawMap()); }
+  if (name === 'map') { loadMapInfo().then(() => { drawMap(); ensureMapImage(false); mapLive(true); }); }
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
   if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); }
@@ -342,14 +333,21 @@ async function loadCfgForm() {
   try { cfgFormData = await ipc.invoke('cfgform:read'); } catch (e) { box.innerHTML = `<div class="muted">${esc(e.message)}</div>`; return; }
   $('cfgFormFile').textContent = cfgFormData.exists ? (cfgFormData.template ? 'mission ' + cfgFormData.template : '') : 'serverDZ.cfg not found';
   if (!cfgFormData.exists) { box.innerHTML = '<div class="muted">serverDZ.cfg was not found. Install the server first; a default config is copied on the first install.</div>'; return; }
-  let group = null, html = '';
+  let group = null, html = '', folded = false;
+  const FOLD = ['Advanced', 'Network'];
   for (const f of cfgFormData.fields) {
-    if (f.group !== group) { group = f.group; html += `<div class="cfg-group">${esc(group)}</div>`; }
+    if (f.group !== group) {
+      if (folded) { html += '</div></details>'; folded = false; }
+      group = f.group;
+      if (FOLD.includes(group)) { html += `<details class="cfg-fold"><summary class="cfg-group">${esc(group)} <span class="muted">rarely needed, click to show</span></summary><div class="cfg-form">`; folded = true; }
+      else html += `<div class="cfg-group">${esc(group)}</div>`;
+    }
     const v = cfgFormData.values[f.key]; const miss = v === null || v === undefined; const title = `${f.key}${f.hint ? ' — ' + f.hint : ''}${miss ? ' (not in the file yet)' : ''}`;
     if (f.type === 'bool') html += `<label class="check ${miss ? 'cfg-missing' : ''}" title="${esc(title)}"><input type="checkbox" data-key="${f.key}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
     else if (f.type === 'array') html += `<label class="field ${miss ? 'cfg-missing' : ''}" style="grid-column:1/-1" title="${esc(title)}">${esc(f.label)} <textarea class="input" data-key="${f.key}">${esc((v || []).join('\n'))}</textarea></label>`;
     else html += `<label class="field ${miss ? 'cfg-missing' : ''}" title="${esc(title)}">${esc(f.label)} <input class="input" data-key="${f.key}" type="${f.type === 'string' ? 'text' : 'number'}" ${f.min !== undefined ? 'min="' + f.min + '"' : ''} ${f.max !== undefined ? 'max="' + f.max + '"' : ''} ${f.type === 'num' ? 'step="any"' : ''} value="${esc(miss ? '' : String(v))}" placeholder="${esc(f.hint || '')}"></label>`;
   }
+  if (folded) html += '</div></details>';
   box.innerHTML = html;
 }
 $('btnCfgFormReload').onclick = () => run(loadCfgForm);
@@ -387,7 +385,7 @@ async function refreshConfigTree() {
   const tree = $('configTree');
   if (!r.groups.some(g => g.files.length)) { tree.innerHTML = `<div class="empty">No config files found. Install the server first.<br><code>${esc(r.serverDir)}</code></div>`; return; }
   tree.innerHTML = r.groups.map(g => `
-    <div class="tree-group ${g.collapsed ? 'collapsed' : ''}">${esc(g.group)}</div>
+    <div class="tree-group ${g.collapsed === false ? '' : 'collapsed'}">${esc(g.group)}</div>
     <div class="tree-files">${g.files.map(f => {
       const pr = editor.fileProblems[f.abs];
       const badge = pr ? (pr.error ? `<span class="fprob" style="color:var(--bad)">${pr.error}✕</span>` : pr.warning ? `<span class="fprob" style="color:var(--warn)">${pr.warning}▲</span>` : '<span class="fprob" style="color:var(--ok)">✓</span>') : '';
@@ -1791,6 +1789,7 @@ let wipeArmTimer = null;
 function setWipeArmed(on) { for (const id of ['btnWipeAll', 'btnWipeWorld', 'btnWipePlayers']) $(id).disabled = !on; $('wipeArm').checked = on; clearTimeout(wipeArmTimer); if (on) wipeArmTimer = setTimeout(() => setWipeArmed(false), 60000); }
 $('wipeArm').onchange = () => setWipeArmed($('wipeArm').checked);
 $('btnMissionRefresh').onclick = () => run(refreshMission);
+$('btnOpenMissionFolder').onclick = () => run(async () => { const info = await ipc.invoke('mission:mapInfo'); const r = await ipc.invoke('configs:list'); if (r.missionDir) ipc.invoke('shell:openPath', r.missionDir); else toast('No active mission folder', true); });
 
 // ---------- scheduled tasks ----------
 let taskTypes = {};
@@ -1836,7 +1835,7 @@ $('btnNetRefresh').onclick = () => run(refreshNetwork);
 async function loadLogCleanup() { try { const c = await ipc.invoke('logs:cleanupCfg'); $('logCleanEnabled').checked = !!c.enabled; $('logCleanDays').value = c.keepDays; } catch { /* ignore */ } }
 const saveLogCleanup = () => saveSettings({ logCleanup: { enabled: $('logCleanEnabled').checked, keepDays: Number($('logCleanDays').value) || 14 } }).then(() => toast('Log cleanup ' + ($('logCleanEnabled').checked ? 'on' : 'off')));
 $('logCleanEnabled').onchange = saveLogCleanup; $('logCleanDays').onchange = saveLogCleanup;
-$('btnLogCleanNow').onclick = (e) => run(async () => { const r = await ipc.invoke('logs:cleanup', { keepDays: Number($('logCleanDays').value) || 14 }); toast(`Removed ${r.removed} file(s), ${(r.bytes / 1048576).toFixed(1)} MB`); refreshLogs(); }, e.target);
+$('btnLogCleanNow').onclick = (e) => run(async () => { const r = await ipc.invoke('logs:cleanup', { keepDays: Number($('logCleanDays').value) || 14 }); toast(`Removed ${r.removed} file(s), ${(r.bytes / 1048576).toFixed(1)} MB`); refreshLogList(); }, e.target);
 loadLogCleanup();
 $('btnNetAddRules').onclick = (e) => run(async () => { toast('Windows will ask for permission…'); await ipc.invoke('network:addRules'); toast('Firewall rules added'); refreshNetwork(); }, e.target);
 $('btnNetRemoveRules').onclick = (e) => run(async () => { await ipc.invoke('network:removeRules'); toast('Rules removed'); refreshNetwork(); }, e.target);
@@ -1847,7 +1846,7 @@ async function loadMapInfo() {
   mapState.info = await ipc.invoke('mission:mapInfo');
   const i = mapState.info;
   $('mapDetected').textContent = !i.map ? 'No active mission: install the server and set the template in serverDZ.cfg.'
-    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.image ? ' · image: ' + i.image.split(/[\\/]/).pop() : ' · no image yet: add ' + i.map + '.png to the maps folder or use Set map image'}`;
+    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.image ? ' · map image from the game files' : i.building ? ' · building the map image from the game files…' : ' · no map image yet'}`;
   mapState.img = null;
   if (i.image) { await new Promise(res => { const im = new Image(); im.onload = () => { mapState.img = im; res(); }; im.onerror = () => res(); im.src = 'file:///' + i.image.replace(/\\/g, '/') + '?t=' + Date.now(); }); }
 }
@@ -1859,11 +1858,24 @@ async function drawMap() {
   if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz); else { ctx.fillStyle = '#1a1d22'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#2b3036'; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
   const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 });
   const pts = rows.filter(r => r.lastPos && (!$('mapOnlineOnly').checked || r.online));
-  for (const r of pts) { const x = (r.lastPos.x / size) * sz, y = sz - (r.lastPos.z / size) * sz; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = '11px Segoe UI'; ctx.fillText(r.name, x + 8, y + 4); }
-  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · world ${size} m`;
+  for (const r of pts) { const x = (r.lastPos.x / size) * sz, y = sz - (r.lastPos.z / size) * sz; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke(); ctx.font = '11px Segoe UI'; const tw = ctx.measureText(r.name).width; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x + 7, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(r.name, x + 10, y + 4); }
+  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · refreshes every 5 s · world ${size} m`;
 }
 $('btnMapPickImage').onclick = () => run(async () => { const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (!f) return; await ipc.invoke('mission:setMapImage', f); await loadMapInfo(); drawMap(); toast('Map image saved for ' + mapState.info.label); });
 $('btnMapOpenDir').onclick = () => ipc.invoke('mission:openMapsDir');
+// Build the map image automatically the first time the page is opened without one, and keep positions live.
+let mapBuildTried = null, mapLiveTimer = null;
+async function ensureMapImage(force) {
+  const i = mapState.info; if (!i || !i.map) return;
+  if (i.image && !force) return;
+  if (!force && mapBuildTried === i.map) return;
+  mapBuildTried = i.map;
+  try { toast('Building the ' + (i.label || i.map) + ' map from the game files…'); await ipc.invoke('mission:buildMap', { force: !!force }); await loadMapInfo(); drawMap(); toast('Map image ready'); }
+  catch (e) { toast(e.message, true); }
+}
+$('btnMapBuild').onclick = (e) => run(() => ensureMapImage(true), e.target);
+ipc.on('map:progress', p => { if (p.error) { $('mapDetected').textContent = 'Map build failed: ' + p.error; return; } if (!p.done) $('mapDetected').textContent = `Building the map image from the game files… ${Math.round((p.progress || 0) * 100)}%`; });
+function mapLive(on) { clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) drawMap().catch(() => {}); else mapLive(false); }, 5000); }
 $('btnMapRefresh').onclick = () => run(async () => { await loadMapInfo(); drawMap(); }); $('mapOnlineOnly').onchange = () => drawMap();
 window.addEventListener('resize', () => { if (document.querySelector('#page-map.active') && mapState.info) drawMap(); });
 

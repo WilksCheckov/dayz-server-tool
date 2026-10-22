@@ -302,6 +302,8 @@ handle('mission:gameplay', () => mission.gameplay());
 handle('mission:saveGameplay', (changes) => mission.saveGameplay(changes));
 handle('mission:mapInfo', () => mission.mapInfo());
 handle('mission:setMapImage', (src) => mission.setMapImage(src));
+handle('mission:buildMap', (opts) => mission.buildMapImage(opts || {}));
+handle('mission:mapSources', () => mission.mapSources());
 handle('mission:openMapsDir', () => { const d = mission.mapInfo().mapsDir; fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
 
 // Scheduled tasks

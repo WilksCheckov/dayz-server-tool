@@ -97,7 +97,26 @@ function mapInfo() {
   const key = map ? map.toLowerCase() : null;
   let image = null;
   try { fs.mkdirSync(mapsDir(), { recursive: true }); for (const ext of ['png', 'jpg', 'jpeg', 'webp']) { const f = path.join(mapsDir(), key + '.' + ext); if (key && fs.existsSync(f)) { image = f; break; } } } catch { /* ignore */ }
-  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, mapsDir: mapsDir() };
+  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, mapsDir: mapsDir(), building: !!building };
+}
+// Build the map image from the game's satellite tiles (DayZ client install or a map mod). Runs in a worker.
+let building = null;
+function mapSources() { const info = mapInfo(); if (!info.map) return []; return require('./mapbuild').findWorldData(info.map, settings.paths().serverDir); }
+async function buildMapImage({ force = false } = {}) {
+  const info = mapInfo();
+  if (!info.map) throw new Error('No active mission, so the map is unknown.');
+  if (info.image && !force) return info;
+  if (building) return building;
+  const src = mapSources()[0];
+  if (!src) throw new Error(`No satellite data found for "${info.map}". Install the DayZ client through Steam on this PC (the map lives in its worlds_${info.map}_data.pbo), or add ${info.map}.png to the maps folder.`);
+  const out = path.join(mapsDir(), info.map + '.png');
+  emitRef('console', { source: 'map', line: `Building the ${info.label || info.map} map from ${src.path}...` });
+  emitRef('map:progress', { map: info.map, progress: 0 });
+  building = require('./mapbuild').buildAsync({ pboPath: src.path, outPath: out, scale: 4 }, p => emitRef('map:progress', { map: info.map, progress: p }))
+    .then(r => { emitRef('console', { source: 'map', line: `Map image ready: ${r.width}x${r.height} from ${r.tiles} tiles.` }); emitRef('map:progress', { map: info.map, progress: 1, done: true }); return mapInfo(); })
+    .catch(e => { emitRef('console', { source: 'map', line: 'Map build failed: ' + e.message }); emitRef('map:progress', { map: info.map, error: e.message }); throw e; })
+    .finally(() => { building = null; });
+  return building;
 }
 function setMapImage(src) {
   const info = mapInfo();
@@ -111,4 +130,4 @@ function setMapImage(src) {
 }
 
 function init(emit) { emitRef = emit; }
-module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage };
+module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage, buildMapImage, mapSources };

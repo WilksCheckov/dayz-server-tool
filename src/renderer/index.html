@@ -174,14 +174,14 @@
               <div class="row gap mt"><button class="btn" id="btnSaveInstall">Save</button></div>
             </div>
             <div class="card">
-              <div class="card-title">Steam login <span class="muted">for Workshop mods</span></div>
-              <p class="muted">The server itself installs anonymously. Workshop mods need a Steam account that owns DayZ. By default the password is kept in memory only; tick "Remember" to store it encrypted with your Windows account so scheduled mod updates keep working after the tool restarts.</p>
+              <div class="card-title">Steam login <span class="muted">game ownership and Workshop access</span></div>
+              <p class="muted">Steam uses this account to verify that you own DayZ and to let the tool download Workshop mods. The server files themselves install anonymously. The password stays in memory only unless you tick "Remember", which stores it encrypted with your Windows account so scheduled mod updates keep working after a restart.</p>
               <label class="field">Username <input id="steamUser" class="input" autocomplete="off"></label>
               <label class="field">Password <input id="steamPass" class="input" type="password" autocomplete="off"></label>
               <label class="field">Steam Guard code (if asked) <input id="steamGuard" class="input" autocomplete="off" placeholder="optional"></label>
               <label class="check"><input type="checkbox" id="steamRemember"> Remember the password on this computer (encrypted, needed for unattended mod updates)</label>
               <div class="row gap mt">
-                <button class="btn" id="btnSaveCreds">Use these credentials</button>
+                <button class="btn primary" id="btnSaveCreds">Save credentials</button>
                 <span class="muted" id="credStatus"></span>
               </div>
             </div>
@@ -196,11 +196,7 @@
               <button class="btn danger" id="btnCancelSteam">Cancel</button>
             </div>
           </div>
-          <div class="card" style="flex:1;min-height:220px">
-            <div class="card-title row between"><span>SteamCMD output <span class="muted">server and mod downloads, Steam login</span></span><span class="row gap"><label class="check"><input type="checkbox" id="steamConsoleAutoscroll" checked> Autoscroll</label><button class="btn small" id="btnClearSteamConsole">Clear</button></span></div>
-            <pre class="console" id="steamConsole"></pre>
-          </div>
-        </section>
+</section>
 
         <!-- LAUNCH -->
         <section class="page" id="page-launch">
@@ -362,10 +358,14 @@
             </div>
             <div class="col gap">
               <div class="card">
-                <div class="card-title">Wipe active mission</div>
-                <p class="muted"><b>Full wipe</b> deletes <code>storage_1</code>: characters, bases, vehicles and loot state. <b>World wipe</b> deletes bases, vehicles and loot but keeps <code>players.db</code>, so everyone keeps their character. <b>Character wipe</b> only deletes <code>players.db</code>.</p>
-                <label class="check wipe-arm"><input type="checkbox" id="wipeArm"> Enable the wipe buttons (safety: disarms again after 60 seconds)</label>
-                <div class="row gap wrap"><button class="btn danger" id="btnWipeAll" disabled>Full wipe</button><button class="btn danger" id="btnWipeWorld" disabled>World wipe, keep characters</button><button class="btn danger" id="btnWipePlayers" disabled>Wipe characters only</button></div>
+                <div class="card-title row between"><span>Server Wipe</span><button class="btn small" id="btnOpenMissionFolder">Open mission folder</button></div>
+                <p class="muted">Every wipe needs the server stopped, takes a backup first, and asks you to type WIPE. Restoring that backup is the only way back.</p>
+                <label class="check wipe-arm"><input type="checkbox" id="wipeArm"> Safety Check - To do any form of wipe this safety must be toggled on.</label>
+                <div class="wipe-list">
+                  <div class="wipe-row"><div><b>Full wipe</b><div class="muted">Everything in storage_1: characters, bases, vehicles and loot state. A fresh start.</div></div><button class="btn danger" id="btnWipeAll" disabled>Full wipe</button></div>
+                  <div class="wipe-row"><div><b>World wipe</b><div class="muted">Bases, vehicles and loot are reset. Characters are kept (players.db stays).</div></div><button class="btn danger" id="btnWipeWorld" disabled>World wipe</button></div>
+                  <div class="wipe-row"><div><b>Character wipe</b><div class="muted">Only players.db is deleted, so everyone respawns fresh while bases and vehicles stay.</div></div><button class="btn danger" id="btnWipePlayers" disabled>Character wipe</button></div>
+                </div>
                 <div class="muted mt" id="wipeInfo"></div>
               </div>
               <div class="card">
@@ -410,6 +410,7 @@
           <div class="page-toolbar">
             <span class="muted" id="mapDetected">Detecting map from the active mission…</span>
             <span class="grow"></span>
+            <button class="btn" id="btnMapBuild" title="Build the map image from the game's satellite tiles (needs the DayZ client installed on this PC, or a map mod)">Rebuild map image</button>
             <button class="btn" id="btnMapPickImage">Set map image…</button>
             <button class="btn" id="btnMapOpenDir">Open maps folder</button>
             <label class="check"><input type="checkbox" id="mapOnlineOnly"> online only</label>
