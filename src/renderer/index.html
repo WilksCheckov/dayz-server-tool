@@ -94,6 +94,10 @@
                 <button class="btn small" id="btnClearConsole">Clear</button>
               </span>
             </div>
+            <div id="criticalStrip" class="critical-strip" hidden>
+              <div class="row between"><span class="critical-title">Critical <span class="muted">last errors from the server and its log, pinned</span></span><button class="btn small" id="btnClearCritical">Dismiss</button></div>
+              <div id="criticalLines"></div>
+            </div>
             <pre class="console" id="console"></pre>
           </div>
           <div class="card alerts-card">

@@ -37,7 +37,29 @@ function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<':
 
 // ---------- console ----------
 const consoleHidden = new Set();
+// Pinned strip of the last critical lines from the server, so they do not scroll away in a busy console.
+const CRITICAL_RE = /crash|fatal|exception|access violation|out of memory|cannot (open|load|find|create)|failed to (load|open|start|bind|create)|script error|no entry|missing|not found|bad version|signature|be(?:server)? ?(?:init|start) ?fail|cannot bind|address already|invalid (?:config|mission|argument)|error/i;
+const CRITICAL_IGNORE = /warning|0 error|no error|error summary/i;
+const criticalLines = [];
+function pinCritical(source, line) {
+  if (source !== 'server' && source !== 'rpt') return;
+  if (!CRITICAL_RE.test(line) || CRITICAL_IGNORE.test(line)) return;
+  const key = line.replace(/^\s*\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '').trim();
+  const existing = criticalLines.find(c => c.key === key);
+  if (existing) { existing.count++; existing.at = Date.now(); }
+  else { criticalLines.push({ key, source, line, count: 1, at: Date.now() }); if (criticalLines.length > 6) criticalLines.shift(); }
+  renderCritical();
+}
+function renderCritical() {
+  const strip = $('criticalStrip'); const box = $('criticalLines');
+  if (!criticalLines.length) { strip.hidden = true; box.innerHTML = ''; return; }
+  strip.hidden = false;
+  box.innerHTML = criticalLines.slice().reverse().map(c => `<div class="critical-line"><span class="muted">${new Date(c.at).toLocaleTimeString()} [${esc(c.source)}]</span> ${esc(c.line.slice(0, 300))}${c.count > 1 ? ` <span class="badge bad">×${c.count}</span>` : ''}</div>`).join('');
+}
+$('btnClearCritical').onclick = () => { criticalLines.length = 0; renderCritical(); };
+ipc.on('server:status', st => { if (st && st.running && st.startedAt && Date.now() - st.startedAt < 3000) { criticalLines.length = 0; renderCritical(); } });
 function logLine({ source, line }) {
+  pinCritical(source, line);
   const pre = $('console');
   const span = document.createElement('span');
   span.dataset.src = ['server', 'rpt', 'steamcmd'].includes(source) ? source : 'other';
