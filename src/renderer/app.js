@@ -914,17 +914,16 @@ function loadRconForm() {
   $('rconHost').value = c.host || '127.0.0.1';
   $('rconPort').value = c.port || 2306;
   $('rconPass').value = c.password || '';
-  $('rconAuto').checked = !!c.autoConnect;
+  $('rconAuto').checked = c.autoConnect !== false; $('rconAutoCfg').checked = c.autoConfigure !== false;
 }
-function rconForm() { return { host: $('rconHost').value.trim() || '127.0.0.1', port: Number($('rconPort').value) || 2306, password: $('rconPass').value, autoConnect: $('rconAuto').checked }; }
+function rconForm() { return { autoConfigure: $('rconAutoCfg').checked, host: $('rconHost').value.trim() || '127.0.0.1', port: Number($('rconPort').value) || 2306, password: $('rconPass').value, autoConnect: $('rconAuto').checked }; }
 $('btnRconSave').onclick = (e) => run(async () => { await saveSettings({ rcon: rconForm() }); toast('RCon settings saved'); }, e.target);
 $('btnRconFromBe').onclick = (e) => run(async () => {
-  const be = (state.paths.serverDir + '\\battleye\\BEServer_x64.cfg');
-  let r; try { r = await ipc.invoke('configs:read', be); } catch { return toast('battleye\\BEServer_x64.cfg not found', true); }
-  const port = r.text.match(/^\s*RConPort\s+(\d+)/mi), pass = r.text.match(/^\s*RConPassword\s+(\S+)/mi);
-  if (port) $('rconPort').value = port[1];
-  if (pass) $('rconPass').value = pass[1];
-  toast(port || pass ? 'Read from BEServer_x64.cfg' : 'No RConPort/RConPassword lines found', !(port || pass));
+  await saveSettings({ rcon: rconForm() });
+  const r = await ipc.invoke('rcon:ensure');
+  if (r.action === 'error') return toast(r.error, true);
+  renderRcon(await ipc.invoke('rcon:status')); loadRconForm && loadRconForm();
+  toast(r.action === 'generated' ? 'Created an RCon password in BEServer_x64.cfg. Restart the server for BattlEye to pick it up.' : r.action === 'from-battleye' ? 'Settings filled from BEServer_x64.cfg' : r.action === 'wrote-battleye' ? 'BEServer_x64.cfg updated to match. Restart the server for BattlEye to pick it up.' : 'Already in sync');
 }, e.target);
 $('btnRconConnect').onclick = (e) => run(async () => { await saveSettings({ rcon: rconForm() }); renderRcon(await ipc.invoke('rcon:connect')); refreshPlayers(); }, e.target);
 $('btnRconDisconnect').onclick = (e) => run(async () => { await ipc.invoke('rcon:disconnect'); }, e.target);

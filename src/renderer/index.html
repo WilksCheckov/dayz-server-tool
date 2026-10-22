@@ -716,14 +716,15 @@
           <div class="grid-3">
             <div class="card">
               <div class="card-title">RCon connection</div>
-              <p class="muted">Uses BattlEye RCon. Set <code>RConPassword</code> and <code>RConPort</code> in <code>battleye\BEServer_x64.cfg</code> (Config Editor), then enter the same values here.</p>
+              <p class="muted">Uses BattlEye RCon. The tool configures it for you: before each server start it writes <code>RConPassword</code> and <code>RConPort</code> to <code>battleye\BEServer_x64.cfg</code> (creating a password if there is none), keeps these fields in step, and connects on its own once the server is up.</p>
               <div class="grid-2 tight">
                 <label class="field">Host <input id="rconHost" class="input" placeholder="127.0.0.1"></label>
                 <label class="field">Port <input id="rconPort" class="input" type="number" placeholder="2306"></label>
               </div>
               <label class="field">Password <input id="rconPass" class="input" type="password" autocomplete="off"></label>
-              <label class="check"><input type="checkbox" id="rconAuto"> Connect automatically when the tool starts</label>
-              <div class="row gap mt"><button class="btn" id="btnRconSave">Save</button><button class="btn small" id="btnRconFromBe" title="Read RConPort/RConPassword from BEServer_x64.cfg">Read from BEServer_x64.cfg</button></div>
+              <label class="check"><input type="checkbox" id="rconAutoCfg"> Configure BattlEye's RCon file automatically before each start</label>
+              <label class="check"><input type="checkbox" id="rconAuto"> Connect automatically when the server is up</label>
+              <div class="row gap mt"><button class="btn" id="btnRconSave">Save</button><button class="btn small" id="btnRconFromBe" title="Sync the tool and battleye\BEServer_x64.cfg now (creates a password if neither has one)">Sync with BEServer_x64.cfg</button></div>
             </div>
             <div class="card">
               <div class="card-title">Broadcast</div>

@@ -87,6 +87,7 @@ function start() {
   const p = settings.paths(s);
   if (!fs.existsSync(p.serverExe)) throw new Error('DayZServer_x64.exe not found. Install the server first.');
   if (!fs.existsSync(p.configPath)) throw new Error(`Config file not found: ${p.configPath}`);
+  try { require('./rcon').ensureConfigured(); } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon auto-configuration failed: ' + e.message }); }
   fs.mkdirSync(p.profilesDir, { recursive: true });
   clearTimeout(restartTimer); restartTimer = null;
   manualStop = false;

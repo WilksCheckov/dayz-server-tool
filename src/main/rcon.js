@@ -37,7 +37,7 @@ function setError(msg) {
 
 function cfg() {
   const s = settings.load();
-  return { host: '127.0.0.1', port: 2306, password: '', autoConnect: false, ...(s.rcon || {}) };
+  return { host: '127.0.0.1', port: 2306, password: '', autoConnect: true, autoConfigure: true, ...(s.rcon || {}) };
 }
 
 function status() { return { ...state, config: { ...cfg(), password: cfg().password ? '••••' : '' } }; }
@@ -150,9 +150,56 @@ const ban = (num, minutes = 0, reason = '') => command(`ban ${num} ${minutes} ${
 const addBan = (guid, minutes = 0, reason = '') => command(`addBan ${guid} ${minutes} ${reason}`.trim());
 const removeBan = (num) => command(`removeBan ${num}`);
 
+// ---------- automatic configuration from battleye\BEServer_x64.cfg ----------
+// BattlEye reads RConPassword / RConPort from that file when the server starts (DayZ may rename it to
+// BEServer_x64_active_*.cfg while running). The tool keeps its own settings and that file in step, creating
+// a password when neither has one, so RCon works without any manual setup.
+const fsx = require('fs'); const pathx = require('path');
+function beDir() { return pathx.join(settings.paths().serverDir, 'battleye'); }
+function beFiles() { try { return fsx.readdirSync(beDir()).filter(f => /^beserver_x64(?:_active_[a-z0-9]+)?\.cfg$/i.test(f)).map(f => pathx.join(beDir(), f)); } catch { return []; } }
+function readBe() {
+  for (const f of beFiles()) {
+    try { const t = fsx.readFileSync(f, 'utf8'); const pw = t.match(/^\s*RConPassword\s+(\S+)/mi), port = t.match(/^\s*RConPort\s+(\d+)/mi); if (pw || port) return { file: f, password: pw ? pw[1] : '', port: port ? Number(port[1]) : null }; } catch { /* next */ }
+  }
+  return null;
+}
+function writeBe(password, port) {
+  const dir = beDir(); fsx.mkdirSync(dir, { recursive: true });
+  const main = pathx.join(dir, 'BEServer_x64.cfg');
+  let text = ''; try { text = fsx.readFileSync(main, 'utf8'); } catch { /* new file */ }
+  const set = (key, val) => { const re = new RegExp('^\\s*' + key + '\\s+.*$', 'mi'); text = re.test(text) ? text.replace(re, key + ' ' + val) : (text.replace(/\s*$/, '') + (text ? '\r\n' : '') + key + ' ' + val); };
+  set('RConPassword', password); set('RConPort', String(port)); if (!/^\s*RestrictRCon\s/mi.test(text)) set('RestrictRCon', '0');
+  fsx.writeFileSync(main, text.replace(/\s*$/, '') + '\r\n', 'utf8');
+  // an _active_ copy is what a running server actually reads; keep it in step too
+  for (const f of beFiles()) if (f !== main) { try { fsx.writeFileSync(f, fsx.readFileSync(main, 'utf8')); } catch { /* ignore */ } }
+  return main;
+}
+// Make the tool's settings and the BattlEye file agree. Returns what happened.
+function ensureConfigured() {
+  const c = cfg(); if (c.autoConfigure === false) return { action: 'off' };
+  const be = readBe();
+  let password = c.password, port = Number(c.port) || 2306, action = 'ok';
+  if (!password && be && be.password) { password = be.password; if (be.port) port = be.port; action = 'from-battleye'; }
+  if (!password) { password = require('crypto').randomBytes(9).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 12) || 'rcon' + Date.now(); action = 'generated'; }
+  const needWrite = !be || be.password !== password || be.port !== port;
+  if (needWrite) { try { writeBe(password, port); if (action === 'ok') action = 'wrote-battleye'; } catch (e) { return { action: 'error', error: e.message }; } }
+  if (password !== c.password || port !== c.port || c.autoConnect !== true) settings.save({ rcon: { ...c, password, port, host: c.host || '127.0.0.1', autoConnect: true } });
+  if (action !== 'ok') emitRef('console', { source: 'rcon', line: action === 'generated' ? `RCon configured: created a password in battleye\\BEServer_x64.cfg (port ${port}).` : action === 'from-battleye' ? `RCon configured from battleye\\BEServer_x64.cfg (port ${port}).` : `RCon: battleye\\BEServer_x64.cfg updated to match the tool's settings (port ${port}).` });
+  return { action, port, file: pathx.join(beDir(), 'BEServer_x64.cfg') };
+}
+// Connect on its own once the server is up: retry every 15 s for up to 10 minutes, stop when connected or the server stops.
+let autoTimer = null, autoUntil = 0;
+function autoConnectLoop() {
+  const c = cfg(); if (!c.autoConnect || !c.password) return;
+  clearInterval(autoTimer); autoUntil = Date.now() + 10 * 60000;
+  const attempt = () => { if (state.connected) { clearInterval(autoTimer); autoTimer = null; return; } if (Date.now() > autoUntil) { clearInterval(autoTimer); autoTimer = null; emitRef('console', { source: 'rcon', line: 'RCon: gave up auto-connecting after 10 minutes. Check the RCon port and BattlEye.' }); return; } connect().catch(() => {}); };
+  setTimeout(attempt, 20000); autoTimer = setInterval(attempt, 15000);
+}
+function stopAuto() { clearInterval(autoTimer); autoTimer = null; }
 function init(emit) {
   emitRef = emit;
+  try { ensureConfigured(); } catch { /* server not installed yet */ }
   if (cfg().autoConnect && cfg().password) setTimeout(() => connect().catch(() => {}), 3000);
 }
 
-module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, removeBan, cfg, crc32, packet };
+module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, removeBan, cfg, crc32, packet, ensureConfigured, readBe, autoConnectLoop, stopAuto };

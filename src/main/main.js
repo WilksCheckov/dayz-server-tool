@@ -114,7 +114,7 @@ function emit(channel, data) {
   if (channel === 'alerts:new' && data && (data.kind === 'crash' || data.kind === 'crash-loop')) stats.recordCrash();
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
-  if (channel === 'server:status') { refreshTray(); if (data && data.running) { servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
+  if (channel === 'server:status') { refreshTray(); if (data && !data.running) { rcon.stopAuto(); if (rcon.status().connected) rcon.disconnect(true); } if (data && data.running) { rcon.autoConnectLoop(); servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
 }
 
 function createWindow() {
@@ -450,6 +450,8 @@ handle('configs:validateAll', () => configs.validateAll());
 // RCon (BattlEye)
 handle('rcon:status', () => rcon.status());
 handle('rcon:connect', (opts) => rcon.connect(opts || {}));
+handle('rcon:ensure', () => rcon.ensureConfigured());
+handle('rcon:readBe', () => rcon.readBe());
 handle('rcon:disconnect', () => rcon.disconnect());
 handle('rcon:command', (cmd) => rcon.command(cmd));
 handle('rcon:players', () => rcon.players());
