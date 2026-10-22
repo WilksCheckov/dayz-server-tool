@@ -25,6 +25,9 @@ const steambans = require('./steambans');
 const accounts = require('./accounts');
 const domain = require('./domain');
 const heat = require('./heat');
+const lootmap = require('./lootmap');
+const stats = require('./stats');
+const audit = require('./audit');
 const economy = require('./economy');
 const mission = require('./mission');
 const tasks = require('./tasks');
@@ -105,6 +108,8 @@ function emit(channel, data) {
   if (channel === 'console' && data) { try { servererrors.handleLine(data.source, data.line); } catch { /* ignore */ } }
   if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') && !/(0 failed)|0 error|no error|failed: 0\b|fails?: ?0\b/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
   else if (channel === 'alerts:new' && data) toollog.warn(`alert ${data.kind}: ${data.title} ${data.details || ''}`);
+  if (channel === 'health:sample' && data) stats.recordSample(data);
+  if (channel === 'alerts:new' && data && (data.kind === 'crash' || data.kind === 'crash-loop')) stats.recordCrash();
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
   if (channel === 'server:status') { refreshTray(); if (data && data.running) { servererrors.reset(); ensureFirewall(); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
@@ -154,9 +159,14 @@ function createWindow() {
 }
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
+const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan|removeBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:cleanup)$/;
 function handle(channel, fn) {
   ipcMain.handle(channel, async (event, ...args) => {
-    try { return { ok: true, data: await fn(...args) }; }
+    try {
+      const data = await fn(...args);
+      if (AUDITED.test(channel)) { try { const detail = channel === 'steam:setCredentials' ? { user: args[0] && args[0].user } : channel === 'settings:set' ? Object.keys(args[0] || {}) : args.filter(a => typeof a !== 'object' || Array.isArray(a) ? true : JSON.stringify(a).length < 300); audit.log('app', 'local', channel, detail); } catch { /* ignore */ } }
+      return { ok: true, data };
+    }
     catch (e) { toollog.error(`ipc ${channel}: ${e && e.stack || e}`); return { ok: false, error: e.message || String(e) }; }
   });
 }
@@ -305,7 +315,14 @@ handle('mission:saveGameplay', (changes) => mission.saveGameplay(changes));
 handle('mission:mapInfo', () => mission.mapInfo());
 handle('mission:setMapImage', (src) => mission.setMapImage(src));
 handle('mission:buildMap', (opts) => mission.buildMapImage(opts || {}));
-handle('heat:summary', () => heat.summary());
+handle('heat:summary', (since) => heat.summary(null, Number(since) || 0));
+handle('lootmap:items', () => lootmap.items());
+handle('lootmap:spawns', (name) => lootmap.spawns(name));
+handle('stats:overview', () => stats.overview());
+handle('stats:summaryText', () => stats.summaryText());
+handle('stats:postSummary', () => stats.postSummaryNow());
+handle('audit:list', (o) => audit.list(o || {}));
+handle('audit:export', () => { const p = path.join(app.getPath('userData'), 'audit-export.csv'); fs.writeFileSync(p, audit.exportCsv()); shell.showItemInFolder(p); return p; });
 handle('heat:rebuild', () => heat.rebuild());
 handle('heat:clear', () => heat.clear());
 handle('mission:mapSources', () => mission.mapSources());
@@ -469,6 +486,8 @@ app.whenReady().then(() => {
   accounts.init(emit);
   domain.init(emit);
   heat.init(emit);
+  stats.init(emit);
+  audit.init(emit);
   createWindow();
 });
 

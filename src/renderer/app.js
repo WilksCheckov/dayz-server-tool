@@ -86,6 +86,8 @@ const ICONS = {
   tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>',
   network: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-6 5M12 12l6 5"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6z"/><path d="M9 4v14M15 6v14"/></svg>',
+  stats: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  audit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6l1 2h3a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h3l1-2z"/><path d="M8 11h8M8 15h5"/></svg>',
   logs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h14"/></svg>',
   workshop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
   mods: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
@@ -121,9 +123,11 @@ const NAV = [
     { page: 'backups', label: 'Backups', sub: 'Zip backups of mission, profiles and config', icon: 'backups' },
     { page: 'restarts', label: 'Restarts', sub: 'Scheduled restarts with in-game warnings', icon: 'restarts' },
     { page: 'tasks', label: 'Tasks', sub: 'Scheduled messages, commands, backups and scripts', icon: 'tasks' },
-    { page: 'network', label: 'Network', sub: 'Ports, firewall rules and public IP', icon: 'network' }
+    { page: 'network', label: 'Network', sub: 'Ports, firewall rules and public IP', icon: 'network' },
+    { page: 'audit', label: 'Audit log', sub: 'Who did what: app, Discord bot and web admin actions', icon: 'audit' }
   ] },
   { title: 'Players', items: [
+    { page: 'stats', label: 'Statistics', sub: 'Deaths, players online, leaderboards and server health over time', icon: 'stats' },
     { page: 'players', label: 'Online', sub: 'Live players via RCon: message, kick, ban', icon: 'players' },
     { page: 'database', label: 'Database', sub: 'Every player seen in the admin logs: playtime, kills, sessions, notes', icon: 'database' },
     { page: 'bans', label: 'Bans', sub: 'Game bans and BattlEye bans', icon: 'bans' },
@@ -174,7 +178,9 @@ function showPage(name) {
   if (name === 'mission') refreshMission();
   if (name === 'tasks') refreshTasks();
   if (name === 'network') refreshNetwork();
-  if (name === 'map') { loadMapInfo().then(() => { drawMap(); ensureMapImage(false); mapLive(true); }); }
+  if (name === 'map') { loadMapInfo().then(() => { scheduleDraw(); ensureMapImage(false); mapLive(true); }); }
+  if (name === 'stats') refreshStats();
+  if (name === 'audit') refreshAudit();
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
   if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); }
@@ -1050,13 +1056,14 @@ function loadDiscordForm() {
   $('dcAdminChannel').value = c.adminChannelId || ''; $('dcWhitelistRole').value = c.whitelistRoleId || ''; $('dcPriorityRole').value = c.priorityRoleId || ''; $('dcBannedRole').value = c.bannedRoleId || ''; $('dcMutedRole').value = c.mutedRoleId || ''; $('dcSteamKey').value = c.steamApiKey || '';
   $('dcStatusFormat').value = c.statusFormat || 'Server Online | {count}/{max} Players'; $('dcOfflineStatus').value = c.offlineStatus || 'Server Offline';
   $('dcAuto').checked = !!c.autoStart;
+  $('dcSummaryChannel').value = c.summaryChannelId || ''; $('dcSummaryTime').value = c.summaryTime || '09:00';
   $('dcTicketCategory').value = c.ticketCategoryId || ''; $('dcTicketLog').value = c.ticketLogChannelId || ''; $('dcKillFeed').value = c.killFeedChannelId || ''; $('dcJoinFeed').value = c.joinFeedChannelId || '';
   $('dcLiveChannel').value = c.liveLogChannelId || '';
   const kinds = c.liveLogKinds || ['adm'];
   $('dcLiveAdm').checked = kinds.includes('adm'); $('dcLiveRpt').checked = kinds.includes('rpt'); $('dcLiveErrors').checked = !!c.liveLogErrorsOnly;
 }
 function discordForm() {
-  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked, ticketCategoryId: $('dcTicketCategory').value.trim(), ticketLogChannelId: $('dcTicketLog').value.trim(), killFeedChannelId: $('dcKillFeed').value.trim(), joinFeedChannelId: $('dcJoinFeed').value.trim() };
+  return { token: $('dcToken').value.trim(), guildId: $('dcGuild').value.trim(), adminRoleIds: $('dcRoles').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean), logChannelId: $('dcLog').value.trim(), autoStart: $('dcAuto').checked, adminChannelId: $('dcAdminChannel').value.trim(), whitelistRoleId: $('dcWhitelistRole').value.trim(), priorityRoleId: $('dcPriorityRole').value.trim(), bannedRoleId: $('dcBannedRole').value.trim(), mutedRoleId: $('dcMutedRole').value.trim(), steamApiKey: $('dcSteamKey').value.trim(), statusFormat: $('dcStatusFormat').value.trim() || 'Server Online | {count}/{max} Players', offlineStatus: $('dcOfflineStatus').value.trim() || 'Server Offline', liveLogChannelId: $('dcLiveChannel').value.trim(), liveLogKinds: [$('dcLiveAdm').checked ? 'adm' : null, $('dcLiveRpt').checked ? 'rpt' : null].filter(Boolean), liveLogErrorsOnly: $('dcLiveErrors').checked, summaryChannelId: $('dcSummaryChannel').value.trim(), summaryTime: $('dcSummaryTime').value.trim() || '09:00', ticketCategoryId: $('dcTicketCategory').value.trim(), ticketLogChannelId: $('dcTicketLog').value.trim(), killFeedChannelId: $('dcKillFeed').value.trim(), joinFeedChannelId: $('dcJoinFeed').value.trim() };
 }
 $('btnDiscordSave').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); await ipc.invoke('discord:applyLiveLog'); toast('Bot settings saved'); renderDiscord(await ipc.invoke('discord:status')); }, e.target);
 $('btnDiscordStart').onclick = (e) => run(async () => { await saveSettings({ discord: discordForm() }); toast('Starting bot…'); renderDiscord(await ipc.invoke('discord:start')); toast('Bot online'); }, e.target);
@@ -1841,82 +1848,8 @@ $('btnNetAddRules').onclick = (e) => run(async () => { toast('Windows will ask f
 $('btnNetRemoveRules').onclick = (e) => run(async () => { await ipc.invoke('network:removeRules'); toast('Rules removed'); refreshNetwork(); }, e.target);
 
 // ---------- player map ----------
-const mapState = { img: null, info: null };
-async function loadMapInfo() {
-  mapState.info = await ipc.invoke('mission:mapInfo');
-  const i = mapState.info;
-  $('mapDetected').textContent = !i.map ? 'No active mission: install the server and set the template in serverDZ.cfg.'
-    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.image ? ' · map image from the game files' : i.building ? ' · building the map image from the game files…' : ' · no map image yet'}`;
-  mapState.img = null;
-  if (i.image) { await new Promise(res => { const im = new Image(); im.onload = () => { mapState.img = im; res(); }; im.onerror = () => res(); im.src = 'file:///' + i.image.replace(/\\/g, '/') + '?t=' + Date.now(); }); }
-}
-async function drawMap() {
-  if (!mapState.info) await loadMapInfo();
-  const size = (mapState.info && mapState.info.size) || 15360;
-  const c = $('mapCanvas'); const card = c.parentElement; const W = card.clientWidth - 36, H = card.clientHeight - 60; const sz = Math.max(200, Math.min(W, H)); c.width = sz; c.height = sz;
-  const ctx = c.getContext('2d'); ctx.clearRect(0, 0, sz, sz);
-  if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz); else { ctx.fillStyle = '#1a1d22'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#2b3036'; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
-  await drawOverlay(ctx, sz, size);
-  const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 });
-  const pts = rows.filter(r => r.lastPos && (!$('mapOnlineOnly').checked || r.online));
-  for (const r of pts) { const x = (r.lastPos.x / size) * sz, y = sz - (r.lastPos.z / size) * sz; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke(); ctx.font = '11px Segoe UI'; const tw = ctx.measureText(r.name).width; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x + 7, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(r.name, x + 10, y + 4); }
-  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · refreshes every 5 s · world ${size} m`;
-}
-// ----- heatmap overlays -----
-const CAUSE_COLORS = { player: '#ff5252', infected: '#6fd36f', animal: '#ff9f3b', vehicle: '#b784ff', explosion: '#ffe14d', fall: '#7fd3ff', suicide: '#c9c9c9', bleeding: '#ff8fa3', environment: '#9aa3ad', other: '#e0e0e0', unknown: '#777' };
-const CAUSE_LABELS = { player: 'players', infected: 'infected', animal: 'animals', vehicle: 'vehicles', explosion: 'explosions', fall: 'falls', suicide: 'suicide', bleeding: 'bleeding out', environment: 'environment (hunger, sickness…)', other: 'other', unknown: 'unknown' };
-let heatCache = { at: 0, data: null };
-async function heatData(force) { if (!force && heatCache.data && Date.now() - heatCache.at < 5000) return heatCache.data; try { heatCache = { at: Date.now(), data: await ipc.invoke('heat:summary') }; } catch { heatCache = { at: Date.now(), data: null }; } return heatCache.data; }
-function heatColor(t) { // 0..1 -> blue -> green -> yellow -> red
-  const stops = [[60, 120, 255], [60, 220, 120], [255, 220, 60], [255, 60, 30]]; const p = t * (stops.length - 1); const i = Math.min(stops.length - 2, Math.floor(p)); const f = p - i;
-  const c = stops[i].map((v, k) => Math.round(v + (stops[i + 1][k] - v) * f)); return c;
-}
-function drawHeatGrid(ctx, sz, N, cells, max, alpha) {
-  const cell = sz / N;
-  for (const [i, c] of cells) {
-    const gx = i % N, gz = Math.floor(i / N); const t = Math.log(1 + c) / Math.log(1 + max);
-    const [r, g, b] = heatColor(t); const x = gx * cell + cell / 2, y = sz - (gz * cell + cell / 2);
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, cell * 1.6); grad.addColorStop(0, `rgba(${r},${g},${b},${(0.25 + 0.75 * t) * alpha})`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, cell * 1.6, 0, Math.PI * 2); ctx.fill();
-  }
-}
-async function drawOverlay(ctx, sz, size) {
-  const mode = $('mapOverlay').value; const info = $('mapOverlayInfo');
-  if (mode === 'none') { info.textContent = ''; return; }
-  const h = await heatData(); const alpha = Number($('mapOverlayAlpha').value) / 100;
-  if (!h || (!h.travel.length && !h.deaths.length)) { info.textContent = 'No data yet. It fills from the admin log (-adminlog) while players play; "Rebuild from all logs" reads older logs.'; return; }
-  const N = h.N;
-  if (mode === 'travel') { drawHeatGrid(ctx, sz, N, h.travel, h.travelMax, alpha); info.textContent = `${h.samples.toLocaleString()} positions from the admin log · blue = rare, red = busiest`; }
-  else if (mode === 'deaths') {
-    const grid = new Map(); let max = 0;
-    for (const d of h.deaths) { const gx = Math.min(N - 1, Math.floor(d.x / size * N)), gz = Math.min(N - 1, Math.floor(d.z / size * N)); const i = gz * N + gx; const v = (grid.get(i) || 0) + 1; grid.set(i, v); if (v > max) max = v; }
-    drawHeatGrid(ctx, sz, N, [...grid.entries()], max, alpha); info.textContent = `${h.deaths.length.toLocaleString()} deaths · blue = few, red = most`;
-  } else if (mode === 'causes') {
-    for (const d of h.deaths) { const x = d.x / size * sz, y = sz - d.z / size * sz; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = CAUSE_COLORS[d.cause] || CAUSE_COLORS.unknown; ctx.globalAlpha = alpha; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1; ctx.stroke(); }
-    const order = Object.entries(h.causes).sort((a, b) => b[1] - a[1]);
-    info.innerHTML = `<span class="map-legend">${order.map(([c, n]) => `<span style="--c:${CAUSE_COLORS[c] || CAUSE_COLORS.unknown}">${esc(CAUSE_LABELS[c] || c)} ${n}</span>`).join('')}</span>`;
-  }
-}
-$('mapOverlay').onchange = () => drawMap(); $('mapOverlayAlpha').oninput = () => drawMap();
-$('btnHeatRebuild').onclick = (e) => run(async () => { const r = await ipc.invoke('heat:rebuild'); heatCache.at = 0; toast(`Read ${r.files} log file(s): ${r.positions.toLocaleString()} positions, ${r.deaths} deaths`); drawMap(); }, e.target);
-$('btnHeatClear').onclick = (e) => run(async () => { const ok = await showModal('Clear the heatmap data for this map?', '', [{ label: 'Clear', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('heat:clear'); heatCache.at = 0; drawMap(); }, e.target);
-$('btnMapPickImage').onclick = () => run(async () => { const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (!f) return; await ipc.invoke('mission:setMapImage', f); await loadMapInfo(); drawMap(); toast('Map image saved for ' + mapState.info.label); });
-$('btnMapOpenDir').onclick = () => ipc.invoke('mission:openMapsDir');
-// Build the map image automatically the first time the page is opened without one, and keep positions live.
-let mapBuildTried = null, mapLiveTimer = null;
-async function ensureMapImage(force) {
-  const i = mapState.info; if (!i || !i.map) return;
-  if (i.image && !force) return;
-  if (!force && mapBuildTried === i.map) return;
-  mapBuildTried = i.map;
-  try { toast('Building the ' + (i.label || i.map) + ' map from the game files…'); await ipc.invoke('mission:buildMap', { force: !!force }); await loadMapInfo(); drawMap(); toast('Map image ready'); }
-  catch (e) { toast(e.message, true); }
-}
-$('btnMapBuild').onclick = (e) => run(() => ensureMapImage(true), e.target);
-ipc.on('map:progress', p => { if (p.error) { $('mapDetected').textContent = 'Map build failed: ' + p.error; return; } if (!p.done) $('mapDetected').textContent = `Building the map image from the game files… ${Math.round((p.progress || 0) * 100)}%`; });
-function mapLive(on) { clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) drawMap().catch(() => {}); else mapLive(false); }, 5000); }
-$('btnMapRefresh').onclick = () => run(async () => { await loadMapInfo(); drawMap(); }); $('mapOnlineOnly').onchange = () => drawMap();
-window.addEventListener('resize', () => { if (document.querySelector('#page-map.active') && mapState.info) drawMap(); });
+// map page code lives in map.js
+
 
 // ---------- mod safety check ----------
 $('btnModCheck').onclick = (e) => run(async () => {
@@ -2034,3 +1967,44 @@ try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch { /* ignore *
 // Report renderer errors to the main process log (tool.log in the data folder).
 window.addEventListener('error', e => { try { ipc.invoke('app:rendererError', `${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}`).catch(() => {}); } catch { /* ignore */ } });
 window.addEventListener('unhandledrejection', e => { try { ipc.invoke('app:rendererError', 'unhandled: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)).catch(() => {}); } catch { /* ignore */ } });
+
+// ---------- statistics ----------
+function drawBars(canvas, values, labels, color, opts = {}) {
+  const c = canvas; const W = c.clientWidth || 600, H = c.height || 150; c.width = W; const ctx = c.getContext('2d'); ctx.clearRect(0, 0, W, H);
+  const max = Math.max(1, ...values); const n = values.length; const pad = 22, bw = (W - pad) / n;
+  ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.fillRect(pad, 0, W - pad, H - 18);
+  for (let i = 0; i < n; i++) { const h = (values[i] / max) * (H - 24); ctx.fillStyle = color; ctx.fillRect(pad + i * bw + 1, H - 18 - h, Math.max(1, bw - 2), h); }
+  ctx.fillStyle = '#8a94a6'; ctx.font = '10px Segoe UI'; ctx.fillText(String(max), 0, 10);
+  const step = Math.max(1, Math.ceil(n / (opts.labelsEvery || 8)));
+  for (let i = 0; i < n; i += step) ctx.fillText(labels[i], pad + i * bw, H - 5);
+}
+async function refreshStats() {
+  let o; try { o = await ipc.invoke('stats:overview'); } catch (e) { toast(e.message, true); return; }
+  const card = (t) => `<div class="stat-tile"><div class="muted">${t.label}</div><div class="stat-val">${t.value}</div>${t.sub ? `<div class="muted small">${t.sub}</div>` : ''}</div>`;
+  const row = (title, t) => `<div class="card"><div class="card-title">${title}</div><div class="stat-grid">${[
+    { label: 'Deaths', value: t.deaths, sub: Object.entries(t.causes).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => k + ' ' + v).join(' · ') },
+    { label: 'Player kills', value: t.kills }, { label: 'Unique players', value: t.unique, sub: t.newPlayers + ' new' }, { label: 'Peak online', value: t.peak },
+    { label: 'Avg FPS', value: t.avgFps ?? '—' }, { label: 'Uptime', value: t.uptimePct !== null ? t.uptimePct + '%' : '—', sub: t.restarts + ' restart(s), ' + t.crashes + ' crash(es)' }].map(card).join('')}</div></div>`;
+  $('statsCards').innerHTML = row('Today', o.today) + row('Last 7 days', o.week) + row('Last 30 days', o.month);
+  $('statsDeathsHour').textContent = `${o.deathsLastHour} in the last hour`;
+  drawBars($('chDeathsHour'), o.hourlyDeaths, o.hourlyDeaths.map((_, i) => { const h = new Date(Date.now() - (23 - i) * 3600000).getHours(); return h + 'h'; }), '#ff6b6b', { labelsEvery: 12 });
+  drawBars($('chDeathsDay'), o.days.map(d => d.deaths), o.days.map(d => d.day.slice(5)), '#ff9f3b', { labelsEvery: 10 });
+  drawBars($('chPlayersDay'), o.days.map(d => d.peak), o.days.map(d => d.day.slice(5)), '#7cc47f', { labelsEvery: 10 });
+  drawBars($('chUniqueDay'), o.days.map(d => d.unique), o.days.map(d => d.day.slice(5)), '#6fa8ff', { labelsEvery: 10 });
+  drawBars($('chFpsDay'), o.days.map(d => d.avgFps || 0), o.days.map(d => d.day.slice(5)), '#b784ff', { labelsEvery: 10 });
+  const lb = (title, rows, fmt) => `<div class="card"><div class="card-title">${title}</div><table class="table"><tbody>${rows.length ? rows.map((r, i) => `<tr><td class="muted">${i + 1}</td><td>${esc(r.name)}</td><td class="right">${fmt(r)}</td></tr>`).join('') : '<tr><td class="muted">No data yet.</td></tr>'}</tbody></table></div>`;
+  $('statsBoards').innerHTML = lb('Most kills', o.leaderboards.kills, r => r.value) + lb('Most deaths', o.leaderboards.deaths, r => r.value) + lb('Best K/D (5+ fights)', o.leaderboards.kd, r => `${r.value} (${r.kills}/${r.deaths})`) + lb('Most playtime', o.leaderboards.playtime, r => fmtPlaytime(r.value)) + lb('Longest sessions', o.leaderboards.longest, r => fmtPlaytime(r.sec)) + lb('Weapons (30 days)', o.month.weapons.map(([name, n]) => ({ name, value: n })), r => r.value);
+}
+$('btnStatsRefresh').onclick = () => run(refreshStats);
+$('btnStatsSummary').onclick = (e) => run(async () => { await ipc.invoke('stats:postSummary'); toast('Summary posted to Discord'); }, e.target);
+$('btnStatsCopy').onclick = (e) => run(async () => { const t = await ipc.invoke('stats:summaryText'); await navigator.clipboard.writeText(t.replace(/\*\*/g, '')); toast('Summary copied'); }, e.target);
+
+// ---------- audit log ----------
+async function refreshAudit() {
+  const rows = await ipc.invoke('audit:list', { q: $('auditQuery').value.trim(), source: $('auditSource').value, limit: 500 });
+  $('auditTable').querySelector('tbody').innerHTML = rows.map(e => `<tr><td class="muted">${fmtDate(e.ts)}</td><td><span class="badge">${esc(e.source)}</span></td><td>${esc(e.who)}</td><td>${esc(e.action)}</td><td class="muted">${esc(e.details)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Nothing recorded yet.</td></tr>';
+}
+$('auditQuery').addEventListener('input', () => { clearTimeout(refreshAudit._t); refreshAudit._t = setTimeout(refreshAudit, 250); }); $('auditSource').onchange = refreshAudit;
+$('btnAuditRefresh').onclick = () => run(refreshAudit);
+$('btnAuditExport').onclick = (e) => run(async () => { const p = await ipc.invoke('audit:export'); toast('Exported to ' + p); }, e.target);
+ipc.on('audit:new', () => { if (document.querySelector('#page-audit.active')) refreshAudit(); });

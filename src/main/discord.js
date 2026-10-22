@@ -29,7 +29,7 @@ function cfg() {
     token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', priorityRoleId: '', bannedRoleId: '', mutedRoleId: '', steamApiKey: '',
     statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
     logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
-    ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '',
+    ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '', summaryChannelId: '', summaryTime: '09:00',
     ...(s.discord || {})
   };
 }
@@ -655,6 +655,7 @@ async function onInteraction(interaction) {
       if (r.ephemeral === false) { await interaction.deleteReply().catch(() => {}); await interaction.followUp({ ...payload, ephemeral: false }); }
       else await interaction.editReply(payload);
       if (r.log) { addLog(r.log); postLog(`📝 ${r.log}`); }
+      try { require('./audit').log('discord', interaction.user.tag, `/${name}${sub ? ' ' + sub : ''}`, r.log || r.content || ''); } catch { /* ignore */ }
       return;
     }
     // ----- buttons -----

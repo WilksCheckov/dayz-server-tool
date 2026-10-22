@@ -235,6 +235,7 @@ async function handleAdmin(req, res, p, c, send) {
       else if (action === 'kick') await rcon.kick(Number(body.num), 'Kicked by admin');
       else return send(404, 'application/json', '{"error":"unknown action"}');
       emitRef('console', { source: 'website', line: `Admin panel: ${action}` });
+      try { require('./audit').log('web', String(req.socket.remoteAddress || ''), 'admin panel: ' + action, body && Object.keys(body).length ? body : ''); } catch { /* ignore */ }
       return send(200, 'application/json', '{"ok":true}');
     } catch (e) { return send(500, 'application/json', JSON.stringify({ error: e.message })); }
   }

@@ -74,7 +74,8 @@ function applyEvent(ev, d) {
   if (!ev || !ev.name) return;
   const key = ev.id || ev.name;
   if (ev.id && d.players[ev.name] && !d.players[ev.id]) mergeNameInto(ev.name, ev.id);
-  const r = rec(key, ev.name, ev.id);
+  const existed = !!d.players[key];
+  const r = rec(key, ev.name, ev.id); ev._new = !existed;
   r.lastSeen = Math.max(r.lastSeen || 0, ev.ts); if (!r.firstSeen || ev.ts < r.firstSeen) r.firstSeen = ev.ts;
   if (ev.pos) r.lastPos = { ...ev.pos, at: ev.ts };
   r.lastEvent = ev.type;
@@ -106,7 +107,7 @@ function ingest() {
       const lines = (meta.rest + buf.toString('utf8', 0, n)).split(/\r?\n/);
       meta.rest = lines.pop() || '';
       const ctx = { date: meta.date, lastSec: meta.lastSec };
-      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } } }
+      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch { /* ignore */ } } }
       meta.date = ctx.date; meta.lastSec = ctx.lastSec;
     } finally { fs.closeSync(fd); }
     d.files[x.f] = meta;

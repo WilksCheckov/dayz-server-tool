@@ -1,0 +1,162 @@
+'use strict';
+// Map page: zoom and pan over the satellite image, live player dots, heat overlays with a time filter,
+// the loot spawn overlay, click-for-details and a distance measure. Loaded after app.js (shares its globals).
+
+const mapState = { img: null, info: null, view: { scale: 1, ox: 0, oy: 0 }, players: [], hover: null, measure: null, loot: null, lootItem: '', drag: null, raf: null };
+const CAUSE_COLORS = { player: '#ff5252', infected: '#6fd36f', animal: '#ff9f3b', vehicle: '#b784ff', explosion: '#ffe14d', fall: '#7fd3ff', suicide: '#c9c9c9', bleeding: '#ff8fa3', environment: '#9aa3ad', other: '#e0e0e0', unknown: '#777' };
+const CAUSE_LABELS = { player: 'players', infected: 'infected', animal: 'animals', vehicle: 'vehicles', explosion: 'explosions', fall: 'falls', suicide: 'suicide', bleeding: 'bleeding out', environment: 'environment (hunger, sickness…)', other: 'other', unknown: 'unknown' };
+const OVERLAY_KIND = { travel: null, hits: 1, building: 2, logouts: 3, logins: 4, deaths: 5 };
+
+async function loadMapInfo() {
+  mapState.info = await ipc.invoke('mission:mapInfo');
+  const i = mapState.info;
+  $('mapDetected').textContent = !i.map ? 'No active mission: install the server and set the template in serverDZ.cfg.'
+    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.image ? ' · map image from the game files' : i.building ? ' · building the map image from the game files…' : ' · no map image yet'}`;
+  mapState.img = null;
+  if (i.image) { await new Promise(res => { const im = new Image(); im.onload = () => { mapState.img = im; res(); }; im.onerror = () => res(); im.src = 'file:///' + i.image.replace(/\\/g, '/') + '?t=' + Date.now(); }); }
+}
+function worldSize() { return (mapState.info && mapState.info.size) || 15360; }
+// base size: the map square fitted in the canvas; view scales/pans on top of it
+function baseSize(c) { return Math.max(100, Math.min(c.width, c.height)); }
+function toScreen(c, x, z) { const sz = baseSize(c); const v = mapState.view; const ox = (c.width - sz) / 2, oy = (c.height - sz) / 2; return [ox + (x / worldSize()) * sz * v.scale + v.ox, oy + (sz - (z / worldSize()) * sz) * v.scale + v.oy]; }
+function toWorld(c, px, py) { const sz = baseSize(c); const v = mapState.view; const ox = (c.width - sz) / 2, oy = (c.height - sz) / 2; const bx = (px - ox - v.ox) / v.scale, by = (py - oy - v.oy) / v.scale; return [bx / sz * worldSize(), (sz - by) / sz * worldSize()]; }
+function sizeCanvas() { const c = $('mapCanvas'); const card = c.parentElement; const W = Math.max(300, card.clientWidth - 30), H = Math.max(260, card.clientHeight - 54); if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } return c; }
+function scheduleDraw() { if (mapState.raf) return; mapState.raf = requestAnimationFrame(() => { mapState.raf = null; drawMap(); }); }
+
+async function drawMap() {
+  if (!mapState.info) await loadMapInfo();
+  const c = sizeCanvas(); const ctx = c.getContext('2d'); const sz = baseSize(c); const v = mapState.view;
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.save(); ctx.translate((c.width - sz) / 2 + v.ox, (c.height - sz) / 2 + v.oy); ctx.scale(v.scale, v.scale);
+  if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz);
+  else { ctx.fillStyle = '#1a1d22'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#2b3036'; ctx.lineWidth = 1 / v.scale; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
+  ctx.restore();
+  await drawOverlay(ctx, c);
+  drawLoot(ctx, c);
+  // players
+  if (!mapState.players.at || Date.now() - mapState.players.at > 4000) { try { const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 }); mapState.players = Object.assign(rows.filter(r => r.lastPos), { at: Date.now() }); } catch { /* ignore */ } }
+  const pts = mapState.players.filter(r => !$('mapOnlineOnly').checked || r.online);
+  ctx.font = '11px Segoe UI';
+  for (const r of pts) {
+    const [x, y] = toScreen(c, r.lastPos.x, r.lastPos.z);
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+    const tw = ctx.measureText(r.name).width; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x + 7, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(r.name, x + 10, y + 4);
+  }
+  // measure line
+  if (mapState.measure && mapState.measure.a) {
+    const m = mapState.measure; const [ax, ay] = toScreen(c, m.a[0], m.a[1]); const b = m.b || m.cursor; if (b) { const [bx, by] = toScreen(c, b[0], b[1]); ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]); const dist = Math.hypot(b[0] - m.a[0], b[1] - m.a[1]); const label = dist >= 1000 ? (dist / 1000).toFixed(2) + ' km' : Math.round(dist) + ' m'; ctx.fillStyle = 'rgba(0,0,0,.7)'; const tw = ctx.measureText(label).width; ctx.fillRect((ax + bx) / 2 - tw / 2 - 4, (ay + by) / 2 - 9, tw + 8, 16); ctx.fillStyle = '#ffe14d'; ctx.fillText(label, (ax + bx) / 2 - tw / 2, (ay + by) / 2 + 4); }
+  }
+  // cursor coordinates
+  const cur = mapState.hover; const coords = cur ? `${Math.round(cur[0])}, ${Math.round(cur[1])}` : '';
+  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · scroll to zoom, drag to pan, click a dot for details, Shift+click twice to measure · zoom ${v.scale.toFixed(1)}x${coords ? ' · cursor ' + coords : ''}`;
+}
+
+// ----- heat overlays -----
+let heatCache = { at: 0, key: '', data: null };
+function heatSince() { const r = $('mapRange').value; return r === 'all' ? 0 : Date.now() - Number(r) * 3600000; }
+async function heatData() { const since = heatSince(); const key = String(since); if (heatCache.data && heatCache.key === key && Date.now() - heatCache.at < 5000) return heatCache.data; try { heatCache = { at: Date.now(), key, data: await ipc.invoke('heat:summary', since) }; } catch { heatCache = { at: Date.now(), key, data: null }; } return heatCache.data; }
+function heatColor(t) { const stops = [[60, 120, 255], [60, 220, 120], [255, 220, 60], [255, 60, 30]]; const p = t * (stops.length - 1); const i = Math.min(stops.length - 2, Math.floor(p)); const f = p - i; return stops[i].map((v, k) => Math.round(v + (stops[i + 1][k] - v) * f)); }
+function drawHeatGrid(ctx, c, N, cells, max, alpha) {
+  const size = worldSize(); const cellW = size / N; const [x0, y0] = toScreen(c, 0, size); const [x1, y1] = toScreen(c, cellW, size - cellW); const cellPx = Math.max(2, x1 - x0); const r = cellPx * 1.6;
+  for (const [i, n] of cells) {
+    const gx = i % N, gz = Math.floor(i / N); const t = Math.log(1 + n) / Math.log(1 + max); const [cr, cg, cb] = heatColor(t);
+    const [x, y] = toScreen(c, (gx + 0.5) * cellW, (gz + 0.5) * cellW);
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r); grad.addColorStop(0, `rgba(${cr},${cg},${cb},${(0.25 + 0.75 * t) * alpha})`); grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function binEvents(events, N, size, kind) { const grid = new Map(); let max = 0; for (const e of events) { if (kind !== null && e[3] !== kind) continue; const gx = Math.min(N - 1, Math.max(0, Math.floor(e[1] / size * N))), gz = Math.min(N - 1, Math.max(0, Math.floor(e[2] / size * N))); const i = gz * N + gx; const v = (grid.get(i) || 0) + 1; grid.set(i, v); if (v > max) max = v; } return { cells: [...grid.entries()], max }; }
+async function drawOverlay(ctx, c) {
+  const mode = $('mapOverlay').value; const info = $('mapOverlayInfo');
+  if (mode === 'none' || mode === 'loot') { if (mode === 'none') info.textContent = ''; return; }
+  const h = await heatData(); const alpha = Number($('mapOverlayAlpha').value) / 100;
+  if (!h || (!h.events.length && !h.deaths.length)) { info.textContent = 'No data in this time range. It fills from the admin log (-adminlog) while players play; "Rebuild from all logs" reads older logs.'; return; }
+  const N = h.N, size = h.size;
+  if (mode in OVERLAY_KIND) {
+    const kind = OVERLAY_KIND[mode]; const { cells, max } = binEvents(h.events, N, size, kind);
+    drawHeatGrid(ctx, c, N, cells, max, alpha);
+    const n = kind === null ? h.events.length : h.events.filter(e => e[3] === kind).length;
+    const what = { travel: 'positions', hits: 'hits', building: 'build actions', logouts: 'logouts', logins: 'logins', deaths: 'deaths' }[mode];
+    info.textContent = `${n.toLocaleString()} ${what} · blue = few, red = most`;
+  } else if (mode === 'causes') {
+    for (const d of h.deaths) { const [x, y] = toScreen(c, d.x, d.z); ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = CAUSE_COLORS[d.cause] || CAUSE_COLORS.unknown; ctx.globalAlpha = alpha; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1; ctx.stroke(); }
+    const order = Object.entries(h.causes).sort((a, b) => b[1] - a[1]);
+    info.innerHTML = `<span class="map-legend">${order.map(([k, n]) => `<span style="--c:${CAUSE_COLORS[k] || CAUSE_COLORS.unknown}">${esc(CAUSE_LABELS[k] || k)} ${n}</span>`).join('')}</span>`;
+  }
+}
+
+// ----- loot spawn overlay -----
+let lootItems = null;
+async function loadLootItems() { if (lootItems) return lootItems; try { lootItems = await ipc.invoke('lootmap:items'); } catch (e) { toast(e.message, true); lootItems = []; } return lootItems; }
+function drawLoot(ctx, c) {
+  if ($('mapOverlay').value !== 'loot' || !mapState.loot) return;
+  const l = mapState.loot; const alpha = Number($('mapOverlayAlpha').value) / 100; const maxP = Math.max(1, ...l.spots.map(s => s.points));
+  for (const s of l.spots) { const [x, y] = toScreen(c, s.x, s.z); const r = 2 + 4 * Math.sqrt(s.points / maxP) * Math.min(2, Math.sqrt(mapState.view.scale)); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = `rgba(255,120,40,${0.35 + 0.5 * alpha})`; ctx.fill(); }
+  $('mapOverlayInfo').textContent = `${l.item.name}: can spawn in ${l.buildings.toLocaleString()} of ${l.totalBuildings.toLocaleString()} buildings (${l.points.toLocaleString()} loot points) · nominal ${l.item.nominal ?? '?'}, min ${l.item.min ?? '?'} · tiers ${l.item.value.join(', ') || 'any'} · usage ${l.item.usage.join(', ') || 'any'}${l.tiers ? '' : ' · tier regions not available (areaflags.map unreadable)'} · most common: ${l.top.slice(0, 4).map(t => t.name.replace(/^Land_/, '') + ' ×' + t.count).join(', ')}`;
+}
+async function pickLootItem(name) {
+  mapState.lootItem = name; mapState.loot = null;
+  if (!name) { scheduleDraw(); return; }
+  try { mapState.loot = await ipc.invoke('lootmap:spawns', name); } catch (e) { toast(e.message, true); }
+  scheduleDraw();
+}
+function renderLootList() {
+  const q = $('lootSearch').value.trim().toLowerCase(); const box = $('lootList');
+  const rows = (lootItems || []).filter(i => !q || i.name.toLowerCase().includes(q)).slice(0, 200);
+  box.innerHTML = rows.map(i => `<div class="ip-item ${mapState.lootItem === i.name ? 'on' : ''}" data-name="${esc(i.name)}"><span>${esc(i.name)}</span><span class="muted">${esc(i.category[0] || '')}${i.value.length ? ' · ' + esc(i.value.join('/')) : ''}</span></div>`).join('') || '<div class="muted" style="padding:6px">No items match.</div>';
+}
+
+// ----- interaction -----
+function mapInit() {
+  const c = $('mapCanvas');
+  c.addEventListener('wheel', e => { e.preventDefault(); const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const v = mapState.view; const f = e.deltaY < 0 ? 1.2 : 1 / 1.2; const ns = Math.min(40, Math.max(1, v.scale * f)); const k = ns / v.scale; const sz = baseSize(c); const ox = (c.width - sz) / 2, oy = (c.height - sz) / 2; v.ox = px - ox - (px - ox - v.ox) * k; v.oy = py - oy - (py - oy - v.oy) * k; v.scale = ns; if (ns === 1) { v.ox = 0; v.oy = 0; } scheduleDraw(); }, { passive: false });
+  c.addEventListener('mousedown', e => { if (e.button !== 0) return; mapState.drag = { x: e.clientX, y: e.clientY, ox: mapState.view.ox, oy: mapState.view.oy, moved: false }; });
+  window.addEventListener('mousemove', e => {
+    const rect = c.getBoundingClientRect(); const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (mapState.drag) { const dx = e.clientX - mapState.drag.x, dy = e.clientY - mapState.drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) mapState.drag.moved = true; mapState.view.ox = mapState.drag.ox + dx; mapState.view.oy = mapState.drag.oy + dy; scheduleDraw(); return; }
+    if (!inside || !document.querySelector('#page-map.active')) return;
+    const w = toWorld(c, e.clientX - rect.left, e.clientY - rect.top); mapState.hover = w; if (mapState.measure && mapState.measure.a && !mapState.measure.b) { mapState.measure.cursor = w; scheduleDraw(); } else { const el = $('mapInfo'); const t = el.textContent.replace(/ · cursor .*$/, ''); el.textContent = t + ` · cursor ${Math.round(w[0])}, ${Math.round(w[1])}`; }
+  });
+  window.addEventListener('mouseup', e => {
+    const d = mapState.drag; mapState.drag = null; if (!d) return;
+    if (d.moved) return;
+    const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const w = toWorld(c, px, py);
+    if (e.shiftKey) { const m = mapState.measure; if (!m || m.b) mapState.measure = { a: w, b: null, cursor: w }; else m.b = w; scheduleDraw(); return; }
+    // click a player dot
+    for (const r of mapState.players) { const [x, y] = toScreen(c, r.lastPos.x, r.lastPos.z); if (Math.hypot(px - x, py - y) <= 7) { showPlayerPopup(r); return; } }
+    // click a loot spot
+    if (mapState.loot) { let best = null, bd = 9; for (const s of mapState.loot.spots) { const [x, y] = toScreen(c, s.x, s.z); const dd = Math.hypot(px - x, py - y); if (dd < bd) { bd = dd; best = s; } } if (best) { toast(`${best.name.replace(/^Land_/, '')} at ${Math.round(best.x)}, ${Math.round(best.z)} · ${best.points} matching loot point(s)`); return; } }
+    if (mapState.measure) { mapState.measure = null; scheduleDraw(); }
+  });
+  c.addEventListener('dblclick', () => { mapState.view = { scale: 1, ox: 0, oy: 0 }; scheduleDraw(); });
+  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; $('lootPanel').hidden = !loot; if (loot) { await loadLootItems(); renderLootList(); } scheduleDraw(); };
+  $('mapOverlayAlpha').oninput = scheduleDraw; $('mapRange').onchange = () => { heatCache.at = 0; scheduleDraw(); };
+  $('lootSearch').addEventListener('input', renderLootList);
+  $('lootList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; pickLootItem(it.dataset.name); renderLootList(); });
+  $('btnHeatRebuild').onclick = (e) => run(async () => { const r = await ipc.invoke('heat:rebuild'); heatCache.at = 0; toast(`Read ${r.files} log file(s): ${r.positions.toLocaleString()} positions, ${r.deaths} deaths`); scheduleDraw(); }, e.target);
+  $('btnHeatClear').onclick = (e) => run(async () => { const ok = await showModal('Clear the heatmap data for this map?', '', [{ label: 'Clear', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('heat:clear'); heatCache.at = 0; scheduleDraw(); }, e.target);
+  $('btnMapPickImage').onclick = () => run(async () => { const f = await ipc.invoke('dialog:pickFile', { filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (!f) return; await ipc.invoke('mission:setMapImage', f); await loadMapInfo(); scheduleDraw(); toast('Map image saved for ' + mapState.info.label); });
+  $('btnMapOpenDir').onclick = () => ipc.invoke('mission:openMapsDir');
+  $('btnMapRefresh').onclick = () => run(async () => { heatCache.at = 0; mapState.players.at = 0; await loadMapInfo(); scheduleDraw(); }); $('mapOnlineOnly').onchange = scheduleDraw;
+  $('btnMapBuild').onclick = (e) => run(() => ensureMapImage(true), e.target);
+  ipc.on('map:progress', p => { if (p.error) { $('mapDetected').textContent = 'Map build failed: ' + p.error; return; } if (!p.done) $('mapDetected').textContent = `Building the map image from the game files… ${Math.round((p.progress || 0) * 100)}%`; });
+  window.addEventListener('resize', () => { if (document.querySelector('#page-map.active') && mapState.info) scheduleDraw(); });
+}
+let mapBuildTried = null, mapLiveTimer = null;
+async function ensureMapImage(force) {
+  const i = mapState.info; if (!i || !i.map) return;
+  if (i.image && !force) return;
+  if (!force && mapBuildTried === i.map) return;
+  mapBuildTried = i.map;
+  try { toast('Building the ' + (i.label || i.map) + ' map from the game files…'); await ipc.invoke('mission:buildMap', { force: !!force }); await loadMapInfo(); scheduleDraw(); toast('Map image ready'); }
+  catch (e) { toast(e.message, true); }
+}
+function mapLive(on) { clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) { mapState.players.at = 0; scheduleDraw(); } else mapLive(false); }, 5000); }
+function showPlayerPopup(r) {
+  const body = `<div class="muted mono">${esc(r.id || '')}${r.steamId ? '<br>Steam64 ' + esc(r.steamId) : ''}</div>
+    <div class="grid-2 tight pdb-kv"><div><span class="muted">Status</span><br>${r.online ? 'online' : 'last seen ' + fmtDate(r.lastSeen)}</div><div><span class="muted">Position</span><br>${Math.round(r.lastPos.x)}, ${Math.round(r.lastPos.z)}</div>
+    <div><span class="muted">Playtime</span><br>${fmtPlaytime(r.playtimeSec)}</div><div><span class="muted">Kills / deaths</span><br>${r.kills} / ${r.deaths}</div></div>
+    ${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.account && r.account.suspicious ? '<span class="badge warn">⚠ suspicious</span>' : ''}`;
+  showModal(r.name, body, [{ label: 'Open in Database', value: 'db', primary: true }, { label: 'Close', value: false }]).then(v => { if (v === 'db') { pdbSelected = r.key; showPage('database'); } });
+}
+mapInit();

@@ -466,3 +466,19 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .map-overlay-bar { flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; }
 .map-legend { display: inline-flex; gap: 10px; flex-wrap: wrap; }
 .map-legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; background: var(--c); vertical-align: middle; }
+
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; flex: 1; min-height: 0; }
+.map-card { align-items: stretch; }
+.map-canvas { width: 100%; height: 100%; max-width: none; cursor: grab; display: block; }
+.map-canvas:active { cursor: grabbing; }
+.loot-panel { width: 280px; min-height: 0; }
+.ip-item.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+.stats-rows { display: flex; flex-direction: column; gap: 12px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.stat-tile { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.stat-val { font-size: 22px; font-weight: 600; }
+.small { font-size: 11px; }
+.stats-boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.stats-boards .table td.right { text-align: right; }
+#page-stats canvas { width: 100%; }
+#page-stats > .grid-2 > .card, #page-stats > .stats-rows > .card { flex-shrink: 0; }

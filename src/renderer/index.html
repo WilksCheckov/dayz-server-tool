@@ -418,14 +418,47 @@
           </div>
           <div class="row gap wrap map-overlay-bar">
             <b>Overlay</b>
-            <select id="mapOverlay" class="input" style="width:230px"><option value="none">None</option><option value="travel">Travel heat (where players go)</option><option value="deaths">Death heat (where players die)</option><option value="causes">Deaths by cause (who killed them)</option></select>
+            <select id="mapOverlay" class="input" style="width:230px"><option value="none">None</option><option value="travel">Travel heat (where players go)</option><option value="hits">Combat heat (hits)</option><option value="building">Base building heat</option><option value="logouts">Logout spots</option><option value="logins">Login / spawn spots</option><option value="deaths">Death heat (where players die)</option><option value="causes">Deaths by cause (who killed them)</option><option value="loot">Loot spawn locations (pick an item)</option></select>
+            <select id="mapRange" class="input" style="width:120px" title="Time range for the heat overlays"><option value="24">Last 24 h</option><option value="168">Last 7 days</option><option value="720" selected>Last 30 days</option><option value="all">All time</option></select>
             <label class="field inline">Opacity <input id="mapOverlayAlpha" type="range" min="20" max="100" value="70" style="width:110px"></label>
             <span class="muted" id="mapOverlayInfo"></span>
             <span class="grow"></span>
             <button class="btn small" id="btnHeatRebuild" title="Re-read every admin log in the profiles folder from the beginning">Rebuild from all logs</button>
             <button class="btn small danger" id="btnHeatClear">Clear</button>
           </div>
-          <div class="card grow map-card"><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
+          <div class="map-layout">
+            <div class="card grow map-card"><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
+            <div class="card loot-panel" id="lootPanel" hidden>
+              <div class="card-title">Loot item <span class="muted">click to show where it can spawn</span></div>
+              <input id="lootSearch" class="input" placeholder="Search items…">
+              <div id="lootList" class="ip-list"></div>
+              <p class="muted small">Computed from the mission: building positions, each building's loot containers and their usage / category / tag flags, the item's flags in types.xml, and the tier regions. Dot size = matching loot points.</p>
+            </div>
+          </div>
+        </section>
+        <!-- STATISTICS -->
+        <section class="page" id="page-stats">
+          <div class="page-toolbar"><span class="muted">Built from the admin log, the player database and the health samples. Daily numbers are kept for 30 days.</span><span class="grow"></span><button class="btn" id="btnStatsCopy">Copy summary</button><button class="btn" id="btnStatsSummary" title="Post the daily summary to the Discord channel set on the Discord Bot page">Post to Discord</button><button class="btn" id="btnStatsRefresh">Refresh</button></div>
+          <div id="statsCards" class="stats-rows"></div>
+          <div class="grid-2">
+            <div class="card"><div class="card-title row between"><span>Deaths per hour, last 24 h</span><span class="muted" id="statsDeathsHour"></span></div><canvas id="chDeathsHour" height="150"></canvas></div>
+            <div class="card"><div class="card-title">Deaths per day, 30 days</div><canvas id="chDeathsDay" height="150"></canvas></div>
+            <div class="card"><div class="card-title">Peak players online per day</div><canvas id="chPlayersDay" height="150"></canvas></div>
+            <div class="card"><div class="card-title">Unique players per day</div><canvas id="chUniqueDay" height="150"></canvas></div>
+            <div class="card"><div class="card-title">Average server FPS per day</div><canvas id="chFpsDay" height="150"></canvas></div>
+          </div>
+          <div id="statsBoards" class="stats-boards"></div>
+        </section>
+        <!-- AUDIT -->
+        <section class="page" id="page-audit">
+          <div class="page-toolbar">
+            <input id="auditQuery" class="input" placeholder="Search who / action / details" style="width:280px">
+            <select id="auditSource" class="input" style="width:150px"><option value="">All sources</option><option value="app">This app</option><option value="discord">Discord bot</option><option value="web">Web admin</option><option value="system">System</option></select>
+            <span class="grow"></span>
+            <button class="btn" id="btnAuditExport">Export CSV</button>
+            <button class="btn" id="btnAuditRefresh">Refresh</button>
+          </div>
+          <div class="card grow"><div class="table-wrap grow"><table class="table" id="auditTable"><thead><tr><th>When</th><th>Source</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody></tbody></table></div></div>
         </section>
         <!-- LOGS -->
         <section class="page" id="page-logs">
@@ -814,6 +847,8 @@
                 <label class="field">Ticket category ID (each ticket gets a private channel here; /ticketpanel posts the button) <input id="dcTicketCategory" class="input" placeholder="optional"></label>
                 <label class="field">Ticket log channel ID (transcript posted on close; falls back to the log channel) <input id="dcTicketLog" class="input" placeholder="optional"></label>
                 <label class="field">Kill feed channel ID (kills and deaths from the admin log) <input id="dcKillFeed" class="input" placeholder="optional"></label>
+                <label class="field">Daily summary channel ID (players, deaths, kills, FPS, uptime) <input id="dcSummaryChannel" class="input" placeholder="optional"></label>
+                <label class="field">Daily summary time (24h) <input id="dcSummaryTime" class="input" placeholder="09:00" style="width:110px"></label>
                 <label class="field">Join / leave feed channel ID <input id="dcJoinFeed" class="input" placeholder="optional"></label>
               </div>
               <div class="card-title mt">Live log to Discord</div>
@@ -989,5 +1024,6 @@
   <script src="../../node_modules/codemirror/addon/search/search.js"></script>
   <script src="../../node_modules/codemirror/addon/search/jump-to-line.js"></script>
   <script src="app.js"></script>
+<script src="map.js"></script>
 </body>
 </html>
