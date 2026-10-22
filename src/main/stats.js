@@ -87,5 +87,6 @@ async function maybePostSummary() {
 }
 async function postSummaryNow() { const dc = (settings.load().discord || {}); if (!dc.summaryChannelId) throw new Error('Set a summary channel on the Discord Bot page first.'); await require('./discord').postAlert({ title: 'Daily server summary', description: summaryText(), color: 0x4f8cff, channelId: dc.summaryChannelId }); return true; }
 
+function clear() { db = { days: {}, lastSummary: null }; try { fs.writeFileSync(file(), JSON.stringify(db)); } catch { /* ignore */ } }
 function init() { load(); clearInterval(timer); timer = setInterval(tick, 60000); }
-module.exports = { init, recordEvent, recordSample, recordCrash, overview, totals, summaryText, postSummaryNow };
+module.exports = { init, recordEvent, recordSample, recordCrash, overview, totals, summaryText, postSummaryNow, clear };

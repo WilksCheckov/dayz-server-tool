@@ -42,8 +42,7 @@ function buildArgs(s) {
   if (s.cpuCount > 0) args.push(`-cpuCount=${s.cpuCount}`);
   for (const part of (s.extraParams || '').split(/\s+/)) if (part) args.push(part);
   const modList = mods.modParam(s, false);
-  let serverModList = mods.modParam(s, true);
-  try { const ac = require('./anticheat').launchMod(); if (ac && !serverModList.toLowerCase().split(';').includes(ac.toLowerCase())) serverModList = serverModList ? ac + ';' + serverModList : ac; } catch { /* ignore */ }
+  const serverModList = mods.modParam(s, true);
   if (modList) args.push(`-mod=${modList}`);
   if (serverModList) args.push(`-serverMod=${serverModList}`);
   return args;

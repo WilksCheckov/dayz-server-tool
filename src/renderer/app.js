@@ -1248,8 +1248,23 @@ $('btnDdnsNow').onclick = (e) => run(async () => { renderDomain(await ipc.invoke
 ipc.on('domain:state', renderDomain);
 ipc.on('website:state', () => { refreshDomain(); });
 
-async function refreshWebsite() { refreshDomain(); renderWeb(await ipc.invoke('website:status')); loadWebForm(); refreshWebFiles(); refreshWebPreview(); }
+async function refreshWebsite() { refreshWebAddresses(); refreshDomain(); renderWeb(await ipc.invoke('website:status')); loadWebForm(); refreshWebFiles(); refreshWebPreview(); }
 
+
+async function refreshWebAddresses() {
+  const box = $('webAddresses');
+  let a; try { a = await ipc.invoke('network:addresses'); } catch (e) { box.innerHTML = '<div class="muted">' + esc(e.message) + '</div>'; return; }
+  const row = (label, value, hint) => value ? `<div class="row gap" style="align-items:center"><span class="muted" style="width:150px">${label}</span><code class="mono">${esc(value)}</code><button class="btn small addr-copy" data-value="${esc(value)}">Copy</button>${hint ? '<span class="muted">' + esc(hint) + '</span>' : ''}</div>` : `<div class="row gap" style="align-items:center"><span class="muted" style="width:150px">${label}</span><span class="muted">${esc(hint || 'unknown')}</span></div>`;
+  const rows = [];
+  for (const l of a.lan) { rows.push(row('Inward (LAN) IP', l.ip, l.name)); rows.push(row('Inward website', `http://${l.ip}:${a.port}/`, 'same network')); }
+  if (!a.lan.length) rows.push(row('Inward (LAN) IP', null, 'no network adapter found'));
+  rows.push(row('Outward (public) IP', a.publicIp, a.publicIp ? 'what the internet sees' : 'could not reach the lookup service'));
+  rows.push(row('Outward website', a.publicIp ? `http://${a.publicIp}:${a.port}/` : null, a.publicIp ? 'needs port ' + a.port + ' forwarded on your router' : ''));
+  rows.push(row('Game server (public)', a.publicIp ? `${a.publicIp}:${a.gamePort}` : null, a.publicIp ? 'direct connect address for players' : ''));
+  box.innerHTML = rows.join('');
+  box.querySelectorAll('.addr-copy').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.value); toast('Copied ' + b.dataset.value); });
+}
+$('btnWebAddrRefresh').onclick = () => refreshWebAddresses();
 
 // ---------- health, alerts, crash reports ----------
 function drawSpark(id, values, { max = null, color = '#4f8cff' } = {}) {
@@ -2104,6 +2119,7 @@ async function refreshSuspicious() {
   $('combatSuspicious').innerHTML = list.length ? `<table class="table"><thead><tr><th>Player</th><th>Score</th><th>Flags in range</th><th>24 h / 7 d / 30 d</th><th>Last</th><th>Hits</th><th>Head %</th></tr></thead><tbody>${list.map(p => `<tr><td><b>${esc(p.name)}</b></td><td><span class="badge bad">${p.score}</span></td><td>${esc(p.flags)}</td><td class="muted">${p.windows.day} / ${p.windows.week} / ${p.windows.month}</td><td class="muted">${esc(p.last)}${p.lastAt ? ' · ' + fmtDate(p.lastAt) : ''}</td><td>${p.hits}</td><td>${p.headshotPct}%</td></tr>`).join('')}</tbody></table>` : '<div class="muted">Nothing flagged in this range. Flags: headshot rate over 55% after 25+ hits, headshots at 400 m+, 4+ hits on 2+ players within 1.5 s, 3+ kills within 10 s, kills at 900 m+, movement faster than 80 m/s, 4+ logins within 10 min (relog duping), logging out within 20 s of being hit (combat logging), BattlEye kicks. Leads, not proof.</div>';
 }
 $('susRange').onchange = refreshSuspicious;
+$('btnStatsReset').onclick = (e) => run(async () => { if (!await showModal('Reset statistics', '<p>Delete the daily statistics? Deaths, kills, joins and health history on this page start again from now. The player database, death log and combat statistics are not affected.</p>', [{ label: 'Reset', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('stats:reset'); toast('Statistics reset'); refreshStats(); }, e.target);
 async function refreshAnticheat() {
   let st; try { st = await ipc.invoke('anticheat:status'); } catch { return; }
   const b = $('acState'); b.className = 'badge ' + (st.enabled && st.upToDate ? 'ok' : st.installed ? 'warn' : '');
@@ -2120,7 +2136,11 @@ $('acEnabled').onchange = (e) => run(async () => {
   }
   await ipc.invoke('anticheat:setEnabled', $('acEnabled').checked); refreshAnticheat();
 }, e.target);
-$('btnAcInstall').onclick = (e) => run(async () => { await ipc.invoke('anticheat:install'); toast('Mod written to the server folder'); refreshAnticheat(); }, e.target);
+$('btnAcInstall').onclick = (e) => run(async () => {
+  const st = await ipc.invoke('anticheat:status');
+  if (!st.enabled) { const ok = await showModal('Install the anti-dupe mod', '<p>This writes the mod into the server folder and adds <code>@DayZAdminTools</code> to the -serverMod line (see the Launch tab).</p><p>Items saved before the mod have no hidden ID, so the first start with it needs a <b>persistence wipe</b> (Mission page → Server Wipe). The same applies when you turn it off again.</p>', [{ label: 'Install and enable', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; }
+  await ipc.invoke('anticheat:setEnabled', true); toast('Mod written to the server folder and added to -serverMod'); refreshAnticheat();
+}, e.target);
 $('btnAcRemove').onclick = (e) => run(async () => { if (!await showModal('Remove the anti-dupe mod', '<p>Delete the @DayZAdminTools folder from the server? Turn the mod off as well, or it is written again at the next start. Remember the wipe note.</p>', [{ label: 'Remove', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('anticheat:remove'); refreshAnticheat(); }, e.target);
 ipc.on('anticheat:changed', () => { if (document.querySelector('#page-stats.active')) refreshAnticheat(); });
 $('btnCombatRebuild').onclick = (e) => run(async () => { const r = await ipc.invoke('combat:rebuild'); toast(`Read ${r.files} log file(s), ${r.events.toLocaleString()} events`); refreshCombat(); }, e.target);

@@ -124,12 +124,15 @@ let firewallChecked = false;
 async function ensureFirewall() {
   if (firewallChecked || !appPrefs().autoFirewall) return;
   firewallChecked = true;
+  const key = network.ports().map(p => p.proto + p.port).join(',');
+  if ((settings.load().firewallVerified || '') === key) return; // verified before for exactly these ports: no check, no prompt
   try {
-    const have = await network.rules();
+    let have; try { have = await network.rules(); } catch (e) { emit('console', { source: 'network', line: e.message + ' Skipping the automatic firewall rules; add them on the Network page if players cannot connect.' }); return; }
     const need = network.ports().filter(p => !have.some(r => String(r.port) === String(p.port) && r.proto === p.proto && r.enabled));
-    if (!need.length) return;
+    if (!need.length) { settings.save({ firewallVerified: key }); return; }
     emit('console', { source: 'network', line: 'Adding firewall rules for ' + need.map(p => p.proto + ' ' + p.port).join(', ') + ' (Windows asks for permission)...' });
     await network.addRules();
+    settings.save({ firewallVerified: key });
     emit('console', { source: 'network', line: 'Firewall rules added.' });
   } catch (e) { emit('console', { source: 'network', line: 'Firewall rules not added: ' + e.message + '. Add them on the Network page.' }); }
 }
@@ -362,6 +365,7 @@ handle('heat:summary', (since) => heat.summary(null, Number(since) || 0));
 handle('lootmap:items', () => lootmap.items());
 handle('lootmap:spawns', (name) => lootmap.spawns(name));
 handle('stats:overview', () => stats.overview());
+handle('stats:reset', () => { stats.clear(); return true; });
 handle('stats:summaryText', () => stats.summaryText());
 handle('stats:postSummary', () => stats.postSummaryNow());
 handle('audit:list', (o) => audit.list(o || {}));
@@ -413,6 +417,7 @@ handle('tasks:run', (id) => { const t = tasks.all().find(x => x.id === id); if (
 
 // Network helper
 handle('network:report', () => network.report());
+handle('network:addresses', async () => ({ lan: network.lanIps(), publicIp: await network.publicIp(), port: (settings.load().website || {}).port || 8080, gamePort: settings.load().port || 2302 }));
 handle('logs:cleanup', (opts) => logs.cleanup(opts || {}));
 handle('logs:cleanupCfg', () => logs.cleanupCfg());
 handle('steam:forgetPassword', () => { settings.save({ steamPassEnc: '' }); return steamcmd.status(); });

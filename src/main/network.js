@@ -59,7 +59,7 @@ async function rules() {
   try {
     const out = await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' | ForEach-Object { $pf = $_ | Get-NetFirewallPortFilter; "$($_.DisplayName)|$($_.Enabled)|$($pf.Protocol)|$($pf.LocalPort)" }`);
     return out.trim().split(/\r?\n/).filter(Boolean).map(l => { const [name, enabled, proto, port] = l.split('|'); return { name, enabled: enabled === 'True', proto, port }; });
-  } catch { return []; }
+  } catch (e) { throw new Error('Could not read the firewall rules (PowerShell): ' + (e.message || e)); }
 }
 
 async function addRules() {
@@ -74,6 +74,8 @@ Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinu
 }
 async function removeRules() { await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule`, { elevated: true }); return rules(); }
 
+// IPv4 addresses of this PC on its networks (what players on the same LAN use)
+function lanIps() { const out = []; for (const [name, list] of Object.entries(require('os').networkInterfaces())) for (const a of list || []) if (a.family === 'IPv4' && !a.internal) out.push({ name, ip: a.address }); return out; }
 async function publicIp() {
   for (const url of ['https://api.ipify.org?format=json', 'https://ifconfig.me/all.json']) {
     try { const j = await (await fetch(url, { signal: AbortSignal.timeout(5000) })).json(); if (j.ip || j.ip_addr) return j.ip || j.ip_addr; } catch { /* next */ }
@@ -156,4 +158,4 @@ async function report() {
   return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080), queryPort: qport, queryLocal, queryPublic, stacks };
 }
 
-module.exports = { ports, rules, addRules, removeRules, publicIp, listening, report, webStacks };
+module.exports = { lanIps, ports, rules, addRules, removeRules, publicIp, listening, report, webStacks };

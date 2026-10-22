@@ -445,7 +445,8 @@
         </section>
         <!-- STATISTICS -->
         <section class="page" id="page-stats">
-          <div class="page-toolbar"><span class="muted">Built from the admin log, the player database and the health samples. Daily numbers are kept for 30 days.</span><span class="grow"></span><button class="btn" id="btnStatsCopy">Copy summary</button><button class="btn" id="btnStatsSummary" title="Post the daily summary to the Discord channel set on the Discord Bot page">Post to Discord</button><button class="btn" id="btnStatsRefresh">Refresh</button></div>
+          <div class="page-toolbar"><span class="muted">Built from the admin log, the player database and the health samples. Daily numbers are kept for 30 days.</span><span class="grow"></span><button class="btn small" id="btnStatsReset" title="Delete the daily statistics (deaths, kills, joins, health samples). Use after testing on a fresh server.">Reset statistics</button>
+            <button class="btn" id="btnStatsCopy">Copy summary</button><button class="btn" id="btnStatsSummary" title="Post the daily summary to the Discord channel set on the Discord Bot page">Post to Discord</button><button class="btn" id="btnStatsRefresh">Refresh</button></div>
           <div id="statsCards" class="stats-rows"></div>
           <div class="grid-2">
             <div class="card"><div class="card-title row between"><span>Deaths per hour, last 24 h</span><span class="muted" id="statsDeathsHour"></span></div><canvas id="chDeathsHour" height="150"></canvas></div>
@@ -730,7 +731,7 @@
           <div class="grid-3">
             <div class="card">
               <div class="card-title">RCon connection</div>
-              <p class="muted">Uses BattlEye RCon. The tool configures it for you: before each server start it writes <code>RConPassword</code> and <code>RConPort</code> to <code>battleye\BEServer_x64.cfg</code> (creating a password if there is none), keeps these fields in step, and connects on its own once the server is up.</p>
+              <p class="muted">Uses BattlEye RCon. The tool configures it for you: before each server start it writes <code>RConPassword</code> and <code>RConPort</code> to <code>BEServer_x64.cfg</code> (in <code>profiles\BattlEye</code> and <code>battleye</code>) and makes sure <code>BattlEye = 1</code> is set in serverDZ.cfg (creating a password if there is none), keeps these fields in step, and connects on its own once the server is up.</p>
               <div class="grid-2 tight">
                 <label class="field">Host <input id="rconHost" class="input" placeholder="127.0.0.1"></label>
                 <label class="field">Port <input id="rconPort" class="input" type="number" placeholder="2306"></label>
@@ -941,6 +942,10 @@
             <button class="btn" id="btnWebOpen" disabled>Open in browser</button>
             <button class="btn primary" id="btnWebStart">Start website</button>
             <button class="btn" id="btnWebStop" hidden>Stop website</button>
+          </div>
+          <div class="card" style="flex-shrink:0">
+            <div class="card-title row between"><span>Addresses <span class="muted">where this website (and the game server) can be reached</span></span><button class="btn small" id="btnWebAddrRefresh">Refresh</button></div>
+            <div id="webAddresses" class="col gap"><div class="muted">Looking up addresses…</div></div>
           </div>
           <div class="grid-2">
             <div class="col gap">

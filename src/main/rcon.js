@@ -154,24 +154,39 @@ const addBan = (guid, minutes = 0, reason = '') => command(`addBan ${guid} ${min
 // BEServer_x64_active_*.cfg while running). The tool keeps its own settings and that file in step, creating
 // a password when neither has one, so RCon works without any manual setup.
 const fsx = require('fs'); const pathx = require('path');
-function beDir() { return pathx.join(settings.paths().serverDir, 'battleye'); }
-function beFiles() { try { return fsx.readdirSync(beDir()).filter(f => /^beserver_x64(?:_active_[a-z0-9]+)?\.cfg$/i.test(f)).map(f => pathx.join(beDir(), f)); } catch { return []; } }
+function beDirs() { const p = settings.paths(); return [pathx.join(p.profilesDir, 'BattlEye'), pathx.join(p.serverDir, 'battleye')]; }
+function beFiles() { const out = []; for (const d of beDirs()) { try { for (const f of fsx.readdirSync(d)) if (/^beserver_x64(?:_active_[a-z0-9]+)?\.cfg$/i.test(f)) out.push(pathx.join(d, f)); } catch { /* no folder */ } } return out; }
+function beLines(text) { return String(text || '').split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean); }
+function beParse(text) {
+  const out = {};
+  for (const l of beLines(text)) { const m = l.match(/^(\w+)\s+(.*)$/); if (m) out[m[1].toLowerCase()] = m[2].trim(); }
+  return out;
+}
 function readBe() {
   for (const f of beFiles()) {
-    try { const t = fsx.readFileSync(f, 'utf8'); const pw = t.match(/^\s*RConPassword\s+(\S+)/mi), port = t.match(/^\s*RConPort\s+(\d+)/mi); if (pw || port) return { file: f, password: pw ? pw[1] : '', port: port ? Number(port[1]) : null }; } catch { /* next */ }
+    try { const kv = beParse(fsx.readFileSync(f, 'utf8')); if (kv.rconpassword || kv.rconport) return { file: f, password: kv.rconpassword || '', port: kv.rconport ? Number(kv.rconport) : null }; } catch { /* next */ }
   }
   return null;
 }
+// Canonical file: one "Key value" per line, CRLF, our keys first, anything else the admin added kept as is.
+function beRender(text, password, port) {
+  const keep = beLines(text).filter(l => !/^(RConPassword|RConPort|RestrictRCon)\s/i.test(l));
+  const restrict = (beLines(text).find(l => /^RestrictRCon\s/i.test(l)) || 'RestrictRCon 0');
+  return ['RConPassword ' + password, 'RConPort ' + port, restrict, ...keep].join('\r\n') + '\r\n';
+}
 function writeBe(password, port) {
-  const dir = beDir(); fsx.mkdirSync(dir, { recursive: true });
-  const main = pathx.join(dir, 'BEServer_x64.cfg');
-  let text = ''; try { text = fsx.readFileSync(main, 'utf8'); } catch { /* new file */ }
-  const set = (key, val) => { const re = new RegExp('^\\s*' + key + '\\s+.*$', 'mi'); text = re.test(text) ? text.replace(re, key + ' ' + val) : (text.replace(/\s*$/, '') + (text ? '\r\n' : '') + key + ' ' + val); };
-  set('RConPassword', password); set('RConPort', String(port)); if (!/^\s*RestrictRCon\s/mi.test(text)) set('RestrictRCon', '0');
-  fsx.writeFileSync(main, text.replace(/\s*$/, '') + '\r\n', 'utf8');
+  let first = null, next = null;
+  for (const dir of beDirs()) {
+    fsx.mkdirSync(dir, { recursive: true });
+    const main = pathx.join(dir, 'BEServer_x64.cfg');
+    let text = ''; try { text = fsx.readFileSync(main, 'utf8'); } catch { /* new file */ }
+    if (!next) next = beRender(text, password, port);
+    if (next !== text) fsx.writeFileSync(main, next, 'utf8');
+    if (!first) first = main;
+  }
   // an _active_ copy is what a running server actually reads; keep it in step too
-  for (const f of beFiles()) if (f !== main) { try { fsx.writeFileSync(f, fsx.readFileSync(main, 'utf8')); } catch { /* ignore */ } }
-  return main;
+  for (const f of beFiles()) if (!/BEServer_x64\.cfg$/i.test(f)) { try { if (fsx.readFileSync(f, 'utf8') !== next) fsx.writeFileSync(f, next); } catch { /* ignore */ } }
+  return first;
 }
 // Make the tool's settings and the BattlEye file agree. Returns what happened.
 function newPassword() { return require('crypto').randomBytes(18).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 16); }
@@ -183,11 +198,13 @@ function ensureConfigured({ regenerate = false } = {}) {
   if (regenerate) { password = newPassword(); action = 'regenerated'; }
   if (!password && be && be.password) { password = be.password; if (be.port) port = be.port; action = 'from-battleye'; }
   if (!password) { password = newPassword(); action = 'generated'; }
-  const needWrite = !be || be.password !== password || be.port !== port;
+  let needWrite = !be || be.password !== password || be.port !== port;
+  if (!needWrite) { for (const dir of beDirs()) { try { const raw = fsx.readFileSync(pathx.join(dir, 'BEServer_x64.cfg'), 'utf8'); if (beRender(raw, password, port) !== raw) needWrite = true; } catch { needWrite = true; } } for (const f of beFiles()) { try { const raw = fsx.readFileSync(f, 'utf8'); if (beRender(raw, password, port) !== raw) needWrite = true; } catch { /* ignore */ } } }
   if (needWrite) { try { writeBe(password, port); if (action === 'ok') action = 'wrote-battleye'; } catch (e) { return { action: 'error', error: e.message }; } }
+  try { const configs = require('./configs'); const cur = configs.cfgFormRead(); if (cur && cur.exists && cur.values && cur.values.BattlEye !== 1 && cur.values.BattlEye !== true) { configs.cfgFormWrite({ BattlEye: 1 }); emitRef('console', { source: 'rcon', line: 'RCon: BattlEye was off in serverDZ.cfg (no BattlEye = 1 line); turned it on, RCon needs it.' }); } } catch { /* config not readable yet */ }
   if (password !== c.password || port !== c.port || c.autoConnect !== true) settings.save({ rcon: { ...c, password, port, host: c.host || '127.0.0.1', autoConnect: true } });
   if (action !== 'ok') emitRef('console', { source: 'rcon', line: action === 'regenerated' ? `RCon: new random password written to battleye\BEServer_x64.cfg (port ${port}). Restart the server for BattlEye to pick it up.` : action === 'generated' ? `RCon configured: created a password in battleye\\BEServer_x64.cfg (port ${port}).` : action === 'from-battleye' ? `RCon configured from battleye\\BEServer_x64.cfg (port ${port}).` : `RCon: battleye\\BEServer_x64.cfg updated to match the tool's settings (port ${port}).` });
-  return { action, port, file: pathx.join(beDir(), 'BEServer_x64.cfg') };
+  return { action, port, file: pathx.join(beDirs()[0], 'BEServer_x64.cfg') };
 }
 // Connect on its own once the server is up: retry every 15 s for up to 10 minutes, stop when connected or the server stops.
 let autoTimer = null, autoUntil = 0;

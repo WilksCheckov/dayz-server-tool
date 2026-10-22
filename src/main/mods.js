@@ -502,6 +502,7 @@ function modParam(s, serverSide) {
     .filter(Boolean);
   if (!serverSide) return generated.join(';');
   const manual = String(s.serverModManual || '').split(/[;\n,]+/).map(x => x.trim()).filter(Boolean);
+  try { const ac = require('./anticheat').launchMod(); if (ac) manual.unshift(ac); } catch { /* not available */ }
   const seen = new Set();
   return [...manual, ...generated].filter(f => { const k = f.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).join(';');
 }
