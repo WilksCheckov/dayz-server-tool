@@ -1413,7 +1413,7 @@ async function refreshEconomy() {
   for (const [id, list] of [['tfCategory', eco.limits.categories], ['tfUsage', eco.limits.usages], ['tfValue', eco.limits.values], ['tfTag', eco.limits.tags]]) {
     const sel = $(id); const first = sel.options[0].outerHTML; sel.innerHTML = first + list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
   }
-  ecoFillFlagNames();
+  ecoFillFlagNames(); itemCatalog = null;
   ecoSetTab(eco.tab);
 }
 function ecoFillFlagNames() { const kind = $('bulkFlagKind').value; const list = { usage: eco.limits.usages, value: eco.limits.values, tag: eco.limits.tags, category: eco.limits.categories }[kind] || []; $('bulkFlagName').innerHTML = list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join(''); }
@@ -1421,6 +1421,8 @@ $('bulkFlagKind').onchange = ecoFillFlagNames;
 document.querySelectorAll('.etab').forEach(t => t.onclick = () => ecoSetTab(t.dataset.etab));
 function ecoSetTab(tab) {
   eco.tab = tab;
+  if (tab === 'spawnable') loadItemCatalog().then(renderItemPicker).catch(() => {});
+  if (tab === 'types') renderBrush();
   document.querySelectorAll('.etab').forEach(x => x.classList.toggle('active', x.dataset.etab === tab));
   ['types', 'events', 'spawnable'].forEach(k => { $('eco-' + k).hidden = k !== tab; });
   const list = eco.files ? (tab === 'types' ? eco.files.types : tab === 'events' ? eco.files.events : eco.files.spawnable) : [];
@@ -1480,6 +1482,7 @@ $('tRows').addEventListener('change', e => {
   if (e.target.classList.contains('vin')) { const v = e.target.value; r[e.target.dataset.f] = v === '' ? null : Number(v); $('ecoInfo').textContent = `${eco.types.rows.length} entries · ${ecoDirtyCount(eco.types)} modified`; row.classList.toggle('dirty', JSON.stringify(r) !== eco.types.orig[i]); }
 });
 $('tRows').addEventListener('click', e => {
+  if (brush.name) return;
   const cell = e.target.closest('.vflags'); if (!cell) return;
   const row = e.target.closest('.vrow'); const i = Number(row.dataset.i); const r = eco.types.rows[i]; const k = cell.dataset.k;
   const options = { category: eco.limits.categories, usage: eco.limits.usages, value: eco.limits.values, tag: eco.limits.tags }[k];
@@ -1491,6 +1494,31 @@ $('tRows').addEventListener('click', e => {
     renderTypes(); ecoRender();
   });
 });
+// ----- brush: pick a tier / usage / tag / category, then left-click rows to add, right-click to remove -----
+const brush = { kind: 'value', name: null };
+function renderBrush() {
+  const list = { usage: eco.limits.usages, value: eco.limits.values, tag: eco.limits.tags, category: eco.limits.categories }[brush.kind] || [];
+  if (brush.name && !list.includes(brush.name)) brush.name = null;
+  const cls = { usage: 'ok', value: 'warn', tag: '', category: '' }[brush.kind];
+  $('brushChips').innerHTML = list.map(v => `<span class="badge chip ${cls} ${brush.name === v ? 'on' : ''}" data-v="${esc(v)}">${esc(v)}</span>`).join('') || '<span class="muted">none defined in cfglimitsdefinition.xml</span>';
+  document.querySelector('#eco-types .vtable').classList.toggle('brushing', !!brush.name);
+  $('brushHint').textContent = brush.name ? `Brush: ${brush.kind === 'value' ? 'tier' : brush.kind} "${brush.name}". Left-click a row to add, right-click to remove, Esc to stop.` : 'Pick a value, then left-click a row to add it, right-click to remove it. Esc clears the brush.';
+}
+$('brushKind').onchange = () => { brush.name = null; renderBrush(); };
+$('brushChips').addEventListener('click', e => { const c = e.target.closest('.chip'); if (!c) return; brush.name = brush.name === c.dataset.v ? null : c.dataset.v; renderBrush(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && brush.name) { brush.name = null; renderBrush(); } });
+function brushApply(e, add) {
+  if (!brush.name || !eco.types) return false;
+  if (e.target.closest('input, button, select')) return false;
+  const row = e.target.closest('.vrow'); if (!row || row.classList.contains('vhead')) return false;
+  e.preventDefault();
+  const i = Number(row.dataset.i); const r = eco.types.rows[i]; const arr = r[brush.kind];
+  const has = arr.includes(brush.name);
+  if (add && !has) arr.push(brush.name); else if (!add && has) arr.splice(arr.indexOf(brush.name), 1); else return true;
+  renderTypes(); ecoRender(); return true;
+}
+$('tRows').addEventListener('click', e => { brushApply(e, true); }, true);
+$('tRows').addEventListener('contextmenu', e => { brushApply(e, false); });
 $('tfSelAll').onchange = (e) => { const st = eco.types; if (!st) return; for (const i of st.filtered) { if (e.target.checked) st.sel.add(i); else st.sel.delete(i); } renderTypes(); };
 $('btnBulkSelectFiltered').onclick = () => { const st = eco.types; if (!st) return; for (const i of st.filtered) st.sel.add(i); renderTypes(); };
 $('btnBulkClear').onclick = () => { if (eco.types) { eco.types.sel.clear(); renderTypes(); } };
@@ -1537,15 +1565,45 @@ $('btnEventAdd').onclick = () => run(async () => {
 function renderSpawn() {
   const st = eco.spawn; const box = $('spList');
   if (!st) { box.innerHTML = ''; return; }
+  st.open = st.open || new Set(); for (const d of box.querySelectorAll('.sp-type')) { if (d.open) st.open.add(d.dataset.i); else st.open.delete(d.dataset.i); }
   const q = $('sfSearch').value.trim().toLowerCase();
   const idx = st.rows.map((r, i) => i).filter(i => !q || st.rows[i].name.toLowerCase().includes(q)).slice(0, 300);
   $('sfCount').textContent = `${idx.length} shown (first 300)`;
-  const group = (i, kind, gi, g) => `<div class="sp-group" data-i="${i}" data-kind="${kind}" data-gi="${gi}"><div class="row gap"><b>${kind}</b>${g.preset ? `<span class="muted">preset ${esc(g.preset)}</span>` : `<span class="muted">chance</span><input type="number" step="0.01" min="0" max="1" class="input sp-gchance" value="${g.chance ?? 1}" style="width:80px">`}<span class="grow"></span>${g.preset ? '' : '<button class="btn small sp-additem">+ item</button>'}<button class="btn small danger sp-delgroup">✕</button></div>${g.preset ? '' : `<div class="sp-items">${g.items.map((it, ii) => `<div class="row gap sp-item" data-ii="${ii}"><input class="input sp-iname" value="${esc(it.name)}" style="width:220px"><span class="muted">chance</span><input type="number" step="0.01" min="0" max="1" class="input sp-ichance" value="${it.chance ?? ''}" placeholder="1" style="width:80px"><button class="btn small danger sp-delitem">✕</button></div>`).join('')}</div>`}</div>`;
+  const group = (i, kind, gi, g) => `<div class="sp-group" data-i="${i}" data-kind="${kind}" data-gi="${gi}"><div class="row gap"><b>${kind}</b>${g.preset ? `<span class="muted">preset ${esc(g.preset)}</span>` : `<span class="muted">chance</span><input type="number" step="0.01" min="0" max="1" class="input sp-gchance" value="${g.chance ?? 1}" style="width:80px">`}<span class="grow"></span>${g.preset ? '' : '<button class="btn small sp-fromlist" title="Fill this group by clicking items in the list on the right">Add from list</button><button class="btn small sp-additem">+ item</button>'}<button class="btn small danger sp-delgroup">✕</button></div>${g.preset ? '' : `<div class="sp-items">${g.items.map((it, ii) => `<div class="row gap sp-item" data-ii="${ii}"><input class="input sp-iname" value="${esc(it.name)}" style="width:220px"><span class="muted">chance</span><input type="number" step="0.01" min="0" max="1" class="input sp-ichance" value="${it.chance ?? ''}" placeholder="1" style="width:80px"><button class="btn small danger sp-delitem">✕</button></div>`).join('')}</div>`}</div>`;
   box.innerHTML = idx.map(i => { const r = st.rows[i]; const dirty = JSON.stringify(r) !== st.orig[i];
     return `<details class="sp-type ${dirty ? 'dirty' : ''}" data-i="${i}"><summary><b>${esc(r.name)}</b> <span class="muted">${r.attachments.length} attachment group(s), ${r.cargo.length} cargo group(s)${r.hoarder ? ', hoarder' : ''}${r.damage ? `, damage ${r.damage.min}–${r.damage.max}` : ''}</span></summary>
       <div class="row gap wrap sp-tools"><button class="btn small sp-addgroup" data-kind="attachments">+ attachments group</button><button class="btn small sp-addgroup" data-kind="cargo">+ cargo group</button></div>
       ${r.attachments.map((g, gi) => group(i, 'attachments', gi, g)).join('')}${r.cargo.map((g, gi) => group(i, 'cargo', gi, g)).join('')}</details>`; }).join('') || '<div class="empty">No entries.</div>';
+  for (const d of box.querySelectorAll('.sp-type')) if (st.open.has(d.dataset.i)) d.open = true;
+  if (st.target) { const g = box.querySelector(`.sp-group[data-i="${st.target.i}"][data-kind="${st.target.kind}"][data-gi="${st.target.gi}"]`); if (g) { g.classList.add('target'); const b = g.querySelector('.sp-fromlist'); if (b) b.classList.add('on'); } else st.target = null; }
+  $('spTarget').textContent = st.target ? `Adding to ${st.rows[st.target.i].name} → ${st.target.kind} group ${st.target.gi + 1}. Click items on the right.` : 'Pick a group with "Add from list" to fill it from the item list on the right.';
 }
+// ----- item picker (class names and categories from the types files of the active mission) -----
+let itemCatalog = null;
+async function loadItemCatalog() {
+  if (itemCatalog) return itemCatalog;
+  const list = eco.files ? eco.files.types.filter(f => f.exists) : [];
+  const seen = new Map();
+  for (const f of list) { try { for (const r of await ipc.invoke('economy:loadTypes', f.abs)) if (!seen.has(r.name)) seen.set(r.name, { name: r.name, cat: r.category[0] || 'other', usage: r.usage }); } catch { /* skip */ } }
+  itemCatalog = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const cats = [...new Set(itemCatalog.map(x => x.cat))].sort();
+  $('ipCat').innerHTML = '<option value="">All classes</option>' + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  return itemCatalog;
+}
+function renderItemPicker() {
+  const q = $('ipSearch').value.trim().toLowerCase(), c = $('ipCat').value;
+  const st = eco.spawn; const inGroup = new Set(st && st.target ? st.rows[st.target.i][st.target.kind][st.target.gi].items.map(x => x.name) : []);
+  const rows = (itemCatalog || []).filter(x => (!q || x.name.toLowerCase().includes(q)) && (!c || x.cat === c)).slice(0, 400);
+  $('ipList').innerHTML = rows.map(x => `<div class="ip-item ${inGroup.has(x.name) ? 'disabled' : ''}" data-name="${esc(x.name)}" title="${esc(x.usage.join(', ') || x.cat)}"><span>${esc(x.name)}</span><span class="muted">${esc(x.cat)}</span></div>`).join('') || '<div class="muted" style="padding:8px">No items match.</div>';
+}
+$('ipSearch').addEventListener('input', renderItemPicker); $('ipCat').onchange = renderItemPicker;
+$('ipList').addEventListener('click', e => {
+  const it = e.target.closest('.ip-item'); const st = eco.spawn; if (!it || !st || it.classList.contains('disabled')) return;
+  if (!st.target) { toast('Pick a group first: open a type and press "Add from list"', true); return; }
+  const grp = st.rows[st.target.i][st.target.kind][st.target.gi]; if (!grp || grp.preset) return;
+  grp.items.push({ name: it.dataset.name, chance: 1 }); st.open.add(String(st.target.i));
+  renderSpawn(); ecoRender(); renderItemPicker();
+});
 $('sfSearch').addEventListener('input', renderSpawn);
 $('spList').addEventListener('change', e => {
   const st = eco.spawn; const g = e.target.closest('.sp-group'); if (!g) return; const r = st.rows[Number(g.dataset.i)]; const grp = r[g.dataset.kind][Number(g.dataset.gi)];
@@ -1557,11 +1615,12 @@ $('spList').addEventListener('click', e => {
   const st = eco.spawn; const t = e.target.closest('.sp-type'); if (!t) return; const r = st.rows[Number(t.dataset.i)];
   if (e.target.classList.contains('sp-addgroup')) { r[e.target.dataset.kind].push({ chance: 1, preset: null, items: [] }); renderSpawn(); ecoRender(); return; }
   const g = e.target.closest('.sp-group'); if (!g) return; const list = r[g.dataset.kind]; const gi = Number(g.dataset.gi);
-  if (e.target.classList.contains('sp-delgroup')) { list.splice(gi, 1); }
+  if (e.target.classList.contains('sp-fromlist')) { const same = st.target && st.target.i === Number(t.dataset.i) && st.target.kind === g.dataset.kind && st.target.gi === gi; st.target = same ? null : { i: Number(t.dataset.i), kind: g.dataset.kind, gi }; st.open = st.open || new Set(); st.open.add(t.dataset.i); renderSpawn(); renderItemPicker(); return; }
+  if (e.target.classList.contains('sp-delgroup')) { list.splice(gi, 1); if (st.target && st.target.i === Number(t.dataset.i)) st.target = null; }
   else if (e.target.classList.contains('sp-additem')) { list[gi].items.push({ name: '', chance: 1 }); }
   else if (e.target.classList.contains('sp-delitem')) { const it = e.target.closest('.sp-item'); list[gi].items.splice(Number(it.dataset.ii), 1); }
   else return;
-  const open = [...document.querySelectorAll('.sp-type[open]')].map(d => d.dataset.i); renderSpawn(); open.forEach(i => { const d = document.querySelector(`.sp-type[data-i="${i}"]`); if (d) d.open = true; }); ecoRender();
+  renderSpawn(); ecoRender(); renderItemPicker();
 });
 // ----- save / revert / problems -----
 function renderEcoProblems(problems, counts) {
@@ -1688,7 +1747,10 @@ $('gpTable').addEventListener('change', e => { const el = e.target.closest('.gp'
 $('btnGpSave').onclick = (e) => run(async () => { const changes = Object.entries(gpChanges).map(([path, value]) => ({ path, value })); if (!changes.length) return toast('Nothing changed'); const r = await ipc.invoke('mission:saveGameplay', changes); gpChanges = {}; toast(r.counts.error ? `Saved with ${r.counts.error} problem(s), see Config Editor` : 'cfggameplay.json saved', r.counts.error > 0); refreshMission(); }, e.target);
 $('missionTable').addEventListener('click', e => { const b = e.target.closest('.ms-switch'); if (!b) return; run(async () => { const ok = await showModal(`Switch to ${b.dataset.name}?`, '<p>serverDZ.cfg is updated (a .bak is kept). Players keep their characters only if the new mission has its own storage.</p>', [{ label: 'Switch', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('mission:switch', b.dataset.name); toast('Mission switched'); refreshMission(); refreshConfigTree(); }); });
 const wipe = (kind, label) => (e) => run(async () => { const ok = await showModal(label, '<p>A backup is taken first. The server must be stopped. This cannot be undone except by restoring that backup.</p><label class="field">Type WIPE to confirm <input id="mWipe" class="input"></label>', [{ label: 'Wipe', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok || $('mWipe').value.trim() !== 'WIPE') return toast('Cancelled'); const r = await ipc.invoke('mission:wipe', kind); toast(`Wiped. Backup: ${r.backup}`); refreshMission(); }, e.target);
-$('btnWipeAll').onclick = wipe('all', 'Full wipe of the active mission'); $('btnWipePlayers').onclick = wipe('players', 'Wipe all characters');
+$('btnWipeAll').onclick = wipe('all', 'Full wipe of the active mission'); $('btnWipePlayers').onclick = wipe('players', 'Wipe all characters'); $('btnWipeWorld').onclick = wipe('world', 'World wipe: bases, vehicles and loot (characters are kept)');
+let wipeArmTimer = null;
+function setWipeArmed(on) { for (const id of ['btnWipeAll', 'btnWipeWorld', 'btnWipePlayers']) $(id).disabled = !on; $('wipeArm').checked = on; clearTimeout(wipeArmTimer); if (on) wipeArmTimer = setTimeout(() => setWipeArmed(false), 60000); }
+$('wipeArm').onchange = () => setWipeArmed($('wipeArm').checked);
 $('btnMissionRefresh').onclick = () => run(refreshMission);
 
 // ---------- scheduled tasks ----------

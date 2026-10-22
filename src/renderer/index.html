@@ -304,6 +304,12 @@
               <label class="check"><input type="checkbox" id="tfModified"> modified only</label>
               <span class="muted" id="tfCount"></span>
             </div>
+            <div class="row gap wrap eco-brush" id="ecoBrush">
+              <b>Brush</b>
+              <select id="brushKind" class="input eco-sel" style="width:110px"><option value="value">Tier</option><option value="usage">Usage</option><option value="tag">Tag</option><option value="category">Category</option></select>
+              <span id="brushChips" class="row gap wrap"></span>
+              <span class="muted" id="brushHint">Pick a value, then left-click a row to add it, right-click to remove it. Esc clears the brush.</span>
+            </div>
             <div class="row gap wrap eco-bulk" id="ecoBulk">
               <b id="bulkCount">0 selected</b><span class="muted eco-bulk-hint">tick rows to bulk edit</span>
               <select id="bulkField" class="input eco-sel"><option value="nominal">nominal</option><option value="min">min</option><option value="lifetime">lifetime</option><option value="restock">restock</option><option value="quantmin">quantmin</option><option value="quantmax">quantmax</option><option value="cost">cost</option></select>
@@ -331,8 +337,15 @@
           </div>
 
           <div class="eco-pane" id="eco-spawnable" hidden>
-            <div class="row gap wrap eco-filters"><input id="sfSearch" class="input" placeholder="Type name contains…" style="width:240px"><span class="muted" id="sfCount"></span></div>
-            <div id="spList" class="sp-list"></div>
+            <div class="row gap wrap eco-filters"><input id="sfSearch" class="input" placeholder="Type name contains…" style="width:240px"><span class="muted" id="sfCount"></span><span class="grow"></span><span class="muted" id="spTarget">Pick a group with "Add from list" to fill it from the item list on the right.</span></div>
+            <div class="sp-layout">
+              <div id="spList" class="sp-list"></div>
+              <div class="card sp-picker">
+                <div class="card-title">Items <span class="muted">click to add to the selected group</span></div>
+                <div class="row gap"><input id="ipSearch" class="input grow" placeholder="Search items…"><select id="ipCat" class="input" style="width:130px"><option value="">All classes</option></select></div>
+                <div id="ipList" class="ip-list"></div>
+              </div>
+            </div>
           </div>
 
           <div class="problems-head row between" id="ecoProblemsHead" hidden><span id="ecoProblemsTitle">Problems</span><span class="muted">Saving validates the file; problems are highlighted in the Config Editor.</span></div>
@@ -350,8 +363,9 @@
             <div class="col gap">
               <div class="card">
                 <div class="card-title">Wipe active mission</div>
-                <p class="muted">A full wipe deletes <code>storage_1</code>: all characters, bases, vehicles and loot state. A character wipe only deletes <code>players.db</code> so bases and vehicles stay.</p>
-                <div class="row gap wrap"><button class="btn danger" id="btnWipeAll">Full wipe</button><button class="btn danger" id="btnWipePlayers">Wipe characters only</button></div>
+                <p class="muted"><b>Full wipe</b> deletes <code>storage_1</code>: characters, bases, vehicles and loot state. <b>World wipe</b> deletes bases, vehicles and loot but keeps <code>players.db</code>, so everyone keeps their character. <b>Character wipe</b> only deletes <code>players.db</code>.</p>
+                <label class="check wipe-arm"><input type="checkbox" id="wipeArm"> Enable the wipe buttons (safety: disarms again after 60 seconds)</label>
+                <div class="row gap wrap"><button class="btn danger" id="btnWipeAll" disabled>Full wipe</button><button class="btn danger" id="btnWipeWorld" disabled>World wipe, keep characters</button><button class="btn danger" id="btnWipePlayers" disabled>Wipe characters only</button></div>
                 <div class="muted mt" id="wipeInfo"></div>
               </div>
               <div class="card">

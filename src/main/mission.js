@@ -53,6 +53,7 @@ async function wipe(kind) {
   const bk = await backups.create('pre-wipe');
   if (kind === 'all') fs.rmSync(storage, { recursive: true, force: true });
   else if (kind === 'players') { for (const f of ['players.db', 'players.db-journal']) fs.rmSync(path.join(storage, f), { force: true }); }
+  else if (kind === 'world') { for (const f of fs.readdirSync(storage)) { if (/^players\.db/i.test(f)) continue; fs.rmSync(path.join(storage, f), { recursive: true, force: true }); } }
   else if (kind === 'vehicles') { const data = path.join(storage, 'data'); try { for (const f of fs.readdirSync(data)) if (/^(vehicles|dynamic)/i.test(f) || /\.bin$/i.test(f) && /vehicle/i.test(f)) fs.rmSync(path.join(data, f), { force: true }); } catch { /* ignore */ } }
   else throw new Error('Unknown wipe kind.');
   emitRef('console', { source: 'mission', line: `Wiped ${kind} (backup ${bk.name})` });

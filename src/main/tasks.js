@@ -17,6 +17,7 @@ const lastRun = {};
 const TYPES = {
   'wipe-full': 'Full wipe (stop, back up, wipe storage and players, start)',
   'wipe-characters': 'Character wipe (stop, back up, wipe players only, start)',
+  'wipe-world': 'World wipe (stop, back up, wipe bases, vehicles and loot but keep characters, start)',
   message: 'In-game message (RCon say)',
   rcon: 'RCon command',
   backup: 'Backup',
@@ -42,14 +43,14 @@ function remove(id) { return save((settings.load().tasks || []).filter(t => t.id
 async function runTask(t, reason = 'manual') {
   const log = line => emitRef('console', { source: 'tasks', line: `[${t.name}] ${line}` });
   const running = server.status().running;
-  if (t.onlyWhenRunning && !running && !['start', 'backup', 'update', 'command', 'wipe-full', 'wipe-characters'].includes(t.type)) { log(`skipped (${reason}): server not running`); return false; }
+  if (t.onlyWhenRunning && !running && !['start', 'backup', 'update', 'command', 'wipe-full', 'wipe-characters', 'wipe-world'].includes(t.type)) { log(`skipped (${reason}): server not running`); return false; }
   try {
     switch (t.type) {
       case 'message': if (!rcon.status().connected) throw new Error('RCon not connected'); await rcon.say(t.payload); break;
       case 'rcon': if (!rcon.status().connected) throw new Error('RCon not connected'); log('-> ' + (await rcon.command(t.payload) || 'ok')); break;
       case 'backup': await backups.create('task'); break;
-      case 'wipe-full': case 'wipe-characters': {
-        const mission = require('./mission'); const kind = t.type === 'wipe-full' ? 'full' : 'characters';
+      case 'wipe-full': case 'wipe-characters': case 'wipe-world': {
+        const mission = require('./mission'); const kind = t.type === 'wipe-full' ? 'all' : t.type === 'wipe-world' ? 'world' : 'players';
         if (running) { try { if (rcon.status().connected) await rcon.say(`Server wipe in 1 minute (${kind}).`); } catch { /* ignore */ } await new Promise(r => setTimeout(r, 60000)); log('Stopping server for wipe'); await server.stop(); }
         await backups.create('pre-wipe');
         await mission.wipe(kind); log(`${kind} wipe done`);
