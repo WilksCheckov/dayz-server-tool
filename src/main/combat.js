@@ -16,7 +16,7 @@ function player(key, name) { const d = load(); if (!d.players[key]) d.players[ke
 // Thresholds (settings.combatFlags) and what they catch. None of this is proof; it points an admin at a replay or a closer look.
 function flagCfg() { try { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20, ...(require('./settings').load().combatFlags || {}) }; } catch { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20 }; }
 }
-const FLAG_WEIGHT = { 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4 };
+const FLAG_WEIGHT = { 'duplicate item': 4, 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4 };
 function raise(p, reason, detail, ts) {
   p.flags[reason] = (p.flags[reason] || 0) + 1;
   p.flagScore = Object.entries(p.flags).reduce((a, [r, n]) => a + (FLAG_WEIGHT[r] || 1) * Math.min(n, 5), 0);
@@ -128,6 +128,8 @@ function overview() {
 }
 // BattlEye kick lines from the RPT / server console, e.g. "Player Bob kicked by BattlEye: Script Restriction #58"
 const BE_RE = /BattlEye[^:]*:\s*(Script Restriction #\d+|Game Restriction #\d+|Global Ban|Admin Ban|Corrupted Memory #\d+|Corrupted Data #\d+|Bad Player Name|Client not responding|Invalid GUID|Failed to update|Query Timeout)/i;
+// a flag raised by another module (anti-dupe): same scoring, history and alerting as the combat rules
+function flagExternal(key, name, reason, detail, ts = Date.now()) { const p = player(key, name); raise(p, reason, detail, ts); save(); }
 function beKick(line, ts = Date.now()) {
   const m = BE_RE.exec(line || ''); if (!m) return null;
   const reason = m[1];
@@ -167,4 +169,4 @@ function rebuild() {
   save(); return { files: files.length, events: n };
 }
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, record, overview, forPlayer, rebuild, clear, parseAttack, suspicious, beKick };
+module.exports = { init, record, overview, forPlayer, rebuild, clear, parseAttack, suspicious, beKick, flagExternal };

@@ -90,6 +90,7 @@ function applyEvent(ev, d) {
 // Read new bytes from the newest ADM files and apply them.
 function ingest() {
   try { require('./deathlog').ingestGear(); } catch { /* bridge not installed */ }
+  try { require('./anticheat').ingest(); } catch { /* nothing to read */ }
   const d = load();
   const p = settings.paths();
   let files = [];

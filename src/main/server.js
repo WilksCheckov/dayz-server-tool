@@ -42,7 +42,8 @@ function buildArgs(s) {
   if (s.cpuCount > 0) args.push(`-cpuCount=${s.cpuCount}`);
   for (const part of (s.extraParams || '').split(/\s+/)) if (part) args.push(part);
   const modList = mods.modParam(s, false);
-  const serverModList = mods.modParam(s, true);
+  let serverModList = mods.modParam(s, true);
+  try { const ac = require('./anticheat').launchMod(); if (ac && !serverModList.toLowerCase().split(';').includes(ac.toLowerCase())) serverModList = serverModList ? ac + ';' + serverModList : ac; } catch { /* ignore */ }
   if (modList) args.push(`-mod=${modList}`);
   if (serverModList) args.push(`-serverMod=${serverModList}`);
   return args;
@@ -89,6 +90,7 @@ function start() {
   if (!fs.existsSync(p.configPath)) throw new Error(`Config file not found: ${p.configPath}`);
   try { require('./rcon').ensureConfigured(); } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon auto-configuration failed: ' + e.message }); }
   try { require('./deathlog').ensureBridge(); } catch (e) { emitRef('console', { source: 'deathlog', line: 'Bridge script: ' + e.message }); }
+  try { require('./anticheat').ensure(); } catch (e) { emitRef('console', { source: 'anticheat', line: 'Anti-dupe mod: ' + e.message }); }
   fs.mkdirSync(p.profilesDir, { recursive: true });
   clearTimeout(restartTimer); restartTimer = null;
   manualStop = false;

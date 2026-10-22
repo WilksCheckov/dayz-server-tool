@@ -2095,6 +2095,7 @@ async function refreshCombat() {
   const parts = c.parts.slice(0, 12); drawBars($('chParts'), parts.map(p => p[1]), parts.map(p => p[0]), '#ff9f3b', { labelsEvery: 12 });
   const lb = (title, rows) => `<div class="card"><div class="card-title">${title}</div><table class="table"><tbody>${rows.length ? rows.map((r, i) => `<tr><td class="muted">${i + 1}</td><td>${esc(r.name)}</td><td class="right">${esc(String(r.value))}</td></tr>`).join('') : '<tr><td class="muted">No data yet.</td></tr>'}</tbody></table></div>`;
   await refreshSuspicious();
+  await refreshAnticheat();
   $('combatBoards').innerHTML = lb('Headshot rate (20+ hits)', c.headshotRate) + lb('Fewest hits per kill (3+ kills)', c.hitsPerKill) + lb('Most damage dealt', c.damageDealt) + lb('Most damage taken', c.damageTaken) + lb('Headshots', c.headshots) + lb('Longest kills', c.longestKills) + lb('Rivalries (killer → victim)', c.rivalries) + lb('Favourite weapons', c.favouriteWeapons) + lb('Base builders (actions)', c.builders);
 }
 async function refreshSuspicious() {
@@ -2103,6 +2104,25 @@ async function refreshSuspicious() {
   $('combatSuspicious').innerHTML = list.length ? `<table class="table"><thead><tr><th>Player</th><th>Score</th><th>Flags in range</th><th>24 h / 7 d / 30 d</th><th>Last</th><th>Hits</th><th>Head %</th></tr></thead><tbody>${list.map(p => `<tr><td><b>${esc(p.name)}</b></td><td><span class="badge bad">${p.score}</span></td><td>${esc(p.flags)}</td><td class="muted">${p.windows.day} / ${p.windows.week} / ${p.windows.month}</td><td class="muted">${esc(p.last)}${p.lastAt ? ' · ' + fmtDate(p.lastAt) : ''}</td><td>${p.hits}</td><td>${p.headshotPct}%</td></tr>`).join('')}</tbody></table>` : '<div class="muted">Nothing flagged in this range. Flags: headshot rate over 55% after 25+ hits, headshots at 400 m+, 4+ hits on 2+ players within 1.5 s, 3+ kills within 10 s, kills at 900 m+, movement faster than 80 m/s, 4+ logins within 10 min (relog duping), logging out within 20 s of being hit (combat logging), BattlEye kicks. Leads, not proof.</div>';
 }
 $('susRange').onchange = refreshSuspicious;
+async function refreshAnticheat() {
+  let st; try { st = await ipc.invoke('anticheat:status'); } catch { return; }
+  const b = $('acState'); b.className = 'badge ' + (st.enabled && st.upToDate ? 'ok' : st.installed ? 'warn' : '');
+  b.textContent = st.enabled ? (st.upToDate ? `mod on (v${st.version})` : st.installed ? `mod on, v${st.version} installed, v${st.current} available` : 'mod on, not installed yet') : st.installed ? 'mod installed, not loaded' : 'mod off · engine check via bridge';
+  $('acEnabled').checked = !!st.enabled;
+  $('acStats').textContent = st.lastStats ? `mod last reported ${st.lastStats.tracked.toLocaleString()} items tracked, ${st.lastStats.dupes} duplicates (${new Date(st.lastStats.ts).toLocaleTimeString()})` : 'no report from the mod yet';
+  const rows = await ipc.invoke('anticheat:list', { limit: 200 });
+  $('acTable').querySelector('tbody').innerHTML = rows.length ? rows.map(r => `<tr><td class="mono">${esc(fmtDate(r.ts))}</td><td>${r.source === 'mod' ? 'hidden ID' : 'engine ID'}</td><td>${esc(r.cls)}</td><td class="mono">${esc(r.uid)}</td><td>${esc(r.who[0] || '')}</td><td>${esc(r.who[1] || '')}</td></tr>`).join('') : '<tr><td colspan="6" class="muted">No duplicates detected.</td></tr>';
+}
+$('acEnabled').onchange = (e) => run(async () => {
+  if ($('acEnabled').checked) {
+    const ok = await showModal('Enable the anti-dupe mod', '<p>The mod adds a hidden ID to what the server saves for every item. Items saved before it was enabled do not have one, so the first start with the mod needs a <b>persistence wipe</b> (Mission page → Server Wipe). The same applies when you turn it off again.</p><p class="muted">Players need nothing: it is loaded with -serverMod only.</p>', [{ label: 'Enable', value: true, primary: true }, { label: 'Cancel', value: false }]);
+    if (!ok) { $('acEnabled').checked = false; return; }
+  }
+  await ipc.invoke('anticheat:setEnabled', $('acEnabled').checked); refreshAnticheat();
+}, e.target);
+$('btnAcInstall').onclick = (e) => run(async () => { await ipc.invoke('anticheat:install'); toast('Mod written to the server folder'); refreshAnticheat(); }, e.target);
+$('btnAcRemove').onclick = (e) => run(async () => { if (!await showModal('Remove the anti-dupe mod', '<p>Delete the @DayZAdminTools folder from the server? Turn the mod off as well, or it is written again at the next start. Remember the wipe note.</p>', [{ label: 'Remove', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('anticheat:remove'); refreshAnticheat(); }, e.target);
+ipc.on('anticheat:changed', () => { if (document.querySelector('#page-stats.active')) refreshAnticheat(); });
 $('btnCombatRebuild').onclick = (e) => run(async () => { const r = await ipc.invoke('combat:rebuild'); toast(`Read ${r.files} log file(s), ${r.events.toLocaleString()} events`); refreshCombat(); }, e.target);
 $('btnStatsRefresh').onclick = () => run(() => Promise.all([refreshStats(), refreshCombat()]));
 $('btnStatsSummary').onclick = (e) => run(async () => { await ipc.invoke('stats:postSummary'); toast('Summary posted to Discord'); }, e.target);

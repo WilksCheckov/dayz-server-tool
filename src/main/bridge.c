@@ -38,6 +38,50 @@ class DZAT_Bridge
 		if (b) return "true";
 		return "false";
 	}
+	// the engine's own persistent id of an entity ("" when it has none)
+	static string EngineId(EntityAI e)
+	{
+		int b1, b2, b3, b4;
+		e.GetPersistentID(b1, b2, b3, b4);
+		if (b1 == 0 && b2 == 0 && b3 == 0 && b4 == 0) return "";
+		return b1.ToString() + "-" + b2.ToString() + "-" + b3.ToString() + "-" + b4.ToString();
+	}
+	// Engine-id dupe check: the same persistent id carried by two online players at once is a copy
+	static ref map<string, float> s_EngineReported = new map<string, float>();
+	static void CheckEngineIds(array<Man> players)
+	{
+		map<string, string> seen = new map<string, string>();
+		map<string, string> seenClass = new map<string, string>();
+		for (int i = 0; i < players.Count(); i++)
+		{
+			PlayerBase p = PlayerBase.Cast(players[i]);
+			if (!p || !p.GetIdentity()) continue;
+			string holder = "player:" + p.GetIdentity().GetId() + ":" + Esc(p.GetIdentity().GetName());
+			array<EntityAI> items = new array<EntityAI>();
+			p.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, items);
+			for (int j = 0; j < items.Count(); j++)
+			{
+				EntityAI e = items[j];
+				if (!e || e == p) continue;
+				string key = EngineId(e);
+				if (key == "") continue;
+				if (seen.Contains(key) && seen.Get(key) != holder)
+				{
+					float now = GetGame().GetTickTime();
+					if (!s_EngineReported.Contains(key) || now - s_EngineReported.Get(key) >= 600)
+					{
+						s_EngineReported.Set(key, now);
+						Append(DIR + "/dupes.log", Stamp() + "|engine|" + key + "|" + e.GetType() + "|" + seen.Get(key) + "|" + holder);
+					}
+				}
+				else
+				{
+					seen.Set(key, holder);
+					seenClass.Set(key, e.GetType());
+				}
+			}
+		}
+	}
 	static string GearJson(PlayerBase p)
 	{
 		array<EntityAI> items = new array<EntityAI>();
@@ -57,6 +101,7 @@ class DZAT_Bridge
 			if (mag) q = mag.GetAmmoCount();
 			if (buf != "") buf = buf + ",";
 			string one = "{\"c\":\"" + Esc(e.GetType()) + "\",\"p\":\"" + Esc(parent) + "\"";
+			one = one + ",\"e\":\"" + EngineId(e) + "\"";
 			one = one + ",\"q\":" + q.ToString();
 			one = one + ",\"h\":" + e.GetHealth01("", "").ToString() + "}";
 			buf = buf + one;
@@ -232,6 +277,7 @@ class DZAT_Bridge
 				Snapshot(p, id, false);
 			}
 		}
+		CheckEngineIds(players);
 		ProcessCommands(players);
 	}
 }

@@ -55,6 +55,7 @@ const stats = require('./stats');
 const audit = require('./audit');
 const combat = require('./combat');
 const deathlog = require('./deathlog');
+const anticheat = require('./anticheat');
 const zip = require('./zip');
 const economy = require('./economy');
 const mission = require('./mission');
@@ -140,7 +141,7 @@ function emit(channel, data) {
   if (channel === 'alerts:new' && data && (data.kind === 'crash' || data.kind === 'crash-loop')) stats.recordCrash();
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
-  if (channel === 'server:status') { refreshTray(); if (data && !data.running) { try { deathlog.housekeeping(); } catch { /* ignore */ } rcon.stopAuto(); if (rcon.status().connected) rcon.disconnect(true); } if (data && data.running) { rcon.autoConnectLoop(); servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
+  if (channel === 'server:status') { refreshTray(); if (data && !data.running) { try { deathlog.housekeeping(); } catch { /* ignore */ } try { anticheat.housekeeping(); } catch { /* ignore */ } rcon.stopAuto(); if (rcon.status().connected) rcon.disconnect(true); } if (data && data.running) { rcon.autoConnectLoop(); servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
 }
 
 function createWindow() {
@@ -366,6 +367,11 @@ handle('stats:postSummary', () => stats.postSummaryNow());
 handle('audit:list', (o) => audit.list(o || {}));
 handle('combat:overview', () => combat.overview());
 handle('deathlog:list', (q) => deathlog.list(q || {}));
+handle('anticheat:status', () => anticheat.status());
+handle('anticheat:setEnabled', (on) => anticheat.setEnabled(!!on));
+handle('anticheat:install', () => anticheat.install());
+handle('anticheat:remove', () => anticheat.remove());
+handle('anticheat:list', (q) => anticheat.list(q || {}));
 handle('deathlog:get', (id) => deathlog.get(id));
 handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
 handle('deathlog:stats', () => deathlog.stats());
@@ -551,6 +557,7 @@ app.whenReady().then(() => {
   timed('audit', () => audit.init(emit));
   timed('combat', () => combat.init(emit));
   timed('deathlog', () => deathlog.init(emit));
+  timed('anticheat', () => anticheat.init(emit));
   createWindow();
 });
 
