@@ -716,7 +716,7 @@ $('btnImportMods').onclick = (e) => run(async () => {
 }, e.target);
 document.querySelectorAll('.ll-copy').forEach(b => b.onclick = () => { const t = $(b.dataset.for).textContent; if (t.startsWith('-')) { navigator.clipboard.writeText(t); toast('Copied'); } else toast('Nothing to copy'); });
 ipc.on('console', (m) => {
-  if (!m || m.source !== 'preflight' || window._rtOffered) return;
+  if (!m || m.source !== 'preflight' || window._rtOffered || $('autoRuntimes').checked) return;
   const line = m.line || '';
   const kind = /Visual C\+\+ 2015-2022 x64 runtime is not installed|from the Microsoft Visual C\+\+/.test(line) ? 'vc' : /DirectX End-User Runtime/.test(line) ? 'dx' : null;
   if (!kind) return;
@@ -728,6 +728,8 @@ ipc.on('console', (m) => {
     window._rtOffered = false;
   }, 300);
 });
+ipc.invoke('settings:get').then(s => { $('autoRuntimes').checked = s.autoRuntimes !== false; }).catch(() => {});
+$('autoRuntimes').onchange = () => saveSettings({ autoRuntimes: $('autoRuntimes').checked });
 $('btnPreflight').onclick = (e) => run(async () => {
   const r = await ipc.invoke('server:preflight');
   const li = (items, cls) => items.map(t => `<li class="${cls}">${esc(t)}</li>`).join('');

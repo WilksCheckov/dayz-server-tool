@@ -90,6 +90,22 @@ function start() {
   try {
     const pf = require('./preflight').checks();
     for (const w of pf.warn) emitRef('console', { source: 'preflight', line: 'Check: ' + w });
+    const pre = require('./preflight');
+    const onlyRuntimes = pf.fixes && pf.fixes.length && pf.error.every(e => /Visual C\+\+|DirectX/.test(e));
+    if (pf.fixes && pf.fixes.length && s.autoRuntimes !== false && (onlyRuntimes || !pf.error.length)) {
+      if (pre.isInstalling()) return { ...status(), installingRuntimes: true };
+      const names = pf.fixes.map(k => k === 'vc' ? 'Visual C++ 2015-2022 x64' : 'DirectX June 2010').join(' and ');
+      emitRef('console', { source: 'preflight', line: `Installing the missing ${names} runtime${pf.fixes.length > 1 ? 's' : ''} automatically, then starting the server (Windows asks for permission)…` });
+      pre.installMissing(pf.fixes, emitRef).then(() => {
+        const again = pre.checks();
+        if (again.fixes && again.fixes.length) { emitRef('console', { source: 'preflight', line: 'The runtime installers finished but these are still missing: ' + again.error.filter(e => /Visual C\+\+|DirectX/.test(e)).join(' ') + ' Reboot once, then start the server.' }); try { require('./alerts').alert('server-critical', 'Server not started: runtime still missing after install', 'Reboot the PC once, then start the server.'); } catch { /* ignore */ } return; }
+        emitRef('console', { source: 'preflight', line: 'Runtimes installed; starting the server.' }); try { start(); } catch (e) { emitRef('console', { source: 'server', line: e.message }); }
+      }).catch(e => {
+        emitRef('console', { source: 'preflight', line: 'Runtime install failed: ' + e.message + '. Install it by hand or use Launch → Check before start.' });
+        try { require('./alerts').alert('server-critical', 'Server not started: runtime install failed', e.message); } catch { /* ignore */ }
+      });
+      return { ...status(), installingRuntimes: true };
+    }
     if (pf.error.length) { for (const e of pf.error) emitRef('console', { source: 'preflight', line: 'Problem: ' + e }); throw new Error('Not started: ' + pf.error[0] + (pf.error.length > 1 ? ` (+${pf.error.length - 1} more, see the console)` : '')); }
   } catch (e) { if (/^Not started:/.test(e.message)) throw e; }
   try { require('./rcon').ensureConfigured(); } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon auto-configuration failed: ' + e.message }); }

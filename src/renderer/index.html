@@ -204,7 +204,7 @@
 
         <!-- LAUNCH -->
         <section class="page" id="page-launch">
-          <div class="page-toolbar"><span class="muted">Launch parameters and the generated command line. The tool checks the install, runtime, config, mission, mods and ports before every start.</span><span class="grow"></span><button class="btn small" id="btnPreflight" title="Run the same checks now">Check before start</button></div>
+          <div class="page-toolbar"><span class="muted">Launch parameters and the generated command line. The tool checks the install, runtime, config, mission, mods and ports before every start.</span><span class="grow"></span><label class="check" title="When the server needs a Windows runtime that is missing (Visual C++ 2015-2022 x64, DirectX June 2010), download it from Microsoft and install it before starting. Windows asks for permission once per runtime."><input type="checkbox" id="autoRuntimes"> Install missing runtimes automatically</label><button class="btn small" id="btnPreflight" title="Run the same checks now">Check before start</button></div>
           <div class="grid-2">
             <div class="card">
               <div class="card-title">Launch parameters</div>

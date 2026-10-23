@@ -570,6 +570,12 @@ app.whenReady().then(() => {
   timed('combat', () => combat.init(emit));
   timed('deathlog', () => deathlog.init(emit));
   timed('anticheat', () => anticheat.init(emit));
+  if (app.isPackaged && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {
+    require('./preflight').ensureRuntimes(emit).then(r => {
+      if (r.action === 'ok' || r.action === 'installed') { settings.save({ runtimesReady: true }); if (r.action === 'installed') emit('console', { source: 'preflight', line: 'First-run setup done: the runtimes the server needs are installed.' }); }
+      else if (r.action === 'incomplete') emit('console', { source: 'preflight', line: 'First-run setup: some runtimes still show as missing; a reboot may be needed. The tool checks again at the next start.' });
+    }).catch(e => emit('console', { source: 'preflight', line: 'First-run runtime setup failed: ' + e.message + '. It is retried at the next start of the tool, and before the server starts.' }));
+  }, 4000);
   createWindow();
 });
 

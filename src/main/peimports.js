@@ -38,6 +38,13 @@ function missing(exe) {
   }
   return out;
 }
+// which installable runtime provides a DLL: 'vc', 'dx', or null when the tool cannot install it
+function fixFor(dll) {
+  const n = String(dll).toLowerCase();
+  if (/^(vcruntime|msvcp|concrt|vccorlib)/.test(n)) return 'vc';
+  if (/^(x3daudio|xapofx|xinput1_[1-3]|d3dx|d3dcompiler_4[0-3]|xaudio2_[0-7])/.test(n)) return 'dx';
+  return null;
+}
 // what package provides a DLL, for the fix text
 function provider(dll) {
   const n = dll.toLowerCase();
@@ -45,6 +52,7 @@ function provider(dll) {
   if (/^(x3daudio|xapofx|xinput1_[1-3]|d3dx|d3dcompiler_4[0-3]|xaudio2_[0-7])/.test(n)) return 'the DirectX End-User Runtime (dxwebsetup / directx_Jun2010_redist)';
   if (/^(steam_api|steamclient|tier0|vstdlib)/.test(n)) return 'the server files themselves (validate the install)';
   if (/^beserver/.test(n)) return 'BattlEye (battleye\\BEServer_x64.dll)';
+  if (/^(hid|ws2_32|crypt32|wldap32|dbghelp|shlwapi|bcrypt|user32|gdi32|shell32|ole32|advapi32|kernel32)\.dll$/.test(n)) return 'Windows itself (this edition is missing a component; Windows Server Core lacks some desktop DLLs, use the Desktop Experience edition)';
   return 'an unknown package';
 }
-module.exports = { imports, missing, provider };
+module.exports = { imports, missing, provider, fixFor };

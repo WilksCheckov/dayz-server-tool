@@ -18,7 +18,8 @@ function missionName(cfgText) { const m = String(cfgText || '').match(/^\s*templ
 // Returns { ok: [], warn: [], error: [] } of plain-language findings.
 function checks() {
   const s = settings.load(); const p = settings.paths(s);
-  const out = { ok: [], warn: [], error: [] };
+  const out = { ok: [], warn: [], error: [], fixes: [] };
+  const fix = k => { if (k && !out.fixes.includes(k)) out.fixes.push(k); };
   const err = t => out.error.push(t), warn = t => out.warn.push(t), ok = t => out.ok.push(t);
   // install
   if (!fs.existsSync(p.serverExe)) err('DayZServer_x64.exe is missing: install or validate the server on the Installation page.');
@@ -31,14 +32,14 @@ function checks() {
   if (fs.existsSync(p.serverExe)) {
     try {
       const pe = require('./peimports'); const miss = pe.missing(p.serverExe);
-      for (const dll of miss) err(`${dll} is missing on this PC; the server exits at once without it (exit code 0xC0000135). It comes from ${pe.provider(dll)}.`);
+      for (const dll of miss) { err(`${dll} is missing on this PC; the server exits at once without it (exit code 0xC0000135). It comes from ${pe.provider(dll)}.`); fix(pe.fixFor(dll)); }
       if (!miss.length) ok('Every DLL the server imports is present');
     } catch { /* unreadable exe: the size check above covers it */ }
   }
   // runtime the server needs (DayZ links the 2015-2022 x64 C++ runtime)
   if (process.platform === 'win32') {
     if (regInstalled('HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64') || regInstalled('HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64')) ok('Visual C++ 2015-2022 x64 runtime installed');
-    else err('The Microsoft Visual C++ 2015-2022 x64 runtime is not installed; the server exits at once without it (exit code 0xC0000135). Install vc_redist.x64.exe from Microsoft, then start again.');
+    else { err('The Microsoft Visual C++ 2015-2022 x64 runtime is not installed; the server exits at once without it (exit code 0xC0000135). Install vc_redist.x64.exe from Microsoft, then start again.'); fix('vc'); }
   }
   // config and mission
   let cfg = '';
@@ -127,7 +128,7 @@ async function installVcRedist(emit = () => {}) {
   emit('console', { source: 'preflight', line: 'Running the runtime installer (Windows asks for permission)…' });
   await new Promise((resolve, reject) => {
     // Start-Process -Verb RunAs -Wait runs it elevated and waits for it to finish
-    const ps = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Start-Process -FilePath '${file.replace(/'/g, "''")}' -ArgumentList '/install','/passive','/norestart' -Verb RunAs -Wait -PassThru; exit $p.ExitCode`], { windowsHide: true });
+    const ps = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Start-Process -FilePath '${file.replace(/'/g, "''")}' -ArgumentList '/install','/quiet','/norestart' -Verb RunAs -Wait -PassThru; exit $p.ExitCode`], { windowsHide: true });
     let err = ''; ps.stderr.on('data', d => err += d);
     ps.on('exit', code => (code === 0 || code === 3010 || code === 1638) ? resolve(code) : reject(new Error(code === 1 && /canceled|cancelled|denied/i.test(err) ? 'Windows permission was declined.' : `Installer exit code ${code}${err ? ': ' + err.trim().slice(0, 200) : ''}`)));
     ps.on('error', reject);
@@ -167,4 +168,30 @@ async function installDirectX(emit = () => {}) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   return { installed: okNow, action: 'installed' };
 }
-module.exports = { checks, exitVerdict, installVcRedist, vcInstalled, installDirectX, dxInstalled };
+// Install every runtime the checks found missing, one after the other (each asks Windows for permission once).
+let installing = null;
+function installMissing(fixes, emit = () => {}) {
+  if (installing) return installing;
+  const order = ['vc', 'dx'].filter(k => fixes.includes(k));
+  installing = (async () => {
+    const done = [];
+    try {
+      for (const k of order) { const r = k === 'vc' ? await module.exports.installVcRedist(emit) : await module.exports.installDirectX(emit); done.push({ k, installed: r.installed }); }
+      return done;
+    } finally { installing = null; }
+  })();
+  return installing;
+}
+function isInstalling() { return !!installing; }
+function missingRuntimes() { const m = []; if (!module.exports.vcInstalled()) m.push('vc'); if (!module.exports.dxInstalled()) m.push('dx'); return m; }
+async function ensureRuntimes(emit = () => {}) {
+  if (process.platform !== 'win32') return { action: 'skip' };
+  const need = missingRuntimes();
+  if (!need.length) return { action: 'ok' };
+  const names = need.map(k => k === 'vc' ? 'Visual C++ 2015-2022 x64' : 'DirectX June 2010').join(' and ');
+  emit('console', { source: 'preflight', line: `First-run setup: installing the ${names} runtime${need.length > 1 ? 's' : ''} the DayZ server needs (Windows asks for permission)…` });
+  const done = await installMissing(need, emit);
+  const still = missingRuntimes();
+  return { action: still.length ? 'incomplete' : 'installed', done, still };
+}
+module.exports = { checks, exitVerdict, installVcRedist, vcInstalled, installDirectX, dxInstalled, installMissing, isInstalling, missingRuntimes, ensureRuntimes };
