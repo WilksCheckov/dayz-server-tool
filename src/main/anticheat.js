@@ -9,7 +9,7 @@ const { app } = require('electron');
 const settings = require('./settings');
 
 const MOD_FOLDER = '@DayZAdminTools';
-const MOD_VERSION = 1;
+const MOD_VERSION = 2;
 let db = null, saveTimer = null, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'anticheat.json');
 function load() { if (db) return db; try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = null; } db = { dupes: [], nextId: 1, log: { offset: 0, rest: '' }, lastStats: null, ...(db || {}) }; return db; }
@@ -104,5 +104,30 @@ function housekeeping() {
   const f = path.join(settings.paths().profilesDir, 'DayZAdminTools', 'dupes.log');
   try { if (fs.statSync(f).size > 4 * 1024 * 1024) { fs.unlinkSync(f); load().log = { offset: 0, rest: '' }; save(); } } catch { /* none */ }
 }
+// ---------- live loot positions written by the mod (profiles/DayZAdminTools/loot.txt) ----------
+let lootCache = { mtime: 0, data: null };
+function liveLoot() {
+  const f = path.join(settings.paths().profilesDir, 'DayZAdminTools', 'loot.txt');
+  let st; try { st = fs.statSync(f); } catch { return lootCache.data || { available: false, reason: cfg().mod ? 'The mod has not written item positions yet (the first export comes 2 minutes after the server is up, then every 5 minutes).' : 'Needs the anti-dupe server mod (Statistics → Dupe detection): it writes where every item is every 5 minutes.' }; }
+  if (lootCache.data && lootCache.mtime === st.mtimeMs) return lootCache.data;
+  const text = fs.readFileSync(f, 'utf8'); const lines = text.split(/\r?\n/);
+  const head = (lines[0] || '').split('|'); const endLine = lines.filter(l => l.startsWith('#end|')).pop();
+  if (head[0] !== '#begin' || !endLine) return lootCache.data || { available: false, reason: 'The mod is writing item positions right now; try again in a moment.' };
+  const classes = [], idx = new Map(), places = ['-'], pidx = new Map([['-', 0]]); const items = [];
+  for (const l of lines) {
+    if (!l || l[0] === '#') continue;
+    const p = l.split('|'); if (p.length < 4) continue;
+    let ci = idx.get(p[0]); if (ci === undefined) { ci = classes.length; classes.push(p[0]); idx.set(p[0], ci); }
+    let pi = pidx.get(p[3]); if (pi === undefined) { pi = places.length; places.push(p[3]); pidx.set(p[3], pi); }
+    items.push([ci, Number(p[1]) || 0, Number(p[2]) || 0, pi]);
+  }
+  const m = String(head[1] || '').match(/(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+  const at = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : st.mtimeMs;
+  // category of each class from the mission's types (lower-case match, DayZ class names are case-insensitive)
+  let cats = {}; try { for (const it of require('./lootmap').items()) cats[it.name.toLowerCase()] = (it.category && it.category[0]) || ''; } catch { cats = {}; }
+  const classCat = classes.map(c => cats[c.toLowerCase()] || '');
+  lootCache = { mtime: st.mtimeMs, data: { available: true, at, count: items.length, classes, classCat, places, items } };
+  return lootCache.data;
+}
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, status, install, remove, setEnabled, ensure, launchMod, ingest, list, housekeeping, MOD_FOLDER };
+module.exports = { liveLoot, init, status, install, remove, setEnabled, ensure, launchMod, ingest, list, housekeeping, MOD_FOLDER };

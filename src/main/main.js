@@ -383,6 +383,7 @@ handle('anticheat:setEnabled', (on) => anticheat.setEnabled(!!on));
 handle('anticheat:install', () => anticheat.install());
 handle('anticheat:remove', () => anticheat.remove());
 handle('anticheat:list', (q) => anticheat.list(q || {}));
+handle('anticheat:liveLoot', () => anticheat.liveLoot());
 handle('deathlog:get', (id) => deathlog.get(id));
 handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
 handle('deathlog:stats', () => deathlog.stats());

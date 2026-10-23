@@ -33,6 +33,7 @@ async function drawMap() {
   ctx.restore();
   await drawOverlay(ctx, c);
   drawLoot(ctx, c);
+  drawLiveLoot(ctx, c);
   // players
   if (!mapState.players.at || Date.now() - mapState.players.at > 4000) { try { const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 }); mapState.players = Object.assign(rows.filter(r => r.lastPos), { at: Date.now() }); } catch { /* ignore */ } }
   const pts = mapState.players.filter(r => !$('mapOnlineOnly').checked || r.online);
@@ -68,7 +69,7 @@ function drawHeatGrid(ctx, c, N, cells, max, alpha) {
 function binEvents(events, N, size, kind) { const grid = new Map(); let max = 0; for (const e of events) { if (kind !== null && e[3] !== kind) continue; const gx = Math.min(N - 1, Math.max(0, Math.floor(e[1] / size * N))), gz = Math.min(N - 1, Math.max(0, Math.floor(e[2] / size * N))); const i = gz * N + gx; const v = (grid.get(i) || 0) + 1; grid.set(i, v); if (v > max) max = v; } return { cells: [...grid.entries()], max }; }
 async function drawOverlay(ctx, c) {
   const mode = $('mapOverlay').value; const info = $('mapOverlayInfo');
-  if (mode === 'none' || mode === 'loot') { if (mode === 'none') info.textContent = ''; return; }
+  if (mode === 'none' || mode === 'loot' || mode === 'liveloot') { if (mode === 'none') info.textContent = ''; return; }
   const h = await heatData(); const alpha = Number($('mapOverlayAlpha').value) / 100;
   if (!h || (!h.events.length && !h.deaths.length)) { info.textContent = 'No data in this time range. It fills from the admin log (-adminlog) while players play; "Rebuild from all logs" reads older logs.'; return; }
   const N = h.N, size = h.size;
@@ -83,6 +84,45 @@ async function drawOverlay(ctx, c) {
     const order = Object.entries(h.causes).sort((a, b) => b[1] - a[1]);
     info.innerHTML = `<span class="map-legend">${order.map(([k, n]) => `<span style="--c:${CAUSE_COLORS[k] || CAUSE_COLORS.unknown}">${esc(CAUSE_LABELS[k] || k)} ${n}</span>`).join('')}</span>`;
   }
+}
+
+// ----- actual loot now (positions exported by the anti-dupe mod) -----
+let liveLoot = null, liveLootAt = 0, liveLootPick = '';
+async function loadLiveLoot(force) {
+  if (!force && liveLoot && Date.now() - liveLootAt < 30000) return liveLoot;
+  try { liveLoot = await ipc.invoke('anticheat:liveLoot'); liveLootAt = Date.now(); } catch (e) { toast(e.message, true); }
+  return liveLoot;
+}
+function liveLootFiltered() {
+  const L = liveLoot; if (!L || !L.available) return [];
+  const q = $('liveLootSearch').value.trim().toLowerCase(); const cat = $('liveLootCat').value; const ground = $('liveLootGround').checked;
+  return L.items.filter(it => (!liveLootPick || L.classes[it[0]] === liveLootPick) && (!q || L.classes[it[0]].toLowerCase().includes(q)) && (!cat || L.classCat[it[0]] === cat) && (!ground || it[3] === 0));
+}
+function renderLiveLootList() {
+  const L = liveLoot; const box = $('liveLootList');
+  if (!L || !L.available) { box.innerHTML = `<div class="muted" style="padding:6px">${esc((L && L.reason) || 'No data yet.')}</div>`; $('liveLootWhen').textContent = ''; return; }
+  $('liveLootWhen').textContent = 'as of ' + new Date(L.at).toLocaleTimeString();
+  const cats = [...new Set(L.classCat.filter(Boolean))].sort(); const sel = $('liveLootCat');
+  if (sel.options.length !== cats.length + 1) { const cur = sel.value; sel.innerHTML = '<option value="">All types</option>' + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join(''); sel.value = cur; }
+  const q = $('liveLootSearch').value.trim().toLowerCase(); const cat = $('liveLootCat').value; const ground = $('liveLootGround').checked;
+  const counts = new Map(); for (const it of L.items) { if (ground && it[3] !== 0) continue; const n = L.classes[it[0]]; if (q && !n.toLowerCase().includes(q)) continue; if (cat && L.classCat[it[0]] !== cat) continue; counts.set(n, (counts.get(n) || 0) + 1); }
+  const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 300);
+  box.innerHTML = `<div class="ip-item ${liveLootPick ? '' : 'on'}" data-name=""><span>All matching items</span><span class="muted">${[...counts.values()].reduce((a, b) => a + b, 0).toLocaleString()}</span></div>` + rows.map(([n, k]) => `<div class="ip-item ${liveLootPick === n ? 'on' : ''}" data-name="${esc(n)}"><span>${esc(n)}</span><span class="muted">${k.toLocaleString()}</span></div>`).join('');
+}
+function drawLiveLoot(ctx, c) {
+  if ($('mapOverlay').value !== 'liveloot') return;
+  const info = $('mapOverlayInfo'); const L = liveLoot;
+  if (!L || !L.available) { info.textContent = (L && L.reason) || 'Loading…'; return; }
+  const pts = liveLootFiltered(); const alpha = Number($('mapOverlayAlpha').value) / 100; const size = worldSize();
+  if (mapState.view.scale >= 3 || pts.length <= 400) {
+    for (const it of pts) { const [x, y] = toScreen(c, it[1], it[2]); ctx.beginPath(); ctx.arc(x, y, it[3] === 0 ? 3 : 2.5, 0, Math.PI * 2); ctx.fillStyle = it[3] === 0 ? `rgba(255,200,60,${0.5 + 0.5 * alpha})` : `rgba(120,190,255,${0.5 + 0.5 * alpha})`; ctx.fill(); }
+  } else {
+    const N = 128; const grid = new Map(); let max = 0;
+    for (const it of pts) { const gx = Math.min(N - 1, Math.max(0, Math.floor(it[1] / size * N))), gz = Math.min(N - 1, Math.max(0, Math.floor(it[2] / size * N))); const i = gz * N + gx; const v = (grid.get(i) || 0) + 1; grid.set(i, v); if (v > max) max = v; }
+    drawHeatGrid(ctx, c, N, grid, max, alpha);
+  }
+  const ground = pts.filter(it => it[3] === 0).length;
+  info.textContent = `${pts.length.toLocaleString()} item(s)${liveLootPick ? ' of ' + liveLootPick : ''}: ${ground.toLocaleString()} on the ground, ${(pts.length - ground).toLocaleString()} in containers, tents or vehicles · as of ${new Date(L.at).toLocaleTimeString()} (updates every 5 min) · zoom in for single items (yellow = ground, blue = stored)`;
 }
 
 // ----- loot spawn overlay -----
@@ -129,7 +169,11 @@ function mapInit() {
     if (mapState.measure) { mapState.measure = null; scheduleDraw(); }
   });
   c.addEventListener('dblclick', () => { mapState.view = { scale: 1, ox: 0, oy: 0 }; scheduleDraw(); });
-  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; $('lootPanel').hidden = !loot; if (loot) { await loadLootItems(); renderLootList(); } scheduleDraw(); };
+  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; const live = $('mapOverlay').value === 'liveloot'; $('lootPanel').hidden = !loot; $('liveLootPanel').hidden = !live; if (loot) { await loadLootItems(); renderLootList(); } if (live) { await loadLiveLoot(true); renderLiveLootList(); } scheduleDraw(); };
+  const liveRefresh = () => { renderLiveLootList(); scheduleDraw(); };
+  $('liveLootSearch').addEventListener('input', () => { liveLootPick = ''; liveRefresh(); }); $('liveLootCat').onchange = () => { liveLootPick = ''; liveRefresh(); }; $('liveLootGround').onchange = liveRefresh;
+  $('liveLootList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; liveLootPick = it.dataset.name || ''; liveRefresh(); });
+  setInterval(async () => { if ($('mapOverlay').value === 'liveloot' && document.querySelector('#page-map.active')) { await loadLiveLoot(true); liveRefresh(); } }, 60000);
   $('mapOverlayAlpha').oninput = scheduleDraw; $('mapRange').onchange = () => { heatCache.at = 0; scheduleDraw(); };
   $('lootSearch').addEventListener('input', renderLootList);
   $('lootList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; pickLootItem(it.dataset.name); renderLootList(); });

@@ -3,7 +3,9 @@
 // items sharing one ID the moment the copy appears and writes it to $profile:DayZAdminTools/dupes.log.
 class DZAT_Dupe
 {
-	static const int VERSION = 1;
+	static const int VERSION = 2;
+	static int s_ExportEvery = 5;
+	static int s_ScanCount = 0;
 	static const string DIR = "$profile:DayZAdminTools";
 	static ref map<string, ref array<EntityAI>> s_ByUid = new map<string, ref array<EntityAI>>();
 	static ref map<string, float> s_Reported = new map<string, float>();
@@ -163,6 +165,54 @@ class DZAT_Dupe
 		}
 		for (int k = 0; k < empty.Count(); k++) s_ByUid.Remove(empty[k]);
 		Append(DIR + "/dupes.log", Stamp() + "|stats|" + tracked.ToString() + "|" + s_Dupes.ToString() + "|v" + VERSION.ToString());
+		s_ScanCount++;
+		// first export 2 minutes after the first item appeared, then every s_ExportEvery minutes
+		if (s_ScanCount == 2 || s_ScanCount % s_ExportEvery == 0) ExportLoot();
+	}
+	// Writes loot.txt: one line per item not carried by a player ("class|x|z|container class or -"), framed by
+	// #begin and #end lines so the tool never reads a half-written file.
+	static void ExportLoot()
+	{
+		if (!s_DirReady)
+		{
+			MakeDirectory(DIR);
+			s_DirReady = true;
+		}
+		FileHandle fh = OpenFile(DIR + "/loot.txt", FileMode.WRITE);
+		if (fh == 0) return;
+		FPrintln(fh, "#begin|" + Stamp() + "|v" + VERSION.ToString());
+		int n = 0;
+		string chunk = "";
+		int inChunk = 0;
+		for (int i = 0; i < s_ByUid.Count(); i++)
+		{
+			array<EntityAI> list = s_ByUid.GetElement(i);
+			for (int j = 0; j < list.Count(); j++)
+			{
+				EntityAI e = list[j];
+				if (!e) continue;
+				if (e.GetHierarchyRootPlayer()) continue;
+				EntityAI root = e.GetHierarchyRoot();
+				if (!root) root = e;
+				vector pos = root.GetPosition();
+				string where = "-";
+				if (root != e) where = root.GetType();
+				string line = e.GetType() + "|" + Math.Round(pos[0]).ToString() + "|" + Math.Round(pos[2]).ToString() + "|" + where;
+				if (inChunk > 0) chunk = chunk + "\n";
+				chunk = chunk + line;
+				inChunk++;
+				n++;
+				if (inChunk >= 100)
+				{
+					FPrintln(fh, chunk);
+					chunk = "";
+					inChunk = 0;
+				}
+			}
+		}
+		if (inChunk > 0) FPrintln(fh, chunk);
+		FPrintln(fh, "#end|" + n.ToString());
+		CloseFile(fh);
 	}
 }
 
