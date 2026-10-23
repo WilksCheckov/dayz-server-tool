@@ -2069,10 +2069,39 @@ async function refreshNetwork() {
   $('netRules').querySelector('tbody').innerHTML = r.rules.map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.proto)}</td><td class="mono">${esc(x.port)}</td><td>${x.enabled ? '<span class="badge ok">on</span>' : '<span class="badge warn">off</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No rules from this tool yet.</td></tr>';
 }
 $('btnNetRefresh').onclick = () => run(refreshNetwork);
-async function loadLogCleanup() { try { const c = await ipc.invoke('logs:cleanupCfg'); $('logCleanEnabled').checked = !!c.enabled; $('logCleanDays').value = c.keepDays; } catch { /* ignore */ } }
-const saveLogCleanup = () => saveSettings({ logCleanup: { enabled: $('logCleanEnabled').checked, keepDays: Number($('logCleanDays').value) || 14 } }).then(() => toast('Log cleanup ' + ($('logCleanEnabled').checked ? 'on' : 'off')));
+async function loadLogCleanup() { try { const c = await ipc.invoke('logs:cleanupCfg'); state.logClean = c; $('logCleanEnabled').checked = !!c.enabled; $('logCleanDays').value = c.keepDays; } catch { /* ignore */ } }
+// the toolbar keeps the switch and default age; the dialog holds the rest, so both save the whole config
+const logCleanCfg = (over = {}) => ({ ...(state.logClean || {}), enabled: $('logCleanEnabled').checked, keepDays: Number($('logCleanDays').value) || 14, ...over });
+const saveLogCleanup = () => ipc.invoke('logs:saveCleanupCfg', logCleanCfg()).then(() => loadLogCleanup()).then(() => toast('Log cleanup ' + ($('logCleanEnabled').checked ? 'on' : 'off')));
 $('logCleanEnabled').onchange = saveLogCleanup; $('logCleanDays').onchange = saveLogCleanup;
 $('btnLogCleanNow').onclick = (e) => run(async () => { const r = await ipc.invoke('logs:cleanup', { keepDays: Number($('logCleanDays').value) || 14 }); toast(`Removed ${r.removed} file(s), ${(r.bytes / 1048576).toFixed(1)} MB`); refreshLogList(); }, e.target);
+function logCleanRows(p) {
+  const mb = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+  return p.rules.map((r, i) => `<tr data-i="${i}"><td><input type="checkbox" class="lc-on" ${r.on ? 'checked' : ''}></td>
+    <td>${r.type === 'folder' ? `<code>${esc(r.label)}</code>${r.exists ? '' : ' <span class="muted">(not there now)</span>'}` : esc(r.label)}</td>
+    <td>${r.type === 'folder' ? `<input class="input lc-pat" style="width:110px" value="${esc(r.pattern)}" title="File names to delete, separated by ;  e.g. *.log;*_old.txt. Patterns that could match settings or saves (.json, .xml, .cfg, *) are ignored.">` : ''}</td>
+    <td><input class="input lc-days" type="number" min="1" placeholder="${p.keepDays}" value="${r.ownDays || ''}" title="Keep this many days; empty uses the default"></td>
+    <td class="muted">${r.files} · ${mb(r.bytes)}</td><td>${r.old ? `${r.old} · ${mb(r.oldBytes)}` : '<span class="muted">none</span>'}</td></tr>`).join('');
+}
+$('btnLogCleanWhat').onclick = (e) => run(async () => {
+  let p = await ipc.invoke('logs:cleanupPreview', { keepDays: Number($('logCleanDays').value) || 14 });
+  const read = () => {
+    const kinds = {}, folders = { ...((state.logClean || {}).folders || {}) };
+    document.querySelectorAll('#lcTable tbody tr').forEach(tr => { const r = p.rules[Number(tr.dataset.i)]; const on = tr.querySelector('.lc-on').checked, days = Number(tr.querySelector('.lc-days').value) || null;
+      if (r.type === 'kind') kinds[r.key] = { on, days }; else folders[r.key] = { on, days, pattern: tr.querySelector('.lc-pat').value }; });
+    const extra = ($('lcAdd').value || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (extra && !folders[extra]) folders[extra] = { on: true, days: null, pattern: '*.log' };
+    return logCleanCfg({ kinds, folders });
+  };
+  const body = `<p class="muted">Logs older than their age are deleted when the server stops (if automatic cleanup is on) or with Clean now. The newest file of each row is always kept. Only files matching a folder's pattern are touched; folders that hold this tool's data, BattlEye, player storage and settings files are never offered.</p>
+    <div class="table-wrap" style="max-height:360px"><table class="table" id="lcTable"><thead><tr><th></th><th>Logs</th><th>Pattern</th><th>Keep days</th><th>Now</th><th>Would delete</th></tr></thead><tbody>${logCleanRows(p)}</tbody></table></div>
+    <label class="field mt">Add a mod log folder (inside the profiles folder) <input id="lcAdd" class="input" placeholder="e.g. ExpansionMod/Logs"></label>`;
+  const ok = await showModal('What to clean', body, [{ label: 'Save', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  if (!ok) return;
+  p = await ipc.invoke('logs:saveCleanupCfg', read());
+  await loadLogCleanup();
+  const on = p.rules.filter(r => r.on); toast(`Cleaning ${on.length} kind(s) of logs; ${on.reduce((n, r) => n + r.old, 0)} file(s) are old enough now`);
+}, e.target);
 loadLogCleanup();
 $('btnNetAddRules').onclick = (e) => run(async () => { toast('Windows will ask for permission…'); await ipc.invoke('network:addRules'); toast('Firewall rules added'); refreshNetwork(); }, e.target);
 $('btnNetRemoveRules').onclick = (e) => run(async () => { await ipc.invoke('network:removeRules'); toast('Rules removed'); refreshNetwork(); }, e.target);

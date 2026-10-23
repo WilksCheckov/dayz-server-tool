@@ -509,3 +509,8 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 
 .keys-card { flex: none; }
 .keys-card code { font-size: 12px; }
+.modal-box:has(#lcTable) { width: 880px; }
+#lcTable td { white-space: nowrap; padding: 3px 8px; }
+#lcTable .input { padding: 3px 6px; margin: 0; }
+#lcTable .lc-days { width: 64px; }
+#lcTable .input::placeholder { color: var(--muted); opacity: .6; }

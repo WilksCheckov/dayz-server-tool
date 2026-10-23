@@ -530,7 +530,8 @@
           <div class="page-toolbar">
             <label class="check"><input type="checkbox" id="logFollow" checked> Follow (refresh every 3s)</label>
             <span class="grow"></span>
-            <label class="check" title="Delete RPT / ADM / log / dump files older than this many days after each server start. The newest file of each kind is always kept."><input type="checkbox" id="logCleanEnabled"> Delete logs older than</label><input id="logCleanDays" class="input short" type="number" min="1" value="14"><span class="muted">days</span>
+            <label class="check" title="When the server stops, delete logs older than this many days. Choose which logs (including mod log folders) with What to clean. The newest file of each kind is always kept."><input type="checkbox" id="logCleanEnabled"> Delete logs older than</label><input id="logCleanDays" class="input short" type="number" min="1" value="14"><span class="muted">days</span>
+            <button class="btn" id="btnLogCleanWhat" title="Choose which server and mod logs are cleaned, with their own ages">What to clean…</button>
             <button class="btn" id="btnLogCleanNow" title="Delete old logs now">Clean now</button>
             <button class="btn" id="btnRefreshLogs">Refresh list</button>
             <button class="btn" id="btnOpenProfiles">Open folder</button>

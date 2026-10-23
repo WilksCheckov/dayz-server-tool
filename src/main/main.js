@@ -200,7 +200,7 @@ function createWindow() {
 }
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
-const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:cleanup)$/;
+const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:(cleanup|saveCleanupCfg))$/;
 function handle(channel, fn) {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
@@ -442,6 +442,8 @@ handle('network:upnpUnmap', (names) => upnp.unmap(network.ports().filter(p => !n
 handle('network:addresses', async () => ({ lan: network.lanIps(), publicIp: await network.publicIp(), port: (settings.load().website || {}).port || 8080, gamePort: settings.load().port || 2302 }));
 handle('logs:cleanup', (opts) => logs.cleanup(opts || {}));
 handle('logs:cleanupCfg', () => logs.cleanupCfg());
+handle('logs:cleanupPreview', (opts) => logs.cleanupPreview(opts || {}));
+handle('logs:saveCleanupCfg', (c) => logs.saveCleanupCfg(c || {}));
 handle('steam:forgetPassword', () => { settings.save({ steamPassEnc: '' }); return steamcmd.status(); });
 handle('network:addRules', () => network.addRules());
 handle('network:removeRules', () => network.removeRules());
