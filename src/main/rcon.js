@@ -269,6 +269,7 @@ function sessionCreds() {
 }
 
 // ---------- connect when the server is ready, and say which step is failing ----------
+function fmtElapsed(ms) { const s = Math.round(ms / 1000); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + String(s % 60).padStart(2, '0') + ' s'; }
 function setDiag(step, text) { state.diag = { step, text, at: Date.now() }; emitRef('rcon:state', status()); }
 function udpListening(port) {
   try { const out = require('child_process').execSync('netstat -an -p udp', { encoding: 'utf8', windowsHide: true, timeout: 8000 }); return new RegExp(':' + port + '\\s').test(out); } catch { return null; }
@@ -293,6 +294,13 @@ async function attempt() {
     const creds = sessionCreds();
     if (!creds.password) { setDiag('failed', 'No RCon password is set. Use "Sync with BEServer_x64.cfg" on the Players page, then restart the server.'); stopAuto(); return; }
     const mins = Math.round((Date.now() - auto.startedAt) / 60000);
+    let stg = null; try { stg = require('./server').status().stage; } catch { /* ignore */ }
+    if (stg && !stg.ready) {
+      // fall back to plain retries when the server log cannot be followed, or a stage never ends
+      const noLog = stg.key === 'starting' && Date.now() - auto.startedAt > 3 * 60000;
+      const stuck = Date.now() - stg.at > 30 * 60000;
+      if (!noLog && !stuck) { setDiag('loading', `Server loading: ${stg.label} (step ${stg.index} of ${stg.total}, ${fmtElapsed(Date.now() - auto.startedAt)} so far). RCon connects as soon as loading finishes.`); return; }
+    }
     const open = udpListening(creds.port);
     if (open === false) {
       if (rptActive() || Date.now() - auto.startedAt < 5 * 60000) setDiag('loading', `Server still starting (${mins} min so far); RCon port ${creds.port} is not open yet. The tool connects when it opens.`);
@@ -325,6 +333,7 @@ function autoConnectLoop() {
   auto.timer = setInterval(() => { if (Date.now() - auto.startedAt > 3 * 3600000) { setDiag('failed', 'Gave up after 3 hours.'); stopAuto(); return; } attempt().catch(() => {}); }, 10000);
 }
 function stopAuto() { clearInterval(auto.timer); auto.timer = null; }
+function onStage(stg) { if (stg && stg.ready && auto.timer && !state.connected) setTimeout(() => attempt().catch(() => {}), 1500); }
 function init(emit) {
   emitRef = emit;
   try { if (!serverRunning()) ensureConfigured(); } catch { /* server not installed yet */ }
@@ -332,4 +341,4 @@ function init(emit) {
   if (cfg().autoConnect && cfg().password) setTimeout(() => connect(sessionCreds()).catch(() => {}), 3000);
 }
 
-module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto, beArg, readActive, adoptFromFile, sessionCreds };
+module.exports = { onStage, init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto, beArg, readActive, adoptFromFile, sessionCreds };

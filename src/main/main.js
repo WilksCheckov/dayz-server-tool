@@ -138,6 +138,7 @@ async function ensureFirewall() {
   } catch (e) { emit('console', { source: 'network', line: 'Firewall rules not added: ' + e.message + '. Add them on the Network page.' }); }
 }
 function emit(channel, data) {
+  if (channel === 'server:stage') { try { rcon.onStage(data); } catch { /* ignore */ } }
   if (channel === 'console' && data) { try { servererrors.handleLine(data.source, data.line); } catch { /* ignore */ } if ((data.source === 'rpt' || data.source === 'server') && /BattlEye/i.test(data.line || '')) { try { const k = combat.beKick(data.line); if (k) audit.log('system', 'BattlEye', 'kick', `${k.name}: ${k.reason}`); } catch { /* ignore */ } } }
   if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') && !/(0 failed)|0 error|no error|failed: 0\b|fails?: ?0\b/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
   else if (channel === 'alerts:new' && data) toollog.warn(`alert ${data.kind}: ${data.title} ${data.details || ''}`);
@@ -241,7 +242,8 @@ handle('server:status', () => server.status());
 handle('server:start', () => server.start());
 handle('server:stop', () => server.stop());
 handle('server:restart', () => server.restart());
-handle('server:preflight', () => require('./preflight').checks());
+handle('server:preflight', async () => { try { await require('./sysinfo').defenderStatus({ refresh: true }); } catch { /* ignore */ } return require('./preflight').checks(); });
+handle('server:addDefenderExclusion', () => require('./sysinfo').addDefenderExclusion(emit));
 handle('server:installVcRedist', () => require('./preflight').installVcRedist(emit));
 handle('server:installDirectX', () => require('./preflight').installDirectX(emit));
 handle('server:readConfig', () => {
@@ -493,7 +495,14 @@ handle('configs:validateAll', () => configs.validateAll());
 
 // RCon (BattlEye)
 handle('rcon:status', () => rcon.status());
-handle('rcon:connect', (opts) => rcon.connect(opts || {}));
+handle('rcon:connect', (opts) => {
+  const st = server.status();
+  if (st.running && st.stage && !st.stage.ready && !(opts && opts.force)) {
+    const mins = Math.max(1, Math.round((Date.now() - st.startedAt) / 60000));
+    return { ...rcon.status(), waiting: true, message: `The server is still loading (${st.stage.label}, about ${mins} min so far). BattlEye only answers RCon once loading finishes; the tool connects by itself then.` };
+  }
+  return rcon.connect(opts || {});
+});
 handle('rcon:ensure', (o) => rcon.ensureConfigured(o || {}));
 handle('rcon:disconnect', () => rcon.disconnect());
 handle('rcon:command', (cmd) => rcon.command(cmd));
@@ -574,6 +583,7 @@ app.whenReady().then(() => {
   timed('combat', () => combat.init(emit));
   timed('deathlog', () => deathlog.init(emit));
   timed('anticheat', () => anticheat.init(emit));
+  setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); }, 15000);
   if (app.isPackaged && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {
     require('./preflight').ensureRuntimes(emit).then(r => {
       if (r.action === 'ok' || r.action === 'installed') { settings.save({ runtimesReady: true }); if (r.action === 'installed') emit('console', { source: 'preflight', line: 'First-run setup done: the runtimes the server needs are installed.' }); }

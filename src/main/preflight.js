@@ -18,7 +18,7 @@ function missionName(cfgText) { const m = String(cfgText || '').match(/^\s*templ
 // Returns { ok: [], warn: [], error: [] } of plain-language findings.
 function checks() {
   const s = settings.load(); const p = settings.paths(s);
-  const out = { ok: [], warn: [], error: [], fixes: [] };
+  const out = { ok: [], warn: [], error: [], fixes: [], offers: [] };
   const fix = k => { if (k && !out.fixes.includes(k)) out.fixes.push(k); };
   const err = t => out.error.push(t), warn = t => out.warn.push(t), ok = t => out.ok.push(t);
   // install
@@ -80,6 +80,8 @@ function checks() {
   const port = Number(s.port) || 2302;
   const listeners = udpListeners();
   if (listeners.includes(port)) err(`UDP port ${port} is already in use on this PC: another server (or an old one) is still running. Stop it first or change the port.`);
+  // Windows Defender scanning every file the server reads is a common cause of starts that take many minutes
+  try { const d = require('./sysinfo').cachedDefender(); if (d && d.present && d.realTime !== false && d.excluded !== true) { warn(d.excluded === false ? `Windows Defender scans the server folder (${s.installDir}). On slow machines that alone can stretch a start to 10+ minutes; exclude the folder (button below).` : `Windows Defender is on and probably scans the server folder (${s.installDir}); the tool cannot read the exclusion list without administrator rights. If starts are slow, exclude the folder (button below).`); out.offers.push('defender'); } else if (d && d.present && d.excluded) ok('Server folder excluded from Windows Defender'); } catch { /* ignore */ }
   // memory: the server alone wants 4-6 GB; less makes Windows page and the start takes many minutes
   try { const gb = require('os').totalmem() / 1073741824; if (gb < 8) warn(`This PC has ${gb.toFixed(1)} GB of RAM. The DayZ server wants 4-6 GB on its own, so expect very slow starts and poor performance; 8 GB or more is recommended.`); } catch { /* ignore */ }
   // disk space (best effort)

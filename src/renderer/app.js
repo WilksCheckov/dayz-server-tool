@@ -323,12 +323,14 @@ function renderServer(st) {
 function updateUptime() {
   const st = state.server;
   if (!st) return;
-  if (st.running) $('statUptime').textContent = 'Uptime ' + fmtDuration(Date.now() - st.startedAt);
+  if (st.running && st.stage && !st.stage.ready) $('statUptime').textContent = `Loading: ${st.stage.label} (step ${st.stage.index} of ${st.stage.total}) · ${fmtDuration(Date.now() - st.startedAt)}`;
+  else if (st.running) $('statUptime').textContent = 'Uptime ' + fmtDuration(Date.now() - st.startedAt);
   else if (st.lastExit) $('statUptime').textContent = `Last exit code ${st.lastExit.code} at ${fmtDate(st.lastExit.at)} after ${fmtDuration(st.lastExit.ranFor * 1000)}`;
   else $('statUptime').textContent = 'Not started this session';
 }
 setInterval(updateUptime, 1000);
 ipc.on('server:status', (st) => { renderServer(st); updateModsBanner(); });
+ipc.on('server:stage', (stg) => { if (state.server) { state.server.stage = stg; updateUptime(); } });
 const startServer = (e) => run(async () => renderServer(await ipc.invoke('server:start')), e.target);
 const stopServer = (e) => run(async () => renderServer(await ipc.invoke('server:stop')), e.target);
 $('btnStart').onclick = startServer; $('btnQuickStart').onclick = startServer;
@@ -733,9 +735,13 @@ $('autoRuntimes').onchange = () => saveSettings({ autoRuntimes: $('autoRuntimes'
 $('btnPreflight').onclick = (e) => run(async () => {
   const r = await ipc.invoke('server:preflight');
   const li = (items, cls) => items.map(t => `<li class="${cls}">${esc(t)}</li>`).join('');
-  const needsVc = r.error.some(t => /Visual C\+\+/.test(t)); const needsDx = r.error.some(t => /DirectX/.test(t));
-  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, [...(needsVc ? [{ label: 'Install Visual C++ runtime', value: 'vc', primary: true }] : []), ...(needsDx ? [{ label: 'Install DirectX runtime', value: 'dx', primary: !needsVc }] : []), { label: 'Close', value: true, primary: !needsVc && !needsDx }]);
+  const needsVc = r.error.some(t => /Visual C\+\+/.test(t)); const needsDx = r.error.some(t => /DirectX/.test(t)); const offerDef = (r.offers || []).includes('defender');
+  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, [...(needsVc ? [{ label: 'Install Visual C++ runtime', value: 'vc', primary: true }] : []), ...(needsDx ? [{ label: 'Install DirectX runtime', value: 'dx', primary: !needsVc }] : []), ...(offerDef ? [{ label: 'Exclude server folder from Defender', value: 'def', primary: !needsVc && !needsDx }] : []), { label: 'Close', value: true, primary: !needsVc && !needsDx && !offerDef }]);
   if (choice === 'vc') { toast('Downloading and installing the Visual C++ runtime…'); const res = await ipc.invoke('server:installVcRedist'); toast(res.installed ? 'Visual C++ runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); }
+  if (choice === 'def') {
+    const ok = await showModal('Exclude from Windows Defender', '<p>Add the server folder (and DayZServer_x64.exe) to Windows Defender\'s exclusions, so Defender stops scanning every game file as the server loads it.</p><p class="muted">This lowers protection for that folder: only do it if the folder holds just the DayZ server and mods you trust. Windows asks for permission.</p>', [{ label: 'Add the exclusion', value: true, primary: true }, { label: 'Cancel', value: false }]);
+    if (ok) { try { const res = await ipc.invoke('server:addDefenderExclusion'); toast(res.excluded ? 'Server folder excluded from Defender. The next start should be much faster.' : 'Command finished, but Defender does not report the exclusion yet.', !res.excluded); } catch (err) { toast(err.message, true); } }
+  }
   if (choice === 'dx') { toast('Downloading and installing the DirectX runtime (about 95 MB)…'); const res = await ipc.invoke('server:installDirectX'); toast(res.installed ? 'DirectX runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); }
 }, e.target);
 $('btnCopyFullLine').onclick = () => { navigator.clipboard.writeText($('cmdline').textContent.replace(/^DayZServer_x64\.exe /, '')); toast('Launch line copied'); };
@@ -958,7 +964,7 @@ $('btnRconFromBe').onclick = (e) => run(async () => {
   renderRcon(await ipc.invoke('rcon:status')); loadRconForm && loadRconForm();
   toast(r.action === 'generated' ? 'Created an RCon password in BEServer_x64.cfg. Restart the server for BattlEye to pick it up.' : r.action === 'from-battleye' ? 'Settings filled from BEServer_x64.cfg' : r.action === 'wrote-battleye' ? 'BEServer_x64.cfg updated to match. Restart the server for BattlEye to pick it up.' : 'Already in sync');
 }, e.target);
-$('btnRconConnect').onclick = (e) => run(async () => { await saveSettings({ rcon: rconForm() }); renderRcon(await ipc.invoke('rcon:connect')); refreshPlayers(); }, e.target);
+$('btnRconConnect').onclick = (e) => run(async () => { await saveSettings({ rcon: rconForm() }); const r = await ipc.invoke('rcon:connect'); renderRcon(r); if (r.waiting) toast(r.message); else refreshPlayers(); }, e.target);
 $('btnRconDisconnect').onclick = (e) => run(async () => { await ipc.invoke('rcon:disconnect'); }, e.target);
 $('btnRconRefresh').onclick = () => run(async () => { await refreshPlayers(); await refreshRecent(); });
 ipc.on('rcon:state', (st) => { renderRcon(st); if (st.connected) refreshPlayers(); else renderPlayers([]); });

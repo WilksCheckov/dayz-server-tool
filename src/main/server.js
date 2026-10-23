@@ -15,6 +15,28 @@ let manualStop = false;
 let restartTimer = null;
 let emitRef = () => {};
 let lastExit = null;
+// Loading stages, read from the RPT as it is written. BattlEye answers RCon only after "Init sequence finished".
+const STAGES = [
+  { key: 'starting', label: 'starting the process' },
+  { key: 'data', label: 'loading game data', re: /./ },
+  { key: 'steam', label: 'Steam ready, loading the world', re: /SteamGameServer_Init/ },
+  { key: 'economy', label: 'economy starting', re: /\[CE\]\[Hive\] :: (Initializing OFFLINE|Loading core data)/ },
+  { key: 'map', label: 'economy loading map data', re: /\[CE\]\[Hive\] :: Loading map data/ },
+  { key: 'storage', label: 'persistence loaded, spawning loot', re: /\[CE\]\[Hive\] :: (Storage load took|Initializing spawners)/ },
+  { key: 'ready', label: 'ready', re: /\[CE\]\[Hive\] :: Init sequence finished/ }
+];
+let stage = null;
+function setStage(i) {
+  if (stage && i <= stage.index) return;
+  const st = STAGES[i];
+  stage = { key: st.key, label: st.label, index: i, total: STAGES.length - 1, at: Date.now(), ready: st.key === 'ready' };
+  emitRef('server:stage', { ...stage, startedAt });
+  if (stage.ready) emitRef('console', { source: 'server', line: `Server finished loading in ${Math.round((Date.now() - startedAt) / 1000)} s.` });
+}
+function stageFromLines(lines) {
+  if (!stage || stage.ready) return;
+  for (const l of lines) { for (let i = STAGES.length - 1; i > stage.index; i--) { const re = STAGES[i].re; if (re && re.test(l)) { setStage(i); break; } } if (stage.ready) return; }
+}
 let startedModParam = null;
 
 function currentModParam(s = settings.load()) {
@@ -29,7 +51,8 @@ function status() {
     lastExit,
     restartPending: !!restartTimer,
     crashLoop,
-    modsChanged: !!proc && startedModParam !== currentModParam()
+    modsChanged: !!proc && startedModParam !== currentModParam(),
+    stage: proc ? stage : null
   };
 }
 
@@ -77,6 +100,7 @@ function pollRpt() {
     try { fs.readSync(fd, buf, 0, len, rptOffset); } finally { fs.closeSync(fd); }
     rptOffset += len;
     const lines = (rptRest + buf.toString('utf8')).split(/\r?\n/); rptRest = lines.pop() || '';
+    stageFromLines(lines);
     let n = 0;
     for (const l of lines) { if (!l.trim()) continue; if (++n > 1500) { emitRef('console', { source: 'rpt', line: `(… ${lines.length - 1500} more lines, open the Logs page for the full file)` }); break; } emitRef('console', { source: 'rpt', line: l }); }
   } catch { /* file not readable yet */ }
@@ -122,6 +146,7 @@ function start() {
   proc = spawn(p.serverExe, args, { cwd: p.serverDir, stdio: showWindow ? 'ignore' : ['ignore', 'pipe', 'pipe'], windowsHide: !showWindow, detached: false });
   if (proc.stdout) { const onOut = d => { for (const l of d.toString('utf8').split(/\r?\n/)) if (l.trim()) emitRef('console', { source: 'server', line: l.trim() }); }; proc.stdout.on('data', onOut); proc.stderr.on('data', onOut); }
   startedAt = Date.now();
+  stage = null; setStage(0);
   startRptTail();
   startedModParam = currentModParam(s);
   lastExit = null;
@@ -129,7 +154,7 @@ function start() {
     const ranFor = Math.round((Date.now() - startedAt) / 1000);
     lastExit = { code, signal, at: Date.now(), ranFor };
     emitRef('console', { source: 'server', line: `Server exited (code ${code}) after ${ranFor}s` });
-    proc = null; startedAt = null;
+    proc = null; startedAt = null; stage = null; emitRef('server:stage', null);
     setTimeout(() => { stopRptTail(true); }, 3000);
     const wasManual = manualStop;
     manualStop = false;
