@@ -1125,7 +1125,7 @@ function renderWeb(st) {
 function loadWebForm() {
   const c = webState ? webState.config : {};
   $('webTitle').value = c.title || ''; $('webTagline').value = c.tagline || ''; $('webPort').value = c.port || 8080;
-  $('webAccent').value = c.accent || '#4f8cff'; $('webAddress').value = c.serverAddress || ''; $('webDiscord').value = c.discordInvite || '';
+  $('webAccent').value = c.accent || '#4f8cff'; $('webAddress').value = c.serverAddress || ''; refreshJoinAddress(); $('webDiscord').value = c.discordInvite || '';
   $('webBanner').value = c.bannerUrl || ''; $('webDescription').value = c.description || ''; $('webCss').value = c.customCss || '';
   $('webAdminEnabled').checked = !!(c.admin && c.admin.enabled); $('webAdminPass').value = ''; $('webAdminPass').placeholder = c.admin && (c.admin.passwordHash || c.admin.password) ? '(password set, type a new one to change it)' : 'password';
   $('webShowMods').checked = c.showMods !== false; $('webShowPlayers').checked = c.showPlayers !== false; $('webShowSchedule').checked = c.showSchedule !== false; $('webEnabled').checked = !!c.enabled;
@@ -1274,6 +1274,15 @@ ipc.on('website:state', () => { refreshDomain(); });
 async function refreshWebsite() { refreshWebAddresses(); refreshDomain(); renderWeb(await ipc.invoke('website:status')); loadWebForm(); refreshWebFiles(); refreshWebPreview(); }
 
 
+// what the site shows as the join address when the field is left empty
+async function refreshJoinAddress() {
+  let j = null; try { j = await ipc.invoke('website:joinAddress'); } catch { /* ignore */ }
+  const typed = $('webAddress').value.trim();
+  if (typed) { $('webAddressAuto').textContent = 'Typed by you; clear it to use the automatic address' + (j && j.source !== 'manual' && j.address ? ' (' + j.address + ')' : '') + '.'; return; }
+  $('webAddress').placeholder = j && j.address ? j.address : 'automatic';
+  $('webAddressAuto').textContent = j && j.address ? `Automatic: ${j.source === 'domain' ? 'your domain' : 'your public IP'} and the game port${j.source === 'public-ip' ? ' (updates if your IP changes)' : ''}. Type here to override.` : 'Automatic once the public IP can be looked up. Type here to override.';
+}
+$('webAddress').addEventListener('input', () => refreshJoinAddress());
 async function refreshWebAddresses() {
   const box = $('webAddresses');
   let a; try { a = await ipc.invoke('network:addresses'); } catch (e) { box.innerHTML = '<div class="muted">' + esc(e.message) + '</div>'; return; }

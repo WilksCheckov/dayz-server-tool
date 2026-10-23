@@ -445,6 +445,7 @@ handle('profiles:activate', (name) => profiles.activate(name));
 
 // Website
 handle('website:status', () => website.status());
+handle('website:joinAddress', () => website.joinAddress());
 handle('domain:status', () => domain.status());
 handle('domain:save', (d) => { domain.saveCfg(d || {}); domain.applyTimers(); return domain.status(); });
 handle('domain:issue', (opts) => domain.issue(opts || {}));

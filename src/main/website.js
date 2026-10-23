@@ -45,6 +45,21 @@ function status() {
 }
 
 // ---------- data ----------
+let pubIp = { ip: null, at: 0 };
+async function publicIpCached() {
+  if (Date.now() - pubIp.at < 10 * 60000 && pubIp.ip) return pubIp.ip;
+  try { const ip = await require('./network').publicIp(); if (ip) pubIp = { ip, at: Date.now() }; } catch { /* offline */ }
+  return pubIp.ip;
+}
+// { address, source: 'manual' | 'domain' | 'public-ip' | null }
+async function joinAddress(c = cfg()) {
+  if (c.serverAddress && String(c.serverAddress).trim()) return { address: String(c.serverAddress).trim(), source: 'manual' };
+  const port = Number(settings.load().port) || 2302;
+  const dom = ((c.domain || {}).name || '').trim();
+  if (dom) return { address: `${dom}:${port}`, source: 'domain' };
+  const ip = await publicIpCached();
+  return ip ? { address: `${ip}:${port}`, source: 'public-ip' } : { address: null, source: null };
+}
 async function serverStatus() {
   if (Date.now() - statusCache.at < 10000 && statusCache.data) return statusCache.data;
   const st = server.status();
@@ -149,6 +164,7 @@ function fmtDur(s) { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) /
 
 async function homePage(c) {
   const d = await serverStatus();
+  const join = (await joinAddress(c)).address;
   const players = c.showPlayers ? (d.players === null ? (d.online ? 'online' : '—') : `${d.players}${d.maxPlayers ? ' / ' + d.maxPlayers : ''}`) : null;
   return layout(c, '/', 'Home', `
 <section class="hero"><h1>${esc(c.title)}</h1><p>${esc(c.tagline)}</p>
@@ -157,7 +173,7 @@ ${players !== null ? `<span class="pill">👥 ${esc(players)} players</span>` : 
 ${c.showSchedule && d.nextRestart ? `<span class="pill">⟳ next restart <span data-ts="${d.nextRestart}">${new Date(d.nextRestart).toLocaleString()}</span></span>` : ''}
 </section>
 <div class="grid">
-  ${c.serverAddress ? `<div class="card"><h3>Join</h3><div class="big"><code>${esc(c.serverAddress)}</code></div><div class="muted">Add it as a favourite in the DayZ launcher, or search the name.</div></div>` : ''}
+  ${join ? `<div class="card"><h3>Join</h3><div class="big"><code>${esc(join)}</code></div><div class="muted">Add it as a favourite in the DayZ launcher, or search the name.</div></div>` : ''}
   ${c.showMods ? `<div class="card"><h3>Mods</h3><div class="big">${d.mods.length}</div><div class="muted">${d.mods.slice(0, 4).map(m => esc(m.title)).join(', ')}${d.mods.length > 4 ? '…' : ''}</div><a class="btn" href="/mods">Mod list</a></div>` : ''}
   ${c.showSchedule && d.restartTimes.length ? `<div class="card"><h3>Restarts</h3><div class="big">${d.restartTimes.map(esc).join(' · ')}</div><div class="muted">Daily, server time. Players are warned in-game.</div></div>` : ''}
   ${c.discordInvite ? `<div class="card"><h3>Community</h3><div class="muted">Join the Discord for whitelist applications, support and announcements.</div><a class="btn" href="${esc(c.discordInvite)}">Join Discord</a></div>` : ''}
@@ -274,7 +290,7 @@ async function handle(req, res) {
       if (f) { res.writeHead(200, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); return fs.createReadStream(f).pipe(res); }
     }
     if (p === '/assets/site.css') return send(200, 'text/css', customFile('site.css') || css(c));
-    if (p === '/api/status.json') return send(200, 'application/json', JSON.stringify(await serverStatus()));
+    if (p === '/api/status.json') return send(200, 'application/json', JSON.stringify({ ...(await serverStatus()), address: (await joinAddress()).address }));
     if (p === '/api/mods.json') return send(200, 'application/json', JSON.stringify((await serverStatus()).mods));
     // Files dropped in <installDir>\website\ are served first (images for the banner, favicon, extra pages).
     const pub = publicDir();
@@ -546,4 +562,4 @@ async function preview(slug) {
   return page ? customPage(c, page) : '<p>Not found</p>';
 }
 
-module.exports = { init, start, stop, status, cfg, preview, listFiles, addFiles, removeFile, writeStarter, publicDir, importSite, removeSite, siteDir };
+module.exports = { init, joinAddress, start, stop, status, cfg, preview, listFiles, addFiles, removeFile, writeStarter, publicDir, importSite, removeSite, siteDir };
