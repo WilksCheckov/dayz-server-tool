@@ -7,7 +7,7 @@ async function call(channel, ...args) {
   return r.data;
 }
 
-const EVENTS = ['console', 'server:status', 'mods:changed', 'mods:progress', 'steam:guardNeeded', 'updater:state', 'backups:state', 'backups:changed', 'scheduler:state', 'rcon:state', 'rcon:message', 'discord:state', 'website:state', 'health:sample', 'alerts:new', 'crashes:changed', 'players:changed', 'update:state', 'tasks:changed', 'steam:changed', 'accounts:changed', 'domain:state', 'map:progress', 'audit:new', 'deathlog:changed', 'anticheat:changed', 'server:stage', 'server:maintenance', 'maplink:state', 'maps:changed'];
+const EVENTS = ['console', 'server:status', 'mods:changed', 'mods:progress', 'steam:guardNeeded', 'updater:state', 'backups:state', 'backups:changed', 'scheduler:state', 'rcon:state', 'rcon:message', 'discord:state', 'website:state', 'health:sample', 'alerts:new', 'crashes:changed', 'players:changed', 'update:state', 'tasks:changed', 'steam:changed', 'accounts:changed', 'domain:state', 'map:progress', 'audit:new', 'deathlog:changed', 'anticheat:changed', 'server:stage', 'server:maintenance', 'maplink:state', 'maps:changed', 'instances:progress', 'instances:changed'];
 
 contextBridge.exposeInMainWorld('api', {
   invoke: call,

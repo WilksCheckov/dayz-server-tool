@@ -8,6 +8,43 @@ const mods = require('./mods');
 const alerts = require('./alerts');
 const crashes = require('./crashes');
 let crashLoop = false;
+// The running server is remembered on disk, so a tool restart (an app update, a crash of the tool) picks it up again
+// instead of losing track of it and starting a second copy on the same port.
+let adopted = false;
+const procFile = () => path.join(require('electron').app.getPath('userData'), 'server-process.json');
+function rememberProc(pid, at) { try { fs.writeFileSync(procFile(), JSON.stringify({ pid, startedAt: at, exe: settings.paths().serverExe })); } catch { /* ignore */ } }
+function forgetProc() { try { fs.unlinkSync(procFile()); } catch { /* none */ } }
+function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
+// A process this tool did not start gives no exit event: watch it.
+function watchPid(pid) {
+  const ee = new (require('events'))(); ee.pid = pid; ee.adopted = true;
+  ee.kill = () => { try { process.kill(pid); } catch { /* gone */ } };
+  const t = setInterval(() => { if (!alive(pid)) { clearInterval(t); ee.emit('exit', null, null); } }, 2000);
+  return ee;
+}
+async function adopt() {
+  let rec = null; try { rec = JSON.parse(fs.readFileSync(procFile(), 'utf8')); } catch { return false; }
+  if (!rec || !rec.pid || proc || !alive(rec.pid)) { forgetProc(); return false; }
+  // the pid may have been reused by another program: check it is this server's exe (by its path; when Windows is
+  // too busy to answer that, by its image name, so a slow start of the tool does not lose the server)
+  const run = (file, args) => new Promise(res => require('child_process').execFile(file, args, { windowsHide: true, timeout: 30000 }, (e, out) => res(String(out || '').trim())));
+  const exe = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(rec.pid)} -ErrorAction SilentlyContinue).Path`]);
+  const mine = path.resolve(settings.paths().serverExe).toLowerCase();
+  if (exe && path.resolve(exe).toLowerCase() !== mine) { emitRef('console', { source: 'server', line: `The remembered server pid ${rec.pid} now belongs to ${exe}; not taking it over.` }); forgetProc(); return false; }
+  if (!exe) { const img = await run('tasklist', ['/FI', `PID eq ${Number(rec.pid)}`, '/FO', 'CSV', '/NH']); if (!/"DayZServer_x64\.exe"/i.test(img)) { if (img && !/No tasks/i.test(img)) forgetProc(); return false; } }
+  if (proc) return false;
+  adopted = true;
+  proc = watchPid(rec.pid);
+  startedAt = rec.startedAt || Date.now();
+  startedModParam = currentModParam();
+  emitRef('console', { source: 'server', line: `Found the server still running (pid ${rec.pid}, started ${new Date(startedAt).toLocaleString()}); managing it again.` });
+  startRptTail(); rptStartedAt = startedAt;
+  stage = null; setStage(0);
+  attachExit(proc);
+  try { require('./cpu').apply(rec.pid); } catch { /* ignore */ }
+  emitRef('server:status', status());
+  return true;
+}
 
 let proc = null;
 let startedAt = null;
@@ -41,7 +78,7 @@ function setStage(i) {
   if (i === 0) stageTimes = [];
   for (let k = 0; k <= i; k++) if (stageTimes[k] === undefined) stageTimes[k] = Date.now() - (startedAt || Date.now());
   stage = { key: st.key, label: st.label, index: i, total: STAGES.length - 1, at: Date.now(), ready: st.key === 'ready', profile: loadProfile() };
-  if (stage.ready && stageTimes.length === STAGES.length && stageTimes[i] > 5000) {
+  if (stage.ready && !adopted && stageTimes.length === STAGES.length && stageTimes[i] > 5000) {
     const total = stageTimes[i]; settings.save({ loadProfile: { fractions: stageTimes.map(t => Math.min(1, t / total)), totalMs: total, at: Date.now() } });
   }
   emitRef('server:stage', { ...stage, startedAt });
@@ -68,7 +105,8 @@ function status() {
     modsChanged: !!proc && startedModParam !== currentModParam(),
     stage: proc ? stage : null,
     maintenance,
-    stopping: !!proc && manualStop
+    stopping: !!proc && manualStop,
+    adopted: !!proc && adopted
   };
 }
 
@@ -79,7 +117,7 @@ function buildArgs(s) {
     `-profiles=${s.profilesDir}`
   ];
   try { const be = require('./rcon').beArg(s); if (be) args.push(be); } catch { /* ignore */ }
-  if (s.cpuCount > 0) args.push(`-cpuCount=${s.cpuCount}`);
+  { let n = Number(s.cpuCount) || 0; try { n = require('./cpu').cpuCountArg(s); } catch { /* ignore */ } if (n > 0) args.push(`-cpuCount=${n}`); }
   for (const part of (s.extraParams || '').split(/\s+/)) if (part) args.push(part);
   const modList = mods.modParam(s, false);
   const serverModList = mods.modParam(s, true);
@@ -163,17 +201,34 @@ function start() {
   const args = buildArgs(s);
   emitRef('console', { source: 'server', line: `Starting: DayZServer_x64.exe ${args.join(' ')}` });
   const showWindow = !!((s.app || {}).showServerWindow);
-  proc = spawn(p.serverExe, args, { cwd: p.serverDir, stdio: showWindow ? 'ignore' : ['ignore', 'pipe', 'pipe'], windowsHide: !showWindow, detached: false });
-  if (proc.stdout) { const onOut = d => { for (const l of d.toString('utf8').split(/\r?\n/)) if (l.trim()) emitRef('console', { source: 'server', line: l.trim() }); }; proc.stdout.on('data', onOut); proc.stderr.on('data', onOut); }
-  startedAt = Date.now();
+  // The server must outlive the tool (app updates, a tool crash, background instances): its own process group and
+  // its console output in a file, not a pipe that breaks when the tool exits. Everything it logs is in the RPT anyway.
+  let out = 'ignore'; try { out = fs.openSync(path.join(p.profilesDir, 'server-console.log'), 'w'); } catch { /* no file: drop the output */ }
+  proc = spawn(p.serverExe, args, { cwd: p.serverDir, stdio: ['ignore', out, out], windowsHide: !showWindow, detached: true });
+  if (typeof out === 'number') { try { fs.closeSync(out); } catch { /* ignore */ } }
+  startedAt = Date.now(); adopted = false;
   startRptTail();
   stage = null; setStage(0);
   startedModParam = currentModParam(s);
   lastExit = null;
-  proc.on('exit', (code, signal) => {
+  rememberProc(proc.pid, startedAt);
+  attachExit(proc);
+  try { require('./cpu').apply(proc.pid); } catch { /* ignore */ }
+  proc.on('error', err => {
+    emitRef('console', { source: 'server', line: `Failed to start: ${err.message}` });
+  });
+  emitRef('server:status', status());
+  alerts.alert('server-up', 'Server started', `pid ${proc.pid}`);
+  return status();
+}
+
+function attachExit(p) {
+  p.on('exit', (code, signal) => {
     const ranFor = Math.round((Date.now() - startedAt) / 1000);
     lastExit = { code, signal, at: Date.now(), ranFor };
     emitRef('console', { source: 'server', line: `Server exited (code ${code}) after ${ranFor}s` });
+    if (proc !== p) return;
+    forgetProc(); adopted = false;
     proc = null; startedAt = null; stage = null; emitRef('server:stage', null);
     { const gen = rptGen; setTimeout(() => { if (gen === rptGen) stopRptTail(true); }, 3000); }
     const wasManual = manualStop;
@@ -199,12 +254,6 @@ function start() {
       emitRef('server:status', status());
     }
   });
-  proc.on('error', err => {
-    emitRef('console', { source: 'server', line: `Failed to start: ${err.message}` });
-  });
-  emitRef('server:status', status());
-  alerts.alert('server-up', 'Server started', `pid ${proc.pid}`);
-  return status();
 }
 
 function stop() {
@@ -238,6 +287,6 @@ async function restart() {
   return start();
 }
 
-function init(emit) { emitRef = emit; }
+function init(emit) { emitRef = emit; adopt().catch(() => {}); }
 
 module.exports = { init, start, stop, restart, status, setMaintenance, _tail: { startRptTail, stopRptTail } };

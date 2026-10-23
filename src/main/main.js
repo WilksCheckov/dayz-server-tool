@@ -2,11 +2,14 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+// A background instance keeps everything in its own folder (see instance.js); set before any module reads userData.
+const instance = require('./instance');
+if (instance.isChild) { fs.mkdirSync(instance.dataDir, { recursive: true }); app.setPath('userData', instance.dataDir); }
 // Keep the data from a previous app name (the userData folder is named after productName). Electron creates the new
 // folder for its caches before this code runs, so "does it exist" is no test: copy the tool's own files across once,
 // whenever the old folder has settings and the new one has not been migrated yet. settings.json is only taken from the
 // old folder while the new one still holds untouched defaults.
-try {
+if (!instance.isChild) try {
   const newDir = app.getPath('userData');
   const marker = path.join(newDir, '.migrated');
   if (!fs.existsSync(marker)) {
@@ -65,7 +68,9 @@ const network = require('./network');
 const offsite = require('./offsite');
 const modcheck = require('./modcheck');
 const modkeys = require('./modkeys');
-const profiles = require('./profiles');
+const instances = require('./instances');
+const control = require('./control');
+const cpu = require('./cpu');
 const scheduler = require('./scheduler');
 
 let win = null;
@@ -96,6 +101,12 @@ function refreshTray() {
     { label: st.running ? 'Stop server' : 'Start server', click: () => { try { st.running ? server.stop() : server.start(); } catch (e) { emit('console', { source: 'server', line: e.message }); } } },
     { label: 'Restart server', enabled: st.running, click: () => server.restart().catch(() => {}) },
     { label: 'Backup now', click: () => backups.create('tray').catch(() => {}) },
+    ...(instances.registry().list.length ? [{ type: 'separator' }, ...instances.registry().list.map(x => ({ label: x.name, submenu: [
+      { label: 'Open', click: () => instances.action(x.name, 'open').catch(e => emit('console', { source: 'instances', line: e.message })) },
+      { label: 'Start server', click: () => instances.action(x.name, 'start').catch(e => emit('console', { source: 'instances', line: e.message })) },
+      { label: 'Stop server', click: () => instances.action(x.name, 'stop').catch(e => emit('console', { source: 'instances', line: e.message })) },
+      { label: 'Restart server', click: () => instances.action(x.name, 'restart').catch(e => emit('console', { source: 'instances', line: e.message })) }
+    ] }))] : []),
     { type: 'separator' },
     { label: 'Quit', click: () => { quitting = true; app.quit(); } }
   ]));
@@ -158,10 +169,10 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 640,
     backgroundColor: '#0f1115',
-    title: 'DayZ Admin Tools',
+    title: instance.isChild ? `DayZ Admin Tools — ${instance.name}` : 'DayZ Admin Tools',
     autoHideMenuBar: true,
     icon: ICON,
-    show: !appPrefs().startMinimized,
+    show: instance.isChild ? !!process.env.DZ_SCREENSHOT : !appPrefs().startMinimized,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -174,7 +185,8 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); if (/^https?:\/\//i.test(url)) shell.openExternal(url); } });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
-  win.on('close', e => { if (!quitting && appPrefs().closeToTray && !process.env.DZ_SCREENSHOT) { e.preventDefault(); win.hide(); buildTray(); } });
+  win.on('close', e => { if (!quitting && (instance.isChild || appPrefs().closeToTray) && !process.env.DZ_SCREENSHOT) { e.preventDefault(); win.hide(); if (!instance.isChild) buildTray(); } });
+  if (instance.isChild) win.on('page-title-updated', ev => ev.preventDefault());
   win.on('closed', () => { win = null; });
   // Dev helper: DZ_SCREENSHOT=<file.png> captures the window after load and quits.
   if (process.env.DZ_SCREENSHOT) {
@@ -201,7 +213,9 @@ function createWindow() {
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
 const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:(cleanup|saveCleanupCfg))$/;
+const handlerMap = new Map();
 function handle(channel, fn) {
+  handlerMap.set(channel, fn);
   ipcMain.handle(channel, async (event, ...args) => {
     try {
       const data = await fn(...args);
@@ -316,10 +330,11 @@ handle('economy:unregisterFile', (abs) => economy.unregisterFile(abs));
 handle('fs:readText', (abs) => { if (!pickedFiles.has(path.resolve(String(abs || '')))) throw new Error('Pick the file through the file dialog first.'); return fs.readFileSync(abs, 'utf8'); });
 
 // App preferences + self-update
-handle('app:prefs', () => ({ ...appPrefs(), version: app.getVersion(), packaged: app.isPackaged, dataDir: app.getPath('userData'), loginItem: app.getLoginItemSettings().openAtLogin }));
+handle('app:prefs', () => ({ ...appPrefs(), instance: instance.isChild ? instance.name : null, instanceName: instance.isChild ? instance.name : (settings.load().instanceName || 'Main'), version: app.getVersion(), packaged: app.isPackaged, dataDir: app.getPath('userData'), loginItem: app.getLoginItemSettings().openAtLogin }));
 handle('app:setPrefs', (prefs) => {
   const p = { ...appPrefs(), ...prefs };
   settings.save({ app: p });
+  if (instance.isChild) return p;
   try { app.setLoginItemSettings({ openAtLogin: !!p.launchAtLogin, args: p.startMinimized ? ['--minimized'] : [] }); } catch { /* ignore */ }
   if (p.closeToTray) buildTray(); else if (tray) { tray.destroy(); tray = null; }
   return p;
@@ -359,7 +374,7 @@ handle('app:importSettings', async () => {
 handle('update:state', () => updateState);
 handle('update:check', async () => { if (!autoUpd) throw new Error('Updater not available.'); if (!app.isPackaged) throw new Error('Updates only work in the installed app, not when running from source.'); await autoUpd.checkForUpdates(); return updateState; });
 handle('update:download', async () => { if (!autoUpd) throw new Error('Updater not available.'); await autoUpd.downloadUpdate(); return updateState; });
-handle('update:install', () => { if (!autoUpd) throw new Error('Updater not available.'); quitting = true; autoUpd.quitAndInstall(); return true; });
+handle('update:install', async () => { if (!autoUpd) throw new Error('Updater not available.'); if (instance.isChild) throw new Error('Install updates from the main window.'); await instances.beforeAppUpdate().catch(() => {}); quitting = true; autoUpd.quitAndInstall(); return true; });
 
 // Mission tools
 handle('mission:list', () => mission.list());
@@ -437,7 +452,7 @@ handle('tasks:run', (id) => { const t = tasks.all().find(x => x.id === id); if (
 // Network helper
 handle('network:report', () => network.report());
 handle('network:upnpStatus', () => upnp.status(network.ports()));
-handle('network:upnpMap', (names) => upnp.map(network.ports().filter(p => !names || !names.length || names.includes(p.name))));
+handle('network:upnpMap', (names) => upnp.map(network.ports().filter(p => !names || !names.length || names.includes(p.name)), network.upnpLabel()));
 handle('network:upnpUnmap', (names) => upnp.unmap(network.ports().filter(p => !names || !names.length || names.includes(p.name))));
 handle('network:addresses', async () => ({ lan: network.lanIps(), publicIp: await network.publicIp(), port: (settings.load().website || {}).port || 8080, gamePort: settings.load().port || 2302 }));
 handle('logs:cleanup', (opts) => logs.cleanup(opts || {}));
@@ -459,10 +474,30 @@ handle('mods:removeOrphanKeys', (files) => modkeys.removeOrphans(files));
 handle('mods:fixKey', (file) => modkeys.fix(file));
 
 // Profiles
-handle('profiles:list', () => profiles.list());
-handle('profiles:create', (name, copyFrom) => profiles.create(name, { copyFrom }));
-handle('profiles:remove', (name) => profiles.remove(name));
-handle('profiles:activate', (name) => profiles.activate(name));
+handle('instances:list', () => instances.list());
+handle('instances:defaults', async () => ({ root: instances.defaultRoot(), names: instances.entries().map(e => e.name), self: (instances.self() || {}).name, isChild: instance.isChild, cpu: cpu.status().topology, ramGb: Math.round(require('os').totalmem() / 1073741824) }));
+handle('instances:create', (opts) => { if (instance.isChild) throw new Error('Create instances from the main window.'); return instances.create(opts || {}); });
+handle('instances:remove', (name, opts) => instances.remove(name, opts || {}));
+handle('instances:action', (name, what) => instances.action(name, what));
+handle('instances:startTool', (name) => instances.startTool(name));
+handle('instances:stopTool', (name, opts) => instances.stopTool(name, opts || {}));
+handle('instances:setAutoStart', (name, on) => instances.setAutoStart(name, on));
+handle('instances:rename', (name) => instances.rename(name));
+handle('instances:reassignPorts', (name) => instances.reassignPorts(name));
+// hand this tool's Steam login to a background instance (over the local control channel), so it can update itself
+handle('instances:shareSteamLogin', async (name) => { const c = steamcmd.sharedLogin(); if (!c) return false; const e = instances.byName(name); if (e.main) return false; await control.call(e.data, 'steam:setCredentials', c); return true; });
+// called on a background instance by the main window: new ports, written through the settings cache
+handle('instances:applyPorts', (b) => {
+  if (server.status().running) throw new Error('Stop the server first.');
+  const s = settings.load();
+  settings.save({ port: b.game, steamQueryPort: b.query, rcon: { ...(s.rcon || {}), port: b.rcon }, website: { ...(s.website || {}), port: b.web }, firewallVerified: '' });
+  instances.writeQueryPort(settings.paths().configPath, b.query);
+  return true;
+});
+handle('cpu:status', () => cpu.status());
+handle('cpu:detect', async () => { await cpu.detect(); return cpu.status(); });
+handle('cpu:save', async (c) => { settings.save({ cpu: { mode: 'all', cores: [], priority: 'normal', ...(settings.load().cpu || {}), ...(c || {}) } }); const st = server.status(); if (st.running && st.pid) await cpu.apply(st.pid); return cpu.status(); });
+handle('mods:relinkAll', () => { const out = []; for (const m of settings.load().mods) { try { mods.link(m.id); out.push(m.id); } catch { /* not downloaded */ } } settings.save({ relinkMods: false }); return out; });
 
 // Website
 handle('website:status', () => website.status());
@@ -539,6 +574,7 @@ handle('discord:status', () => discord.status());
 handle('discord:start', () => discord.start());
 handle('discord:stop', () => discord.stop());
 handle('discord:applyLiveLog', () => discord.applyLiveLog());
+handle('discord:setMode', async (mode) => { if (!['own', 'shared', 'off'].includes(mode)) throw new Error('Unknown mode.'); if (mode === 'shared' && !instance.isChild) throw new Error('The main instance hosts the shared bot.'); await discord.stop(true); settings.save({ discord: { ...(settings.load().discord || {}), mode, autoStart: mode === 'shared' ? true : (settings.load().discord || {}).autoStart } }); if (mode === 'shared') await discord.start().catch(() => {}); return discord.status(); });
 handle('discord:commands', () => discord.buildCommands().map(c => ({ name: c.name, description: c.description, subs: (c.options || []).filter(o => o.type === 1).map(o => o.name) })));
 
 // Backups
@@ -584,11 +620,20 @@ app.whenReady().then(() => {
   timed('discord', () => discord.init(emit));
   timed('website', () => website.init(emit));
   timed('health', () => health.init(emit));
-  initUpdater();
+  if (!instance.isChild) initUpdater();
+  cpu.init(emit);
+  instances.init(emit);
+  instances.setLocalStatus(localStatus);
+  instances.setLocal({ open: () => showWindow(), call: (ch) => handlerMap.get(ch)() });
+  control.start(handlerMap);
+  control.route('status', async () => localStatus());
+  control.route('window', async () => { showWindow(); if (win) { win.setAlwaysOnTop(true); win.focus(); win.setAlwaysOnTop(false); } return true; });
+  control.route('quit', async () => { setTimeout(() => { quitting = true; app.quit(); }, 200); return true; });
+  if (instance.isChild && settings.load().relinkMods) setTimeout(() => { try { handlerMap.get('mods:relinkAll')(); emit('console', { source: 'mods', line: 'Linked the copied mods into this instance\'s server folder.' }); } catch { /* ignore */ } }, 2000);
   mission.init(emit); tasks.init(emit); offsite.init(emit);
   // Optional: bring the DayZ server up a few seconds after the tool starts (for unattended reboots).
   if (appPrefs().autoStartServer) setTimeout(() => { try { if (!server.status().running) { emit('console', { source: 'server', line: 'Auto-starting the server (Settings → start with the tool).' }); server.start(); } } catch (e) { emit('console', { source: 'server', line: 'Auto-start failed: ' + e.message }); } }, Math.max(3, Number(appPrefs().autoStartDelaySec) || 10) * 1000);
-  if (appPrefs().closeToTray || process.argv.includes('--minimized')) buildTray();
+  if (!instance.isChild && (appPrefs().closeToTray || process.argv.includes('--minimized'))) buildTray();
   setInterval(refreshTray, 15000);
   timed('players', () => players.init(emit));
   timed('steambans', () => steambans.init(emit));
@@ -602,7 +647,7 @@ app.whenReady().then(() => {
   timed('anticheat', () => anticheat.init(emit));
   timed('maplink', () => require('./maplink').init(emit));
   setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); require('./sysinfo').checkDisk().catch(() => {}); }, 15000);
-  if (app.isPackaged && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {
+  if (app.isPackaged && !instance.isChild && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {
     require('./preflight').ensureRuntimes(emit).then(r => {
       if (r.action === 'ok' || r.action === 'installed') { settings.save({ runtimesReady: true }); if (r.action === 'installed') emit('console', { source: 'preflight', line: 'First-run setup done: the runtimes the server needs are installed.' }); }
       else if (r.action === 'incomplete') emit('console', { source: 'preflight', line: 'First-run setup: some runtimes still show as missing; a reboot may be needed. The tool checks again at the next start.' });
@@ -612,5 +657,14 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => { if (!tray) app.quit(); });
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { quitting = true; control.stop(); });
+
+// What this instance reports to the main window's Instances page.
+function localStatus() {
+  let h = null; try { h = health.current(); } catch { /* ignore */ }
+  let r = null; try { const x = rcon.status(); r = { connected: x.connected }; } catch { /* ignore */ }
+  let d = null; try { const x = discord.status(); d = { running: !!x.running, mode: x.mode || null }; } catch { /* ignore */ }
+  let w = null; try { const x = website.status(); w = { running: !!x.running, port: x.port }; } catch { /* ignore */ }
+  return { name: instance.isChild ? instance.name : (settings.load().instanceName || 'Main'), version: app.getVersion(), pid: process.pid, server: server.status(), health: h, rcon: r, discord: d, website: w, cpu: (() => { try { const c = cpu.status(); return { mode: c.config.mode, chosen: c.chosen }; } catch { return null; } })() };
+}
 app.on('activate', () => showWindow());

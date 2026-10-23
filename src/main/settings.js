@@ -44,10 +44,8 @@ function decryptSecrets(obj) {
   return obj;
 }
 
-// Each server profile has its own settings file (see profiles.js); "default" is settings.json.
-function file() {
-  try { return require('./profiles').settingsFile(); } catch { return path.join(app.getPath('userData'), 'settings.json'); }
-}
+// Each instance has its own data folder (see instance.js), so this is always that folder's settings.json.
+function file() { return path.join(app.getPath('userData'), 'settings.json'); }
 
 function load() {
   if (cache) return cache;

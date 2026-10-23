@@ -24,6 +24,8 @@ function setCredentials(c) {
     catch { /* no safeStorage in this environment */ }
   } else if (c.remember === false) settings.save({ steamPassEnc: '' });
 }
+// The login this tool has in memory, for handing to a new instance on the same PC (never written anywhere by this).
+function sharedLogin() { return hasCredentials() ? { user: creds.user, pass: creds.pass, remember: !!settings.load().steamPassEnc } : null; }
 // Called once at startup: restore a remembered password.
 function loadSavedCredentials() {
   const s = settings.load();
@@ -235,4 +237,4 @@ function status() {
   };
 }
 
-module.exports = { setCredentials, loadSavedCredentials, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getLatestBuild, status, cancel };
+module.exports = { sharedLogin, setCredentials, loadSavedCredentials, hasCredentials, ensureSteamcmd, updateServer, downloadWorkshopItem, getLatestBuild, status, cancel };

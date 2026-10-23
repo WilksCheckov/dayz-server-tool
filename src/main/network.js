@@ -5,6 +5,16 @@ const net = require('net');
 const settings = require('./settings');
 
 const RULE_PREFIX = 'DayZ Admin Tools';
+// A background instance names its rules 'DayZ Admin Tools @<instance> …' so instances never remove each other's rules.
+const inst = require('./instance');
+const MY_PREFIX = inst.isChild ? `${RULE_PREFIX} @${inst.name}` : RULE_PREFIX;
+const MINE = inst.isChild ? `Get-NetFirewallRule -DisplayName '${MY_PREFIX} *' -ErrorAction SilentlyContinue` : `Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -notlike '${RULE_PREFIX} @*' }`;
+const upnpLabel = () => MY_PREFIX;
+// The Steam query port the server really uses: serverDZ.cfg, else the setting, else the default.
+function queryPort(s = settings.load()) {
+  try { const m = require('fs').readFileSync(settings.paths(s).configPath, 'utf8').match(/^\s*steamQueryPort\s*=\s*(\d+)/mi); if (m) return Number(m[1]); } catch { /* no cfg yet */ }
+  return Number(s.steamQueryPort) || 27016;
+}
 const OLD_PREFIX = 'DayZ Server Tool'; // rules created by earlier versions are replaced
 
 function ps(cmd, { elevated = false } = {}) {
@@ -45,7 +55,7 @@ function ports() {
   const list = [
     { name: 'Game', port: Number(s.port) || 2302, proto: 'UDP', why: 'players connect here' },
     { name: 'Game +1', port: (Number(s.port) || 2302) + 1, proto: 'UDP', why: 'engine traffic (DayZ uses port and port+1)' },
-    { name: 'Steam query', port: Number(s.steamQueryPort) || 27016, proto: 'UDP', why: 'server browser' },
+    { name: 'Steam query', port: queryPort(s), proto: 'UDP', why: 'server browser' },
     { name: 'RCon', port: rconPort, proto: 'UDP', why: 'BattlEye RCon (only open if you use RCon remotely)' },
     { name: 'Website', port: web, proto: 'TCP', why: 'built-in website' }
   ];
@@ -57,22 +67,22 @@ function ports() {
 
 async function rules() {
   try {
-    const out = await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' | ForEach-Object { $pf = $_ | Get-NetFirewallPortFilter; "$($_.DisplayName)|$($_.Enabled)|$($pf.Protocol)|$($pf.LocalPort)" }`);
+    const out = await ps(`${MINE} | ForEach-Object { $pf = $_ | Get-NetFirewallPortFilter; "$($_.DisplayName)|$($_.Enabled)|$($pf.Protocol)|$($pf.LocalPort)" }`);
     return out.trim().split(/\r?\n/).filter(Boolean).map(l => { const [name, enabled, proto, port] = l.split('|'); return { name, enabled: enabled === 'True', proto, port }; });
   } catch (e) { throw new Error('Could not read the firewall rules (PowerShell): ' + (e.message || e)); }
 }
 
 async function addRules() {
-  const cmds = ports().map(p => `New-NetFirewallRule -DisplayName '${RULE_PREFIX} ${p.name} ${p.proto} ${p.port}' -Direction Inbound -Action Allow -Protocol ${p.proto} -LocalPort ${p.port} -Profile Any -ErrorAction Stop | Out-Null`);
+  const cmds = ports().map(p => `New-NetFirewallRule -DisplayName '${MY_PREFIX} ${p.name} ${p.proto} ${p.port}' -Direction Inbound -Action Allow -Protocol ${p.proto} -LocalPort ${p.port} -Profile Any -ErrorAction Stop | Out-Null`);
   await ps(`Get-NetFirewallRule -DisplayName '${OLD_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue\r\n${cmds.join('\r\n')}`, { elevated: true });
+${MINE} | Remove-NetFirewallRule -ErrorAction SilentlyContinue\r\n${cmds.join('\r\n')}`, { elevated: true });
   // verify: the rules must now exist, otherwise report it instead of pretending
   const have = await rules();
   const missing = ports().filter(p => !have.some(r => String(r.port) === String(p.port) && r.proto === p.proto));
   if (missing.length) throw new Error('Rules were not created for ' + missing.map(p => p.proto + ' ' + p.port).join(', '));
   return have;
 }
-async function removeRules() { await ps(`Get-NetFirewallRule -DisplayName '${RULE_PREFIX} *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule`, { elevated: true }); return rules(); }
+async function removeRules() { await ps(`${MINE} | Remove-NetFirewallRule`, { elevated: true }); return rules(); }
 
 // IPv4 addresses of this PC on its networks (what players on the same LAN use)
 function lanIps() { const out = []; for (const [name, list] of Object.entries(require('os').networkInterfaces())) for (const a of list || []) if (a.family === 'IPv4' && !a.internal) out.push({ name, ip: a.address }); return out; }
@@ -152,10 +162,10 @@ async function webStacks() {
 
 async function report() {
   const [ip, rl, ls] = await Promise.all([publicIp(), rules(), listening()]);
-  const qport = Number(settings.load().steamQueryPort) || 27016;
+  const qport = queryPort();
   const [queryLocal, queryPublic] = await Promise.all([a2sInfo('127.0.0.1', qport), ip ? a2sInfo(ip, qport) : Promise.resolve(null)]);
   let stacks = null; try { stacks = await webStacks(); } catch { stacks = null; }
   return { publicIp: ip, rules: rl, ports: ls, websiteReachableLocal: await tcpCheck('127.0.0.1', (settings.load().website || {}).port || 8080), queryPort: qport, queryLocal, queryPublic, stacks };
 }
 
-module.exports = { lanIps, ports, rules, addRules, removeRules, publicIp, listening, report, webStacks };
+module.exports = { queryPort, upnpLabel, lanIps, ports, rules, addRules, removeRules, publicIp, listening, report, webStacks };

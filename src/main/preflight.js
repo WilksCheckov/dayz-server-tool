@@ -80,6 +80,21 @@ function checks() {
   const port = Number(s.port) || 2302;
   const listeners = udpListeners();
   if (listeners.includes(port)) err(`UDP port ${port} is already in use on this PC: another server (or an old one) is still running. Stop it first or change the port.`);
+  try { const q = require('./network').queryPort(s), r = Number((s.rcon || {}).port) || 2306; for (const [n, what] of [[q, 'Steam query'], [r, 'RCon']]) if (n !== port && listeners.includes(n)) err(`UDP port ${n} (${what}) is already in use on this PC by another program or server. Change it, or use Fix ports on the Instances page.`); } catch { /* ignore */ }
+  // other instances on this PC: the same ports would make one of them fail; the same cores make both lag
+  try {
+    const inst = require('./instances');
+    const clash = inst.conflicts();
+    if (clash.length) { err(`Ports clash with other instances: ${clash.map(c => `${c.proto} ${c.port} (${c.mine}) is also used by ${c.by}`).join('; ')}.`); out.offers.push('ports'); }
+    const others = inst.entries().filter(e => { try { const r = JSON.parse(fs.readFileSync(path.join(e.data, 'server-process.json'), 'utf8')); process.kill(r.pid, 0); return path.resolve(e.data) !== path.resolve(require('electron').app.getPath('userData')); } catch { return false; } });
+    if (others.length) {
+      const t = require('./cpu').topology(); const gb = require('os').totalmem() / 1073741824; const n = others.length + 1;
+      if (n * 2 > t.physical) warn(`${n} servers on ${t.physical} CPU cores: each needs about 2 cores to run smoothly. Expect lag; set CPU cores to Auto on each instance so they at least do not share cores.`);
+      if (n * 5 > gb) warn(`${n} servers on ${Math.round(gb)} GB of memory: each needs 4-6 GB. Windows will page to disk and every server will lag.`);
+      const mine = require('./cpu').chosen();
+      if (mine) for (const e of others) { const c = JSON.parse(fs.readFileSync(path.join(e.data, 'settings.json'), 'utf8')).cpu || {}; if (c.mode === 'manual' && (c.cores || []).some(x => mine.includes(Number(x)))) warn(`This server and ${e.name} are pinned to some of the same CPU cores; they will slow each other down.`); }
+    }
+  } catch { /* single instance */ }
   // Windows Defender scanning every file the server reads is a common cause of starts that take many minutes
   try { const d = require('./sysinfo').cachedDefender(); if (d && d.present && d.realTime !== false && d.excluded !== true) { warn(d.excluded === false ? `Windows Defender scans the server folder (${s.installDir}). On slow machines that alone can stretch a start to 10+ minutes; exclude the folder (button below).` : `Windows Defender is on and probably scans the server folder (${s.installDir}); the tool cannot read the exclusion list without administrator rights. If starts are slow, exclude the folder (button below).`); out.offers.push('defender'); } else if (d && d.present && d.excluded) ok('Server folder excluded from Windows Defender'); } catch { /* ignore */ }
   // CPU: below 4 cores the server and Windows compete for the same cores and starts take many minutes

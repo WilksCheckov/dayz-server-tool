@@ -33,7 +33,7 @@
           <span class="topbar-sub" id="pageSubtitle"></span>
         </div>
         <div class="topbar-status">
-          <select id="profileSelect" class="input profile-select" title="Server profile"></select>
+          <select id="instanceSelect" class="input profile-select" title="Server instance: choosing another one opens its window"></select>
           <span class="pill pill-link" id="pillServer" data-go="dashboard"><span class="dot"></span>Server: Off</span>
           <span class="pill pill-link" id="pillRcon" data-go="players"><span class="dot"></span>RCon: Off</span>
           <span class="pill pill-link" id="pillDiscord" data-go="discord"><span class="dot"></span>Bot: Off</span>
@@ -139,13 +139,9 @@
                 <p class="muted">Updates come from the project's GitHub Releases. The installed version is replaced in place; your settings and data are kept.</p>
               </div>
               <div class="card">
-                <div class="card-title row between"><span>Server profiles</span><button class="btn small" id="btnProfileNew">New profile</button></div>
-                <p class="muted">Each profile is a separate set of settings (install folder, port, mods, bot…). Switching restarts the tool. Shortcuts: Ctrl+1…9 jump to pages, F5 refreshes the page, Ctrl+K go to a page by name.</p>
-                <div id="profileList"></div>
-              </div>
-              <div class="card">
                 <div class="card-title">Data</div>
                 <div class="muted" id="dataDir">—</div>
+                <p class="muted small">Shortcuts: Ctrl+1…9 jump to pages, F5 refreshes the page, Ctrl+K go to a page by name.</p>
                 <div class="row gap wrap mt">
                   <button class="btn" id="btnOpenDataDir">Open data folder</button>
                   <button class="btn" id="btnExportSettings">Export settings…</button>
@@ -245,6 +241,16 @@
               <label class="field">Other parameters <input id="extraParams" class="input" placeholder="anything else, space separated"></label>
               <label class="check"><input type="checkbox" id="autoRestart"> Auto-restart the server if it crashes or closes</label>
               <div class="row gap mt"><button class="btn primary" id="btnSaveLaunch">Save</button></div>
+            </div>
+            <div class="card">
+              <div class="card-title row between"><span>CPU cores</span><button class="btn small" id="btnCpuDetect" title="Read the processor again">Detect again</button></div>
+              <p class="muted" id="cpuInfo">—</p>
+              <div class="row gap wrap">
+                <label class="field inline">Cores <select id="cpuMode" class="input"><option value="all">Windows decides (best for one server)</option><option value="auto">Auto: this server's own share (several servers)</option><option value="manual">Choose the cores</option></select></label>
+                <label class="field inline" title="Above normal gives the server the CPU first when Windows or other programs are busy; High is rarely needed">Priority <select id="cpuPriority" class="input"><option value="normal">Normal</option><option value="abovenormal">Above normal</option><option value="high">High</option></select></label>
+              </div>
+              <div id="cpuGrid" class="cpu-grid"></div>
+              <p class="muted small" id="cpuSummary"></p>
             </div>
             <div class="card launch-card">
               <div class="card-title row between"><span>Mod lines</span><button class="btn small" id="btnCopyFullLine" title="Copy the full launch parameter line">Copy all</button></div>
@@ -412,6 +418,19 @@
         </section>
 
         <!-- NETWORK -->
+        <!-- INSTANCES -->
+        <section class="page" id="page-instances">
+          <div class="page-toolbar">
+            <span class="muted" id="instMachine">—</span><span class="grow"></span>
+            <button class="btn" id="btnInstRename" title="Rename the main instance (the one in this window)">Rename main</button>
+            <button class="btn" id="btnInstUpdateAll" title="Update the DayZ server files and mods of every instance, one after another (each stops and starts its own server)">Update all</button>
+            <button class="btn primary" id="btnInstNew">New instance</button>
+          </div>
+          <div id="instProgress" class="banner" hidden></div>
+          <div id="instList" class="inst-list"></div>
+          <p class="muted small">Each instance is a separate server in its own folder (server files, SteamCMD and its Workshop mods, the tool's data, backups) with its own ports, CPU cores, restarts, RCon, website and bot. Background instances keep running when this window is closed; open one to manage it in its own window. Rule of thumb: every running server needs about 2 CPU cores and 4-6 GB of memory.</p>
+        </section>
+
         <section class="page" id="page-network">
           <div class="card" style="flex-shrink:0">
             <div class="card-title row between"><span>Router port forwarding <span class="muted">UPnP: asks your router to send these ports to this PC</span></span><span class="row gap"><button class="btn small" id="btnUpnpCheck">Check router</button><button class="btn small primary" id="btnUpnpOpen" title="Forward every port below to this PC">Open all on router</button><button class="btn small" id="btnUpnpClose" title="Remove the forwards this tool created">Close all</button></span></div>
@@ -913,20 +932,22 @@
           <div class="page-toolbar">
             <span class="dot" id="dotDiscord"></span><span class="muted" id="discordStatusText">Bot offline</span>
             <span class="grow"></span>
+            <label class="field inline" id="discordModeWrap" hidden title="Own bot: this instance logs in with its own token. Shared: it uses the main instance's bot; its posts are labelled with its name and the main bot's commands get a server option for it.">Bot <select id="discordMode" class="input"><option value="shared">Shared with the main instance</option><option value="own">Own bot (its own token)</option><option value="off">Off</option></select></label>
             <button class="btn primary" id="btnDiscordStart">Start bot</button>
             <button class="btn" id="btnDiscordStop" hidden>Stop bot</button>
           </div>
           <div class="grid-2">
             <div class="card">
               <div class="card-title">Bot settings</div>
-              <ol class="muted steps">
+              <p class="muted" id="dcSharedNote" hidden>This instance uses the main instance's bot: no token needed here. Channels left empty use the main instance's channels; posts are labelled with this instance's name, and the main bot's commands get a server option for it. Whitelist, priority and bans made through the bot apply to every server sharing it.</p>
+              <ol class="muted steps" id="dcSteps">
                 <li>Go to <a href="#" class="ext" data-url="https://discord.com/developers/applications">discord.com/developers/applications</a>, create an application, open <b>Bot</b>, click <b>Reset Token</b> and paste it below.</li>
                 <li>In Discord, enable <b>Developer Mode</b> (Settings → Advanced), right-click your server → <b>Copy Server ID</b>.</li>
                 <li>On the Bot page also enable <b>Server Members Intent</b> under Privileged Gateway Intents (needed for roles, nicknames and timeouts).</li>
                 <li>Save, start the bot, then use the invite link to add it to your server. Slash commands appear within a minute.</li>
               </ol>
-              <label class="field">Bot token <input id="dcToken" class="input" type="password" autocomplete="off" placeholder="paste token"></label>
-              <label class="field">Server (guild) ID <input id="dcGuild" class="input" placeholder="123456789012345678"></label>
+              <label class="field" id="dcTokenWrap">Bot token <input id="dcToken" class="input" type="password" autocomplete="off" placeholder="paste token"></label>
+              <label class="field" id="dcGuildWrap">Server (guild) ID <input id="dcGuild" class="input" placeholder="123456789012345678"></label>
               <label class="field">Admin role IDs allowed to use commands (comma separated; server Administrators are always allowed) <input id="dcRoles" class="input" placeholder="optional"></label>
               <label class="field">Admin channel ID (whitelist applications and ban notices are posted here with Accept / Decline / Unban buttons) <input id="dcAdminChannel" class="input" placeholder="required for /application and bans"></label>
               <div class="card-title mt">Roles <span class="muted">kept in sync with the lists every 5 minutes and on every change</span></div>

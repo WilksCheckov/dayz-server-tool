@@ -477,7 +477,7 @@ function launchLines(s = settings.load()) {
     local: local.map(m => ({ id: m.id, enabled: m.enabled !== false, serverSide: !!m.serverSide })),
     other, counts: { client: client.length, server: serverOnly.length, local: local.length, disabled: s.mods.filter(m => m.enabled === false).length, missing: missing.length },
     missing: missing.map(m => (s.modCache[m.id] || {}).title || m.id),
-    full: [`-config=${s.configFile}`, `-port=${s.port}`, `-profiles=${s.profilesDir}`, (() => { try { const be = require('./rcon').beArg(s); return be ? (/\s/.test(be) ? `"${be}"` : be) : ''; } catch { return ''; } })(), s.cpuCount > 0 ? `-cpuCount=${s.cpuCount}` : '', other, mod ? `"-mod=${mod}"` : '', serverMod ? `"-serverMod=${serverMod}"` : ''].filter(Boolean).join(' ')
+    full: [`-config=${s.configFile}`, `-port=${s.port}`, `-profiles=${s.profilesDir}`, (() => { try { const be = require('./rcon').beArg(s); return be ? (/\s/.test(be) ? `"${be}"` : be) : ''; } catch { return ''; } })(), (() => { let n = Number(s.cpuCount) || 0; try { n = require('./cpu').cpuCountArg(s); } catch { /* ignore */ } return n > 0 ? `-cpuCount=${n}` : ''; })(), other, mod ? `"-mod=${mod}"` : '', serverMod ? `"-serverMod=${serverMod}"` : ''].filter(Boolean).join(' ')
   };
 }
 

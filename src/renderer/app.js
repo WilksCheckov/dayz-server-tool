@@ -76,6 +76,7 @@ document.querySelectorAll('.console-filters input[data-src]').forEach(cb => cb.o
 // ---------- navigation ----------
 // Sidebar structure: category -> optional subcategory -> pages. Collapsed state is remembered per group.
 const ICONS = {
+  instances: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg>',
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>',
   install: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>',
@@ -106,6 +107,7 @@ const ICONS = {
 const NAV = [
   { items: [{ page: 'dashboard', label: 'Dashboard', sub: 'Status, quick actions and console', icon: 'dashboard' }, { page: 'settings', label: 'Settings', sub: 'Tray, startup, updates and data', icon: 'settings' }] },
   { title: 'Server', items: [
+    { page: 'instances', label: 'Instances', sub: 'Several servers on this PC: each in its own folder with its own ports, cores, mods and bot', icon: 'instances' },
     { page: 'install', label: 'Installation', sub: 'Install location, SteamCMD, server files and Steam login', icon: 'install' },
     { page: 'launch', label: 'Launch', sub: 'Launch parameters and the generated mod lines', icon: 'launch' },
     { page: 'server', label: 'Config Editor', sub: 'Edit and validate serverDZ.cfg, mission XML/JSON and BattlEye configs', icon: 'server' },
@@ -175,7 +177,9 @@ function showPage(name) {
   if (name === 'bans' || name === 'whitelist' || name === 'priority') refreshLists();
   if (name === 'website') refreshWebsite();
   if (name === 'alerts') loadAlertsPage();
-  if (name === 'settings') { loadSettingsPage(); refreshProfiles(); }
+  if (name === 'settings') loadSettingsPage();
+  if (name === 'instances') refreshInstances();
+  if (name === 'launch') loadCpu();
   if (name === 'mission') refreshMission();
   if (name === 'tasks') refreshTasks();
   if (name === 'network') refreshNetwork();
@@ -780,8 +784,9 @@ $('autoRuntimes').onchange = () => saveSettings({ autoRuntimes: $('autoRuntimes'
 $('btnPreflight').onclick = (e) => run(async () => {
   const r = await ipc.invoke('server:preflight');
   const li = (items, cls) => items.map(t => `<li class="${cls}">${esc(t)}</li>`).join('');
-  const needsVc = r.error.some(t => /Visual C\+\+/.test(t)); const needsDx = r.error.some(t => /DirectX/.test(t)); const offerDef = (r.offers || []).includes('defender');
-  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, [...(needsVc ? [{ label: 'Install Visual C++ runtime', value: 'vc', primary: true }] : []), ...(needsDx ? [{ label: 'Install DirectX runtime', value: 'dx', primary: !needsVc }] : []), ...(offerDef ? [{ label: 'Exclude server folder from Defender', value: 'def', primary: !needsVc && !needsDx }] : []), { label: 'Close', value: true, primary: !needsVc && !needsDx && !offerDef }]);
+  const needsVc = r.error.some(t => /Visual C\+\+/.test(t)); const needsDx = r.error.some(t => /DirectX/.test(t)); const offerDef = (r.offers || []).includes('defender'); const offerPorts = (r.offers || []).includes('ports') && instInfo && instInfo.isChild;
+  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, [...(offerPorts ? [{ label: 'Move to free ports', value: 'ports', primary: true }] : []), ...(needsVc ? [{ label: 'Install Visual C++ runtime', value: 'vc', primary: true }] : []), ...(needsDx ? [{ label: 'Install DirectX runtime', value: 'dx', primary: !needsVc }] : []), ...(offerDef ? [{ label: 'Exclude server folder from Defender', value: 'def', primary: !needsVc && !needsDx }] : []), { label: 'Close', value: true, primary: !needsVc && !needsDx && !offerDef }]);
+  if (choice === 'ports') { const b = await ipc.invoke('instances:reassignPorts', instInfo.self); toast(`Moved to game port ${b.game}, query ${b.query}, RCon ${b.rcon}, website ${b.web}`); }
   if (choice === 'vc') { toast('Downloading and installing the Visual C++ runtime…'); const res = await ipc.invoke('server:installVcRedist'); toast(res.installed ? 'Visual C++ runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); }
   if (choice === 'def') {
     const ok = await showModal('Exclude from Windows Defender', '<p>Add the server folder (and DayZServer_x64.exe) to Windows Defender\'s exclusions, so Defender stops scanning every game file as the server loads it.</p><p class="muted">This lowers protection for that folder: only do it if the folder holds just the DayZ server and mods you trust. Windows asks for permission.</p>', [{ label: 'Add the exclusion', value: true, primary: true }, { label: 'Cancel', value: false }]);
@@ -1125,9 +1130,14 @@ function renderDiscord(st) {
   $('btnDiscordStart').hidden = st.running; $('btnDiscordStop').hidden = !st.running;
   const pd = $('pillDiscord'); pd.className = 'pill pill-link ' + (st.running ? 'ok' : ''); pd.innerHTML = `<span class="dot ${st.running ? 'ok' : ''}"></span>Bot: ${st.running ? 'On' : 'Off'}`; pd.title = st.running ? (st.presence ? `Online as ${st.tag || 'the bot'}: ${st.presence}` : `Online as ${st.tag || 'the bot'}`) : (st.error ? 'Offline: ' + st.error : 'Bot offline');
   $('btnDiscordInvite').disabled = !st.inviteUrl;
+  if (st.mode) $('discordMode').value = st.mode;
+  for (const id of ['dcSteps', 'dcTokenWrap', 'dcGuildWrap']) $(id).hidden = !!st.shared;
+  $('dcSharedNote').hidden = !st.shared;
+  if (st.shared) $('discordStatusText').textContent = st.running ? `Using the main instance's bot (${st.tag})` : 'Shared: the main instance\'s bot is offline';
   $('discordInfo').textContent = st.running
     ? `${st.commands} slash commands registered${st.guildName ? ' in ' + st.guildName : ''}${st.presence ? ' · status: ' + st.presence : ''}${st.liveLogPosted ? ' · ' + st.liveLogPosted + ' log batches posted' : ''}${st.error ? ' · ' + st.error : ''}`
     : (st.hasToken ? 'Token saved. Start the bot to register commands.' : 'No token saved yet.');
+  if (st.sharedWith && st.sharedWith.length) $('discordInfo').textContent += ` · shared with ${st.sharedWith.join(', ')} (commands take a server option)`;
   if (st.store) $('discordStore').textContent = `${st.store.applications} application(s) on file · ${st.store.bans} active ban(s) tracked by the bot · ${st.store.tickets || 0} open ticket(s)`;
   const pre = $('discordLog');
   pre.textContent = (st.log || []).map(l => `[${new Date(l.at).toLocaleTimeString()}] ${l.line}`).join('\n');
@@ -2131,16 +2141,138 @@ $('btnModCheck').onclick = (e) => run(async () => {
   await showModal(`Mod check — ${r.counts.error} errors, ${r.counts.warning} warnings`, `<div class="problems" style="height:auto;max-height:300px">${rows}</div><div class="card-title mt">Players need (${r.clientCount})</div><textarea class="input" rows="3" readonly>${esc(r.playersNeed)}</textarea><textarea class="input" rows="3" readonly>${esc(r.workshopLinks)}</textarea>`, [{ label: 'Close', value: true, primary: true }]);
 }, e.target);
 
-// ---------- profiles ----------
-async function refreshProfiles() {
-  const r = await ipc.invoke('profiles:list');
-  $('profileSelect').innerHTML = r.profiles.map(p => `<option value="${esc(p.name)}" ${p.active ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
-  $('profileList').innerHTML = r.profiles.map(p => `<div class="row gap" style="padding:4px 0"><b>${esc(p.name)}</b>${p.active ? '<span class="badge ok">active</span>' : ''}<span class="grow"></span>${p.active ? '' : `<button class="btn small pf-use" data-name="${esc(p.name)}">Switch</button>`}${p.name === 'default' || p.active ? '' : `<button class="btn small danger pf-del" data-name="${esc(p.name)}">✕</button>`}</div>`).join('');
+// ---------- instances ----------
+let instInfo = null;
+async function refreshInstanceSelect() {
+  try {
+    instInfo = await ipc.invoke('instances:defaults');
+    $('instanceSelect').innerHTML = instInfo.names.map(n => `<option value="${esc(n)}" ${n === instInfo.self ? 'selected' : ''}>${esc(n)}</option>`).join('');
+    $('instanceSelect').hidden = instInfo.names.length < 2 && !instInfo.isChild;
+    const nav = document.querySelector('.nav-btn[data-page="instances"]'); if (nav) nav.hidden = instInfo.isChild;
+    $('discordModeWrap').hidden = !instInfo.isChild;
+    if (instInfo.isChild) document.title = 'DayZ Admin Tools — ' + instInfo.self;
+  } catch { /* ignore */ }
 }
-$('profileSelect').onchange = (e) => run(async () => { const name = e.target.value; const ok = await showModal(`Switch to profile "${name}"?`, '<p>The tool restarts with that profile\'s settings. The game server keeps running.</p>', [{ label: 'Switch and restart', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) { refreshProfiles(); return; } await ipc.invoke('profiles:activate', name); });
-$('btnProfileNew').onclick = () => run(async () => { const ok = await showModal('New server profile', '<label class="field">Name <input id="mPfName" class="input" placeholder="second-server"></label><label class="check"><input type="checkbox" id="mPfCopy" checked> Copy the current settings as a starting point</label>', [{ label: 'Create', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; const cur = $('profileSelect').value; await ipc.invoke('profiles:create', $('mPfName').value, $('mPfCopy').checked ? cur : null); toast('Profile created'); refreshProfiles(); });
-$('profileList').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.classList.contains('pf-use')) { $('profileSelect').value = b.dataset.name; $('profileSelect').onchange({ target: $('profileSelect') }); } if (b.classList.contains('pf-del')) run(async () => { await ipc.invoke('profiles:remove', b.dataset.name); refreshProfiles(); }); });
+$('instanceSelect').onchange = (e) => run(async () => { const name = e.target.value; e.target.value = instInfo.self; if (name !== instInfo.self) { toast(`Opening ${name}…`); await ipc.invoke('instances:action', name, 'open'); } });
+const fmtPorts = (p) => `game ${p.game} · query ${p.query} · RCon ${p.rcon}${p.webOn ? ' · web ' + p.web : ''}`;
+function instCard(x) {
+  const st = x.status, sv = st && st.server;
+  const serverBadge = !x.toolRunning ? '<span class="badge">tool stopped</span>' : !sv ? '<span class="badge">no answer</span>' : sv.running ? (sv.stage && !sv.stage.ready ? `<span class="badge warn">loading: ${esc(sv.stage.label)}</span>` : '<span class="badge ok">server on</span>') : (sv.restartPending ? '<span class="badge warn">restarting</span>' : '<span class="badge">server off</span>');
+  const h = st && st.health; const players = h && h.players !== null && h.players !== undefined ? `<span class="badge">${h.players} player${h.players === 1 ? '' : 's'}</span>` : '';
+  const res = h && sv && sv.running ? `<span class="muted">CPU ${h.cpu !== null && h.cpu !== undefined ? Math.round(h.cpu) + '%' : '—'} · RAM ${h.ramMB ? (h.ramMB / 1024).toFixed(1) + ' GB' : '—'}${h.fps ? ' · ' + Math.round(h.fps) + ' FPS' : ''}</span>` : '';
+  const cpuText = x.cpu.mode === 'auto' ? 'Auto' + (st && st.cpu && st.cpu.chosen ? ` (logical ${st.cpu.chosen.join(', ')})` : '') : x.cpu.mode === 'manual' ? `Chosen: ${(x.cpu.cores || []).join(', ') || 'none'}` : 'Windows decides';
+  const botText = { own: 'Own bot', shared: 'Shared with main', off: 'Off' }[x.bot] || x.bot;
+  const conflict = x.conflicts.length ? `<span class="badge bad" title="${esc(x.conflicts.map(c => `${c.proto} ${c.port} also used by ${c.by}`).join('; '))}">port clash</span>` : '';
+  const running = sv && sv.running;
+  return `<div class="card inst" data-name="${esc(x.name)}">
+    <div class="row gap wrap"><b class="inst-name">${esc(x.name)}</b>${x.main ? '<span class="badge">main · this window</span>' : ''}${serverBadge}${players}${conflict}${!x.serverInstalled ? '<span class="badge warn">server not installed</span>' : ''}${!x.exists ? '<span class="badge bad">folder missing</span>' : ''}<span class="grow"></span>
+      <button class="btn small i-open">Open</button>
+      ${running ? '<button class="btn small i-restart">Restart</button><button class="btn small danger i-stop">Stop server</button>' : '<button class="btn small primary i-start">Start server</button>'}
+      <button class="btn small i-more" title="More">⋯</button></div>
+    <div class="inst-grid">
+      <span class="muted">Folder</span><code class="i-dir" title="Open the folder">${esc(x.dir)}</code>
+      <span class="muted">Ports</span><span>${fmtPorts(x.ports)}</span>
+      <span class="muted">CPU</span><span>${esc(cpuText)}</span>
+      <span class="muted">Bot</span><span>${esc(botText)}</span>
+      ${res ? '<span class="muted">Now</span>' + res : ''}
+      ${x.main ? '' : `<span class="muted">Start</span><label class="check"><input type="checkbox" class="i-auto" ${x.autoStart ? 'checked' : ''}> with the main window (its tool runs in the background)</label>`}
+    </div></div>`;
+}
+let instList = [];
+async function refreshInstances() {
+  instList = await ipc.invoke('instances:list');
+  $('instList').innerHTML = instList.map(instCard).join('');
+  if (instInfo && instInfo.cpu) { const on = instList.filter(x => x.status && x.status.server && x.status.server.running).length; $('instMachine').textContent = `${instInfo.cpu.name || 'CPU'} · ${instInfo.cpu.physical} cores / ${instInfo.cpu.logical} threads · ${instInfo.ramGb} GB · ${instList.length} instance${instList.length > 1 ? 's' : ''}, ${on} running${on * 2 > instInfo.cpu.physical || on * 5 > instInfo.ramGb ? ' — more servers than this PC comfortably carries' : ''}`; }
+}
+setInterval(() => { if (document.querySelector('#page-instances.active')) refreshInstances().catch(() => {}); }, 5000);
+ipc.on('instances:changed', () => { refreshInstanceSelect(); if (document.querySelector('#page-instances.active')) refreshInstances(); });
+ipc.on('instances:progress', (p) => { const b = $('instProgress'); b.hidden = p.step === 'Done'; b.innerHTML = `<span>${esc(p.name)}: ${esc(p.step)}${p.detail ? ' — ' + esc(p.detail) : ''}${p.step === 'Failed' ? '' : ' <span class="spinner"></span>'}</span>`; if (p.step === 'Failed') setTimeout(() => { b.hidden = true; }, 15000); });
+$('instList').addEventListener('click', (e) => {
+  const card = e.target.closest('.inst'); if (!card) return; const name = card.dataset.name; const x = instList.find(i => i.name === name); const t = e.target;
+  const act = (what, msg) => run(async () => { await ipc.invoke('instances:action', name, what); if (msg) toast(msg); refreshInstances(); }, t);
+  if (t.classList.contains('i-auto')) return run(async () => ipc.invoke('instances:setAutoStart', name, t.checked));
+  if (t.classList.contains('i-dir')) return ipc.invoke('shell:openPath', x.dir).catch(() => {});
+  if (t.classList.contains('i-open')) return act('open');
+  if (t.classList.contains('i-start')) return act('start', `Starting ${name}`);
+  if (t.classList.contains('i-restart')) return act('restart', `Restarting ${name}`);
+  if (t.classList.contains('i-stop')) return run(async () => { if (!(await showModal(`Stop ${name}?`, '<p>Players are disconnected; the world is saved first.</p>', [{ label: 'Stop server', value: true, primary: true }, { label: 'Cancel', value: false }]))) return; await ipc.invoke('instances:action', name, 'stop'); refreshInstances(); }, t);
+  if (t.classList.contains('i-more')) return run(async () => {
+    const opts = [{ label: 'Update server and mods', value: 'update' }, { label: 'Backup now', value: 'backup' }];
+    if (!x.main) opts.push({ label: 'Move to free ports', value: 'ports' }, { label: x.toolRunning ? 'Stop its tool (server keeps running)' : 'Start its tool', value: 'tool' }, { label: 'Remove…', value: 'remove' });
+    opts.push({ label: 'Cancel', value: null });
+    const c = await showModal(name, `<p class="muted">${esc(x.dir)}</p><p>Ports: ${fmtPorts(x.ports)}</p>`, opts);
+    if (c === 'update') { toast(`Updating ${name}…`); await ipc.invoke('instances:action', name, 'update'); toast(`${name} updated`); }
+    if (c === 'backup') { await ipc.invoke('instances:action', name, 'backup'); toast('Backup taken'); }
+    if (c === 'ports') { const b = await ipc.invoke('instances:reassignPorts', name); toast(`${name}: game ${b.game}, query ${b.query}, RCon ${b.rcon}, web ${b.web}`); }
+    if (c === 'tool') { if (x.toolRunning) await ipc.invoke('instances:stopTool', name); else await ipc.invoke('instances:startTool', name); }
+    if (c === 'remove') {
+      const how = await showModal(`Remove ${name}?`, `<p>Its server must be stopped. Removing it from the list keeps the folder; deleting also removes <code>${esc(x.dir)}</code> with its server files, mods, world, logs and backups.</p>`, [{ label: 'Remove, keep the folder', value: 'keep', primary: true }, { label: 'Remove and delete the folder', value: 'delete' }, { label: 'Cancel', value: null }]);
+      if (how === 'delete' && !(await showModal('Delete for good?', `<p>Delete <code>${esc(x.dir)}</code>? This cannot be undone.</p>`, [{ label: 'Delete', value: true, primary: true }, { label: 'Cancel', value: false }]))) return;
+      if (how) { await ipc.invoke('instances:remove', name, { deleteFiles: how === 'delete' }); toast(`${name} removed`); }
+    }
+    refreshInstances();
+  }, t);
+});
+$('btnInstRename').onclick = (e) => run(async () => { const ok = await showModal('Rename the main instance', `<label class="field">Name <input id="mInstName" class="input" value="${esc(instInfo.self)}"></label><p class="muted">Shown in the instance list, in shared bot posts and in the bot's server option.</p>`, [{ label: 'Save', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('instances:rename', $('mInstName').value.trim()); await refreshInstanceSelect(); refreshInstances(); }, e.target);
+$('btnInstUpdateAll').onclick = (e) => run(async () => {
+  if (!(await showModal('Update every instance?', '<p>Each instance updates its DayZ server files and mods in turn. A running server is stopped (players are warned when RCon is connected) and started again.</p>', [{ label: 'Update all', value: true, primary: true }, { label: 'Cancel', value: false }]))) return;
+  for (const x of instList) { $('instProgress').hidden = false; $('instProgress').innerHTML = `<span>Updating ${esc(x.name)}… <span class="spinner"></span></span>`; try { await ipc.invoke('instances:action', x.name, 'update'); } catch (err) { toast(`${x.name}: ${err.message}`, true); } }
+  $('instProgress').hidden = true; toast('All instances updated'); refreshInstances();
+}, e.target);
+$('btnInstNew').onclick = (e) => run(async () => {
+  const d = await ipc.invoke('instances:defaults');
+  const body = `<label class="field">Name <input id="niName" class="input" placeholder="e.g. Livonia" maxlength="32"></label>
+    <label class="field">Folder (the instance goes in a subfolder with its name) <input id="niRoot" class="input" value="${esc(d.root)}"></label>
+    <label class="field">Start from <select id="niFrom" class="input">${d.names.map(n => `<option value="${esc(n)}">a copy of ${esc(n)}</option>`).join('')}<option value="">nothing: install the server from its window</option></select></label>
+    <div id="niCopy"><label class="check"><input type="checkbox" id="niServer" checked> Copy the server files and mission (fast; otherwise SteamCMD downloads about 3 GB)</label>
+    <label class="check"><input type="checkbox" id="niMods" checked> Copy the mods, their keys and the mod list</label>
+    <label class="check"><input type="checkbox" id="niWorld"> Copy the world too (bases, vehicles, loot); off = a fresh wipe</label>
+    <label class="check"><input type="checkbox" id="niSettings" checked> Copy the tool settings (restarts, backups, alerts, website…)</label></div>
+    <label class="field">CPU cores <select id="niCpu" class="input"><option value="auto">Auto: its own share, so servers do not share cores</option><option value="all">Windows decides</option></select></label>
+    <label class="field">Discord bot <select id="niBot" class="input"><option value="shared">Shared with the main instance</option><option value="own">Its own bot (set the token in its window)</option><option value="off">Off</option></select></label>
+    <label class="check"><input type="checkbox" id="niSteam" checked> Use this window's Steam login, so it can update itself (stays encrypted in its own folder)</label>
+    <label class="check"><input type="checkbox" id="niAuto" checked> Start it with the main window</label>
+    <p class="muted small">Ports are picked automatically: the next free block (game port +100, query +100, RCon +100, website +1). Passwords and tokens are not copied: each instance keeps its own, encrypted for its own folder.</p>`;
+  const ok = await showModal('New instance', body, [{ label: 'Create', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  if (!ok) return;
+  const from = $('niFrom').value;
+  const opts = { name: $('niName').value.trim(), root: $('niRoot').value.trim(), from: from || null, copyServer: !!from && $('niServer').checked, copyMods: !!from && $('niMods').checked, copyStorage: !!from && $('niWorld').checked, copySettings: !!from && $('niSettings').checked, cpu: $('niCpu').value, bot: $('niBot').value, autoStart: $('niAuto').checked };
+  $('btnInstNew').disabled = true;
+  try {
+    const r = await ipc.invoke('instances:create', opts);
+    toast(`${r.name} created: game port ${r.ports.game}`);
+    await refreshInstanceSelect(); await refreshInstances();
+    await ipc.invoke('instances:action', r.name, 'open');
+    if ($('niSteam').checked) { try { if (await ipc.invoke('instances:shareSteamLogin', r.name)) toast(`${r.name} uses the same Steam login`); } catch (err) { toast('Steam login not shared: ' + err.message, true); } }
+  } finally { $('btnInstNew').disabled = false; }
+}, e.target);
 
+// ---------- CPU cores (Launch page) ----------
+let cpuState = null;
+async function loadCpu() { try { cpuState = await ipc.invoke('cpu:status'); renderCpu(); } catch { /* ignore */ } }
+function renderCpu() {
+  const st = cpuState; if (!st) return; const t = st.topology, c = st.config;
+  $('cpuInfo').textContent = `${t.name || 'CPU'}: ${t.physical} cores, ${t.logical} logical processors${t.smt > 1 ? ' (hyper-threading)' : ''}${t.guessed ? ' (not read from Windows yet)' : ''}.`;
+  $('cpuMode').value = c.mode; $('cpuPriority').value = c.priority || 'normal';
+  const shown = c.mode === 'manual' ? (c.cores || []).map(Number) : c.mode === 'auto' ? st.autoPreview : [];
+  let html = '';
+  for (let core = 0; core < t.physical; core++) {
+    const threads = Array.from({ length: t.smt }, (_, k) => core * t.smt + k);
+    html += `<div class="cpu-core"><div class="muted small">Core ${core}${core === 0 && t.physical >= 4 ? ' · Windows' : ''}</div>${threads.map(n => `<label class="check"><input type="checkbox" class="cpu-t" data-n="${n}" ${shown.includes(n) ? 'checked' : ''} ${c.mode === 'manual' ? '' : 'disabled'}> ${n}</label>`).join('')}</div>`;
+  }
+  $('cpuGrid').innerHTML = html;
+  $('cpuSummary').textContent = c.mode === 'all' ? 'The server may run on every core; Windows spreads the work. Best for a single server.' : c.mode === 'auto' ? `Auto: this instance gets logical processors ${st.autoPreview.join(', ')} (its share among the instances set to Auto; core 0 stays free for Windows on 4+ cores). -cpuCount=${st.cpuCount}.` : `Pinned to ${shown.length} logical processor${shown.length === 1 ? '' : 's'}; -cpuCount=${st.cpuCount}. Pick whole cores (both threads) for the best result.`;
+}
+const saveCpu = (extra = {}) => run(async () => { cpuState = await ipc.invoke('cpu:save', { mode: $('cpuMode').value, priority: $('cpuPriority').value, ...extra }); renderCpu(); toast('CPU settings saved; a running server is updated now'); });
+$('cpuMode').onchange = () => saveCpu(cpuState && $('cpuMode').value === 'manual' && !(cpuState.config.cores || []).length ? { cores: cpuState.autoPreview } : {});
+$('cpuPriority').onchange = () => saveCpu();
+$('cpuGrid').addEventListener('change', () => saveCpu({ cores: [...document.querySelectorAll('.cpu-t:checked')].map(i => Number(i.dataset.n)) }));
+$('btnCpuDetect').onclick = (e) => run(async () => { cpuState = await ipc.invoke('cpu:detect'); renderCpu(); }, e.target);
+
+// ---------- bot mode of a background instance ----------
+$('discordMode').onchange = (e) => run(async () => { renderDiscord(await ipc.invoke('discord:setMode', e.target.value)); });
+
+refreshInstanceSelect();
 // ---------- theme + shortcuts ----------
 function applyTheme(t) { document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark'; }
 $('prefTheme').onchange = () => { applyTheme($('prefTheme').value); };
@@ -2224,7 +2356,6 @@ setInterval(() => { if ($('logFollow').checked && document.querySelector('#page-
 try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch { /* ignore */ }
 (async function init() {
   await loadSettings();
-  refreshProfiles();
   await refreshSteam();
   renderServer(await ipc.invoke('server:status'));
   await refreshMods();

@@ -88,7 +88,8 @@ function saveGameplay(changes) {
 // World sizes in metres, keyed by the map name at the end of the mission template (dayzOffline.<map>).
 const WORLDS = { chernarusplus: 15360, enoch: 12800, sakhal: 10240, namalsk: 12800, deerisle: 16384, esseker: 12800, takistanplus: 12800, banov: 10240, chiemsee: 10240, iztek: 12800, melkart: 15360, valning: 10240 };
 const MAP_LABELS = { chernarusplus: 'Chernarus', enoch: 'Livonia', sakhal: 'Sakhal', namalsk: 'Namalsk', deerisle: 'Deer Isle', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', iztek: 'Iztek', melkart: 'Melkart', valning: 'Valning' };
-function mapsDir() { return path.join(settings.load().installDir, 'maps'); }
+// Background instances share the main instance's maps (sharedMapsDir), so tiles are built once per PC.
+function mapsDir() { const s = settings.load(); return s.sharedMapsDir && require('fs').existsSync(require('path').dirname(s.sharedMapsDir)) ? s.sharedMapsDir : path.join(s.installDir, 'maps'); }
 // Which map the active mission uses, its size, and the image for it if one has been added to <installDir>\maps\<map>.(png|jpg).
 // The active mission's map key (chernarusplus, enoch, …) on its own, so helpers can use it without calling mapInfo().
 function mapKey() {

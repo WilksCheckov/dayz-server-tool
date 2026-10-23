@@ -20,6 +20,72 @@ const mods = require('./mods');
 
 let emitRef = () => {};
 let client = null;
+
+// ---------- one bot for several instances ----------
+// discord.mode: 'own' (this instance logs in with its own token), 'shared' (a background instance that uses the main
+// instance's bot: its posts go through it, labelled with the instance name, and the main bot's commands take a
+// server option that reaches it), 'off'.
+const instance = require('./instance');
+const control = require('./control');
+function mode() { const d = settings.load().discord || {}; return d.mode || (d.token ? 'own' : 'off'); }
+const shared = () => instance.isChild && mode() === 'shared';
+const myName = () => instance.isChild ? instance.name : (settings.load().instanceName || 'Main');
+// background instances that share this (main) bot
+function sharedTargets() {
+  if (instance.isChild) return [];
+  try { const inst = require('./instances'); return inst.entries().filter(e => !e.main).filter(e => { try { return (JSON.parse(fs.readFileSync(path.join(e.data, 'settings.json'), 'utf8')).discord || {}).mode === 'shared'; } catch { return false; } }); } catch { return []; }
+}
+const toJSON = (x) => x && typeof x.toJSON === 'function' ? x.toJSON() : x;
+function serial(p) { if (typeof p === 'string') return { content: p }; return { content: p.content, embeds: (p.embeds || []).map(toJSON), components: (p.components || []).map(toJSON) }; }
+// what a shared instance gets instead of a real channel: sending goes through the main bot
+function sharedChannel(id) {
+  return { id, isTextBased: () => true, messages: { fetch: async () => null },
+    send: (payload) => control.request(instance.managerData, 'bot/post', { from: myName(), channelId: id, payload: serial(payload) }).then(() => ({ id: null })) };
+}
+let sharedPoll = null;
+async function startShared() {
+  await stop(true);
+  const check = async () => {
+    let h = null; try { h = await control.request(instance.managerData, 'bot/status', undefined, 4000); } catch { h = null; }
+    const was = state.running;
+    state.running = !!(h && h.running); state.tag = h && h.tag; state.guildName = h && h.guildName; state.error = state.running ? null : 'The main instance\'s bot is not running.';
+    if (state.running !== was) { addLog(state.running ? `Using the main instance's bot (${state.tag}).` : 'The main instance\'s bot is offline; posts wait until it is back.'); if (state.running) applyLiveLog(); else stopTail(); }
+    emitRef('discord:state', status());
+  };
+  state.startedAt = Date.now();
+  await check(); sharedPoll = setInterval(() => check().catch(() => {}), 30000);
+  return status();
+}
+// a command for another instance: it runs there and the reply comes back
+async function remoteExecute(target, name, sub, opt, user) {
+  let e; try { e = require('./instances').byName(target); } catch { return { content: `❌ No server called ${target}.` }; }
+  if (!control.info(e.data)) return { content: `⚠️ ${e.name}'s tool is not running, so it cannot answer.` };
+  try { const r = await control.request(e.data, 'bot/execute', { name, sub, opt, user: user ? { id: user.id, tag: user.tag } : null }, 300000); return { ...r, log: r.log ? `[${e.name}] ${r.log}` : r.log }; }
+  catch (err) { return { content: `❌ ${e.name}: ${err.message}` }; }
+}
+// whitelist, priority and bans made through the shared bot apply to every server that shares it
+const MIRRORED = ['whitelist', 'priority', 'ban', 'bebans'];
+function mirror(op, kind, ...args) {
+  if (!MIRRORED.includes(kind)) return;
+  for (const e of sharedTargets()) { if (!control.info(e.data)) { addLog(`${e.name} is not running: its ${kind} list was not updated.`); continue; } control.call(e.data, `lists:${op}`, kind, ...args).catch(err => addLog(`${e.name}: ${kind} ${op} failed: ${err.message}`)); }
+}
+function listsAdd(kind, ...args) { const r = lists.add(kind, ...args); mirror('add', kind, ...args); return r; }
+function listsRemove(kind, ...args) { const r = lists.remove(kind, ...args); mirror('remove', kind, ...args); return r; }
+// commands that act on one server get a "server" option when other instances share this bot
+const SCOPED = ['status', 'players', 'kick', 'say', 'server', 'backup', 'deaths', 'death', 'refund', 'heal', 'teleport', 'search'];
+function serverChoices() { const t = sharedTargets(); return t.length ? [myName(), ...t.map(e => e.name)].slice(0, 25) : null; }
+function addServerOption(cmds) {
+  const choices = serverChoices(); if (!choices) return cmds;
+  const opt = { type: 3, name: 'server', description: `Which server (default: ${myName()})`, required: false, choices: choices.map(n => ({ name: n, value: n })) };
+  for (const c of cmds) {
+    if (!SCOPED.includes(c.name)) continue;
+    const subs = (c.options || []).filter(o => o.type === 1);
+    if (subs.length) for (const sc of subs) sc.options = [...(sc.options || []), opt];
+    else c.options = [...(c.options || []), opt];
+  }
+  return cmds;
+}
+
 let state = { running: false, tag: null, appId: null, guildName: null, error: null, commands: 0, startedAt: null, presence: null, playersOnline: null, liveLogPosted: 0 };
 const log = [];
 
@@ -30,13 +96,18 @@ function cfg() {
     statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
     logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
     ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '', deathLogChannelId: '', summaryChannelId: '', summaryTime: '09:00',
-    ...(s.discord || {})
+    ...(shared() ? hostChannels() : {}),
+    ...(shared() ? Object.fromEntries(Object.entries(s.discord || {}).filter(([, v]) => v !== '' && v !== null && !(Array.isArray(v) && !v.length))) : (s.discord || {}))
   };
+}
+// the main instance's channel settings (not its token), read from its settings file
+function hostChannels() {
+  try { const d = JSON.parse(fs.readFileSync(path.join(instance.managerData, 'settings.json'), 'utf8')).discord || {}; const out = {}; for (const [k, v] of Object.entries(d)) if (/ChannelId$|Kinds$|ErrorsOnly$|statusFormat|offlineStatus/.test(k)) out[k] = v; return out; } catch { return {}; }
 }
 
 function status() {
   const c = cfg();
-  return { ...state, log: log.slice(-60), config: { ...c, token: c.token ? '••••' + c.token.slice(-4) : '' }, hasToken: !!c.token,
+  return { ...state, mode: mode(), shared: shared(), sharedWith: sharedTargets().map(e => e.name), instance: instance.isChild ? instance.name : null, log: log.slice(-60), config: { ...c, token: c.token ? '••••' + c.token.slice(-4) : '' }, hasToken: !!c.token,
     inviteUrl: state.appId ? `https://discord.com/oauth2/authorize?client_id=${state.appId}&scope=bot%20applications.commands&permissions=1101659225094` : null,
     store: { applications: Object.keys(store().applications).length, bans: store().bans.filter(b => b.status === 'banned').length, tickets: (store().tickets || []).filter(t => t.status === 'open').length } };
 }
@@ -153,6 +224,7 @@ async function resolvePlayer(ref) {
 }
 
 async function channel(id) {
+  if (shared()) return id ? sharedChannel(id) : null;
   if (!client || !id) return null;
   try { const ch = await client.channels.fetch(id); return ch && ch.isTextBased() ? ch : null; } catch { return null; }
 }
@@ -304,7 +376,7 @@ function deathEmbed(r) {
 }
 async function postDeath(r) { const c = cfg(); if (!state.running || !c.deathLogChannelId || !r) return; const ch = await channel(c.deathLogChannelId); if (ch) ch.send({ embeds: [deathEmbed(r)] }).catch(() => {}); }
 function feedEvent(ev) {
-  if (!client || !state.running || !ev || !ev.type) return;
+  if ((!client && !shared()) || !state.running || !ev || !ev.type) return;
   if (ev.ts < Date.now() - 2 * 60 * 1000) return; // replayed history, not live
   const c = cfg();
   let line = null, chId = null;
@@ -329,15 +401,15 @@ async function flushFeeds() {
 
 // ---------- whitelist application flow ----------
 async function applyWhitelist({ steamId, discordId, name, reviewerId }) {
-  lists.add('whitelist', { id: steamId, discordId, name }, { name, note: reviewerId ? `accepted by ${reviewerId}` : '' });
+  listsAdd('whitelist', { id: steamId, discordId, name }, { name, note: reviewerId ? `accepted by ${reviewerId}` : '' });
   const m = await member(discordId);
   const c = cfg();
   if (m && c.whitelistRoleId) m.roles.add(c.whitelistRoleId).catch(e => addLog(`Could not add whitelist role: ${e.message}`));
   if (m && name) m.setNickname(name).catch(() => {});
 }
 async function revokeWhitelist({ steamId, discordId }) {
-  if (steamId) lists.remove('whitelist', steamId);
-  if (discordId) lists.remove('whitelist', discordId);
+  if (steamId) listsRemove('whitelist', steamId);
+  if (discordId) listsRemove('whitelist', discordId);
   const m = await member(discordId);
   const c = cfg();
   if (m && c.whitelistRoleId) m.roles.remove(c.whitelistRoleId).catch(() => {});
@@ -407,7 +479,7 @@ const acceptedRow = (steamId, discordId) => new ActionRowBuilder().addComponents
 async function banUser({ steamId, discordId, reason, bannedBy, expiresAt, name }) {
   if (!steamId) throw new Error('No SteamID64 known for that player.');
   await revokeWhitelist({ steamId, discordId });
-  lists.add('ban', { id: steamId, discordId, name, reason }, { name, note: reason });
+  listsAdd('ban', { id: steamId, discordId, name, reason }, { name, note: reason });
   if (discordId) await setRole(discordId, cfg().bannedRoleId, true);
   const m = await member(discordId);
   if (m) m.send(`You have been banned. Reason: ${reason}${expiresAt ? ` (expires <t:${Math.floor(new Date(expiresAt) / 1000)}:F>)` : ''}`).catch(() => {});
@@ -436,8 +508,8 @@ async function unbanUser({ steamId, discordId, unbannedBy }) {
   const ban = store().bans.find(b => b.status === 'banned' && ((steamId && b.steamId === steamId) || (discordId && discordId !== '0' && b.discordId === discordId)));
   const sid = steamId || (ban && ban.steamId);
   const did = (discordId && discordId !== '0') ? discordId : (ban && ban.discordId);
-  if (sid) lists.remove('ban', sid);
-  if (did) lists.remove('ban', did);
+  if (sid) listsRemove('ban', sid);
+  if (did) listsRemove('ban', did);
   const g = await guild();
   if (did) await setRole(did, cfg().bannedRoleId, false);
   if (did && g) {
@@ -461,6 +533,7 @@ async function unbanUser({ steamId, discordId, unbannedBy }) {
 }
 
 let expiryTimer = null;
+let choicesTimer = null;
 async function checkExpiredBans() {
   const now = Date.now();
   for (const b of store().bans.filter(b => b.status === 'banned' && b.expiresAt && new Date(b.expiresAt).getTime() <= now)) {
@@ -514,11 +587,11 @@ async function execute(name, sub, opt, user) {
     if (!t.steamId) return { content: '❌ Give a Steam64 ID, or a Discord user who has a whitelist application on file.' };
     if (sub === 'add') {
       if (kind === 'whitelist') await applyWhitelist({ steamId: t.steamId, discordId: t.discordId, name: t.name, reviewerId: by });
-      else { lists.add(kind, { id: t.steamId, discordId: t.discordId, name: t.name }, { name: t.name, note: opt.reason || '' }); if (t.discordId) await setRole(t.discordId, cfg().priorityRoleId, true); }
+      else { listsAdd(kind, { id: t.steamId, discordId: t.discordId, name: t.name }, { name: t.name, note: opt.reason || '' }); if (t.discordId) await setRole(t.discordId, cfg().priorityRoleId, true); }
       return { content: `✅ Added \`${t.steamId}\`${t.name ? ` (${t.name})` : ''} to the ${kind}.`, log: `${who}: ${kind} add ${t.steamId}` };
     }
     if (sub === 'remove') {
-      if (kind === 'whitelist') await revokeWhitelist({ steamId: t.steamId, discordId: t.discordId }); else { lists.remove(kind, t.steamId); if (t.discordId) await setRole(t.discordId, cfg().priorityRoleId, false); }
+      if (kind === 'whitelist') await revokeWhitelist({ steamId: t.steamId, discordId: t.discordId }); else { listsRemove(kind, t.steamId); if (t.discordId) await setRole(t.discordId, cfg().priorityRoleId, false); }
       return { content: `✅ Removed \`${t.steamId}\` from the ${kind}.`, log: `${who}: ${kind} remove ${t.steamId}` };
     }
   }
@@ -535,13 +608,13 @@ async function execute(name, sub, opt, user) {
     }
     if (sub === 'battleye') {
       if (rcon.status().connected) { await rcon.addBan(opt.guid, opt.minutes || 0, opt.reason || ''); lists.saveNote(opt.guid, { note: opt.reason || '' }); return { content: `✅ BattlEye ban added live via RCon for \`${opt.guid}\`.`, log: `${who}: BE ban ${opt.guid}` }; }
-      lists.add('bebans', { id: opt.guid, minutes: opt.minutes || 0, reason: opt.reason || '' });
+      listsAdd('bebans', { id: opt.guid, minutes: opt.minutes || 0, reason: opt.reason || '' });
       return { content: `✅ Added \`${opt.guid}\` to bans.txt (run loadBans or restart).`, log: `${who}: BE ban ${opt.guid}` };
     }
     if (sub === 'remove') {
       const t = resolveTarget(opt);
       const id = t.steamId || opt.steamid64;
-      if (lists.has('bebans', id)) { lists.remove('bebans', id); return { content: `✅ Removed \`${id}\` from bans.txt.`, log: `${who}: BE unban ${id}` }; }
+      if (lists.has('bebans', id)) { listsRemove('bebans', id); return { content: `✅ Removed \`${id}\` from bans.txt.`, log: `${who}: BE unban ${id}` }; }
       const ok = await unbanUser({ steamId: t.steamId, discordId: t.discordId, unbannedBy: by || who });
       return { content: ok ? `✅ Ban lifted for \`${id}\`${t.discordId ? ' and whitelist access restored' : ''}.` : `❌ No ban found for \`${id}\`.`, log: `${who}: unban ${id}` };
     }
@@ -712,7 +785,16 @@ async function onInteraction(interaction) {
       }
       await interaction.deferReply({ ephemeral: true });
       opt._channelId = interaction.channelId;
-      const r = await execute(name, sub, opt, interaction.user);
+      const target = opt.server; delete opt.server;
+      let r;
+      if (target && target.toLowerCase() !== myName().toLowerCase()) r = await remoteExecute(target, name, sub, opt, interaction.user);
+      else if (!target && name === 'status' && sharedTargets().length) {
+        // every server at once
+        const parts = [await execute(name, sub, opt, interaction.user), ...await Promise.all(sharedTargets().map(e => remoteExecute(e.name, name, sub, opt, interaction.user)))];
+        const names = [myName(), ...sharedTargets().map(e => e.name)];
+        r = { embeds: parts.flatMap((p, i) => (p.embeds || []).map(em => { const j = toJSON(em); return { ...j, author: j.author || { name: names[i] } }; })).slice(0, 10), content: parts.filter(p => !(p.embeds || []).length && p.content).map((p, i) => `**${names[i]}**: ${p.content}`).join('\n') || undefined };
+      }
+      else r = await execute(name, sub, opt, interaction.user);
       const payload = { content: r.content, embeds: r.embeds };
       if (r.ephemeral === false) { await interaction.deleteReply().catch(() => {}); await interaction.followUp({ ...payload, ephemeral: false }); }
       else await interaction.editReply(payload);
@@ -855,10 +937,17 @@ async function updatePresence() {
   if (st.running) {
     let count = null;
     if (rcon.status().connected) { try { count = (await rcon.players()).players.length; } catch { count = null; } }
+    const others = sharedTargets();
+    if (others.length) {
+      const sts = await Promise.all(others.map(e => control.info(e.data) ? control.request(e.data, 'status', undefined, 3000).catch(() => null) : null));
+      const up = sts.filter(x => x && x.server && x.server.running);
+      count = (count || 0) + up.reduce((n, x) => n + ((x.health && x.health.players) || 0), 0);
+      const servers = 1 + up.length;
+      text = `${servers} server${servers > 1 ? 's' : ''} online | ${count} player${count === 1 ? '' : 's'}`; presence = 'online'; state.playersOnline = count;
+    }
     const max = maxPlayers();
-    text = (c.statusFormat || 'Server Online | {count}/{max} Players').replace('{count}', count === null ? '?' : String(count)).replace('{max}', max ? String(max) : '?');
-    presence = 'online';
-    state.playersOnline = count;
+    if (!others.length) text = (c.statusFormat || 'Server Online | {count}/{max} Players').replace('{count}', count === null ? '?' : String(count)).replace('{max}', max ? String(max) : '?');
+    if (!others.length) { presence = 'online'; state.playersOnline = count; }
   } else {
     text = st.restartPending ? 'Server restarting…' : (c.offlineStatus || 'Server Offline');
     presence = st.restartPending ? 'idle' : 'dnd';
@@ -886,7 +975,7 @@ function newestFile(kind) {
 }
 function pollLogs() {
   const c = cfg();
-  if (!client || !state.running || !c.liveLogChannelId) return;
+  if ((!client && !shared()) || !state.running || !c.liveLogChannelId) return;
   for (const kind of (c.liveLogKinds || [])) {
     const file = newestFile(kind);
     if (!file) continue;
@@ -909,14 +998,14 @@ function pollLogs() {
 }
 async function flushLogs() {
   const c = cfg();
-  if (!client || !state.running || !c.liveLogChannelId || !tail.queue.length || tail.paused) return;
+  if ((!client && !shared()) || !state.running || !c.liveLogChannelId || !tail.queue.length || tail.paused) return;
   const lines = tail.queue.splice(0, tail.queue.length);
   const chunks = []; let cur = '';
   for (const l of lines) { const piece = l.length > 1800 ? l.slice(0, 1800) + '…' : l; if ((cur + '\n' + piece).length > 1850) { chunks.push(cur); cur = piece; } else cur = cur ? cur + '\n' + piece : piece; }
   if (cur) chunks.push(cur);
   try {
-    const ch = await client.channels.fetch(c.liveLogChannelId);
-    if (!ch || !ch.isTextBased()) throw new Error('Live log channel is not a text channel.');
+    const ch = await channel(c.liveLogChannelId);
+    if (!ch) throw new Error('Live log channel not found or not a text channel.');
     for (const chunk of chunks.slice(0, 4)) { await ch.send('```\n' + chunk.replace(/```/g, "'''") + '\n```'); tail.posted++; }
     if (chunks.length > 4) await ch.send(`⚠️ ${chunks.length - 4} more chunk(s) skipped to respect Discord rate limits.`);
     state.liveLogPosted = tail.posted;
@@ -928,6 +1017,8 @@ function applyLiveLog() { if (!state.running) return; if (cfg().liveLogChannelId
 
 // ---------- lifecycle ----------
 async function start() {
+  if (shared()) return startShared();
+  if (mode() === 'off' && instance.isChild) throw new Error('The bot is off for this instance. Choose Own bot or Shared with the main instance.');
   const c = cfg();
   if (!c.token) throw new Error('Bot token is empty. Create a bot at discord.com/developers and paste its token.');
   if (!c.guildId) throw new Error('Guild (server) ID is empty. Enable Developer Mode in Discord, right-click your server, Copy Server ID.');
@@ -944,8 +1035,10 @@ async function start() {
       try {
         state.tag = client.user.tag; state.appId = client.application.id; state.running = true; state.startedAt = Date.now();
         const rest = new REST({ version: '10' }).setToken(c.token);
-        const cmds = buildCommands();
+        const cmds = addServerOption(buildCommands());
         await rest.put(Routes.applicationGuildCommands(state.appId, c.guildId), { body: cmds });
+        let lastChoices = JSON.stringify(serverChoices());
+        clearInterval(choicesTimer); choicesTimer = setInterval(async () => { const now = JSON.stringify(serverChoices()); if (now === lastChoices || !state.running) return; lastChoices = now; try { await rest.put(Routes.applicationGuildCommands(state.appId, c.guildId), { body: addServerOption(buildCommands()) }); addLog('Slash commands updated for the current server instances.'); } catch (e) { addLog('Updating slash commands failed: ' + e.message); } }, 60000);
         await rest.put(Routes.applicationCommands(state.appId), { body: [] }).catch(() => {}); // clear stray global commands
         state.commands = cmds.length;
         try { const g = await client.guilds.fetch(c.guildId); state.guildName = g.name; } catch { state.guildName = null; state.error = 'Bot is not in that guild yet. Use the invite link.'; }
@@ -963,7 +1056,7 @@ async function start() {
 }
 
 async function stop(silent = false) {
-  stopTail(); stopPresence(); clearInterval(expiryTimer); expiryTimer = null;
+  stopTail(); stopPresence(); clearInterval(expiryTimer); expiryTimer = null; clearInterval(sharedPoll); sharedPoll = null; clearInterval(choicesTimer); choicesTimer = null;
   if (client) { try { client.removeAllListeners(); await client.destroy(); } catch { /* ignore */ } client = null; }
   const was = state.running;
   state.running = false; state.startedAt = null; state.presence = null;
@@ -973,6 +1066,21 @@ async function stop(silent = false) {
 }
 
 function notify(ch) { if (ch === 'server:status') updatePresence().catch(() => {}); }
-function init(emit) { emitRef = emit; if (cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000); }
+function init(emit) {
+  emitRef = emit;
+  // the control routes: the main bot posts and reports for shared instances; any instance runs a routed command
+  control.route('bot/post', async ({ from, channelId, payload }) => {
+    if (!client || !state.running) throw new Error('The bot is not running.');
+    const ch = await channel(channelId || cfg().logChannelId); if (!ch) throw new Error('Channel not found.');
+    const p = { ...payload };
+    if (p.content) p.content = `**[${from}]** ${p.content}`.slice(0, 2000);
+    if (p.embeds) p.embeds = p.embeds.map(e => ({ ...e, author: e.author || { name: from } }));
+    const m = await ch.send(p); return { id: m && m.id };
+  });
+  control.route('bot/status', async () => ({ running: !!(client && state.running), tag: state.tag, guildName: state.guildName }));
+  control.route('bot/execute', async ({ name, sub, opt, user }) => { const r = await execute(name, sub, opt || {}, user); return { content: r.content, embeds: (r.embeds || []).map(toJSON), log: r.log, ephemeral: r.ephemeral }; });
+  if (shared()) setTimeout(() => start().catch(() => {}), 4000);
+  else if (mode() !== 'off' && cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000);
+}
 
 module.exports = { postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
