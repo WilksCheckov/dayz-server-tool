@@ -7,8 +7,15 @@ const { app } = require('electron');
 
 let emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'audit.log');
+// Secrets never reach the audit log: RCon and admin passwords in config text, password/token fields in arguments.
+function redact(text) {
+  return String(text)
+    .replace(/(RConPassword\s+)[^\s\\"]+/gi, '$1***')
+    .replace(/((?:password\w*|passwordAdmin|adminPassword)\s*=\s*)("[^"]*"|[^;\s\\]+)/gi, '$1"***"')
+    .replace(/("(?:password|pass|passwordHash|passwordAdmin|token|secret|apiKey|webhookUrl|steamPass\w*|keyPem|certPem)"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"***"');
+}
 function log(source, who, action, details) {
-  const entry = { ts: Date.now(), source, who: who || '', action, details: details === undefined ? '' : (typeof details === 'string' ? details : JSON.stringify(details)).slice(0, 600) };
+  const entry = { ts: Date.now(), source, who: who || '', action, details: details === undefined ? '' : redact(typeof details === 'string' ? details : JSON.stringify(details)).slice(0, 600) };
   try {
     try { if (fs.statSync(file()).size > 5 * 1024 * 1024) fs.renameSync(file(), file() + '.1'); } catch { /* none */ }
     fs.appendFileSync(file(), JSON.stringify(entry) + '\n');
@@ -29,5 +36,9 @@ function exportCsv() {
   const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
   return 'time,source,who,action,details\n' + rows.map(e => [new Date(e.ts).toISOString(), e.source, e.who, e.action, e.details].map(esc).join(',')).join('\n');
 }
-function init(emit) { emitRef = emit; }
-module.exports = { init, log, list, exportCsv, file };
+function init(emit) {
+  emitRef = emit;
+  // one-time clean-up of entries written before redaction existed
+  for (const f of [file(), file() + '.1']) { try { const raw = fs.readFileSync(f, 'utf8'); const clean = raw.split('\n').map(l => { if (!l) return l; try { const e = JSON.parse(l); e.details = redact(e.details || ''); return JSON.stringify(e); } catch { return l; } }).join('\n'); if (clean !== raw) fs.writeFileSync(f, clean); } catch { /* none */ } }
+}
+module.exports = { init, log, list, exportCsv, file, redact };

@@ -17,7 +17,7 @@ let current = { at: null, cpu: null, ramMB: null, fps: null, players: null, pid:
 let lastCpu = null; // { pid, cpuSeconds, at }
 let lastPlayersAt = 0, lastPlayers = null;
 let lowFpsSince = null;
-let saveTimer = null;
+let lastSave = 0, busy = false;
 
 function file() { return path.join(app.getPath('userData'), 'health.json'); }
 function load() { try { minutes = JSON.parse(fs.readFileSync(file(), 'utf8')).minutes || []; } catch { minutes = []; } prune(); }
@@ -27,8 +27,10 @@ function prune() { const cutoff = Date.now() - 24 * 3600 * 1000; minutes = minut
 // One PowerShell call returns CPU seconds and working set for the server process.
 function processStats(pid) {
   return new Promise(resolve => {
-    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if($p){ "$($p.CPU)|$($p.WorkingSet64)" }`], { windowsHide: true });
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if($p){ $c=[cultureinfo]::InvariantCulture; "$($p.CPU.ToString($c))|$($p.WorkingSet64)" }`], { windowsHide: true });
     let out = '';
+    const kill = setTimeout(() => { try { ps.kill(); } catch { /* gone */ } }, 15000);
+    ps.on('close', () => clearTimeout(kill));
     ps.stdout.on('data', d => { out += d; });
     ps.on('close', () => { const m = out.trim().match(/^([\d.]+)\|(\d+)$/); resolve(m ? { cpuSeconds: Number(m[1]), ram: Number(m[2]) } : null); });
     ps.on('error', () => resolve(null));
@@ -53,7 +55,7 @@ function latestFps() {
 
 async function sample() {
   const st = server.status();
-  if (!st.running) { if (current.pid) { current = { at: Date.now(), cpu: null, ramMB: null, fps: null, players: null, pid: null }; emitRef('health:sample', current); } lastCpu = null; lowFpsSince = null; return; }
+  if (!st.running) { if (current.pid) { current = { at: Date.now(), cpu: null, ramMB: null, fps: null, players: null, pid: null }; emitRef('health:sample', current); save(); } lastCpu = null; lowFpsSince = null; return; }
   const stats = await processStats(st.pid);
   let cpu = null, ramMB = null;
   if (stats) {
@@ -76,7 +78,7 @@ async function sample() {
   if (!b || b.t !== t) { b = { t, cpu: null, ram: null, fps: null, players: null, n: 0 }; minutes.push(b); prune(); }
   const avg = (old, v) => v === null ? old : (old === null ? v : Math.round((old * b.n + v) / (b.n + 1)));
   b.cpu = avg(b.cpu, cpu); b.ram = avg(b.ram, ramMB); b.fps = avg(b.fps, fps); b.players = players === null ? b.players : Math.max(b.players || 0, players); b.n++;
-  clearTimeout(saveTimer); saveTimer = setTimeout(save, 30000);
+  if (Date.now() - lastSave > 30000) { lastSave = Date.now(); save(); }
   // Thresholds
   const th = alerts.cfg().thresholds;
   if (fps !== null && fps < th.fpsBelow) { if (!lowFpsSince) lowFpsSince = Date.now(); else if (Date.now() - lowFpsSince > th.fpsForSec * 1000) alerts.alert('low-fps', `Server FPS is ${fps}`, `Below ${th.fpsBelow} for over ${Math.round(th.fpsForSec / 60)} minutes. ${players !== null ? players + ' players online.' : ''}`); }
@@ -93,7 +95,7 @@ function init(emit) {
   emitRef = emit;
   load();
   clearInterval(timer);
-  timer = setInterval(() => sample().catch(() => {}), 10000);
+  timer = setInterval(() => { if (busy) return; busy = true; sample().catch(() => {}).finally(() => { busy = false; }); }, 10000);
 }
 
 module.exports = { init, current: () => current, history, sample };

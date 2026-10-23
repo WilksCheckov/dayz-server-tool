@@ -932,6 +932,7 @@ function renderRcon(st) {
   $('dotRcon').className = 'dot ' + (st.connected ? 'ok' : '');
   $('rconStatusText').textContent = st.connected ? `RCon connected to ${st.host}:${st.port}` : (st.error ? `RCon: ${st.error}` : 'RCon disconnected');
   $('btnRconConnect').hidden = st.connected; $('btnRconDisconnect').hidden = !st.connected;
+  const dg = $('rconDiag'); if (dg) { dg.textContent = !st.connected && st.diag ? st.diag.text : ''; dg.style.color = st.diag && st.diag.step === 'failed' ? 'var(--bad)' : ''; }
   const pr = $('pillRcon'); pr.className = 'pill ' + (st.connected ? 'ok' : ''); pr.innerHTML = `<span class="dot ${st.connected ? 'ok' : ''}"></span>${st.connected ? 'RCon on' : 'RCon off'}`;
 }
 function loadRconForm() {
@@ -948,7 +949,7 @@ $('btnRconNewPw').onclick = (e) => run(async () => {
   const r = await ipc.invoke('rcon:ensure', { regenerate: true });
   if (r.action === 'error') return toast(r.error, true);
   renderRcon(await ipc.invoke('rcon:status')); loadRconForm && loadRconForm();
-  toast('New random RCon password written to BEServer_x64.cfg. Restart the server for BattlEye to pick it up.');
+  toast(r.action === 'pending' ? 'New password saved. It takes effect at the next server start; RCon keeps working with the current one until then.' : 'New random RCon password written. It is used from the next server start.');
 }, e.target);
 $('btnRconFromBe').onclick = (e) => run(async () => {
   await saveSettings({ rcon: rconForm() });

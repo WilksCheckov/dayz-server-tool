@@ -43,10 +43,10 @@ function cfg() {
 function status() { return { ...state, config: { ...cfg(), password: cfg().password ? '••••' : '' } }; }
 
 function connect(opts = {}) {
-  const c = { ...cfg(), ...opts };
-  if (!c.password) return Promise.reject(new Error('RCon password is empty. Set it in battleye\\BEServer_x64.cfg and here.'));
+  const c = { ...sessionCreds(), ...opts };
+  if (!c.password) return Promise.reject(new Error('RCon password is empty. Use "Sync with BEServer_x64.cfg" on the Players page.'));
   disconnect(true);
-  state = { connected: false, host: c.host, port: Number(c.port), error: null, lastSeen: null };
+  state = { connected: false, host: c.host, port: Number(c.port), error: null, lastSeen: null, diag: state.diag || null };
   sock = dgram.createSocket('udp4');
   sock.on('message', onMessage);
   sock.on('error', e => { setError(e.message); disconnect(); });
@@ -149,13 +149,24 @@ const kick = (num, reason = '') => command(`kick ${num} ${reason}`.trim());
 const ban = (num, minutes = 0, reason = '') => command(`ban ${num} ${minutes} ${reason}`.trim());
 const addBan = (guid, minutes = 0, reason = '') => command(`addBan ${guid} ${minutes} ${reason}`.trim());
 
-// ---------- automatic configuration from battleye\BEServer_x64.cfg ----------
-// BattlEye reads RConPassword / RConPort from that file when the server starts (DayZ may rename it to
-// BEServer_x64_active_*.cfg while running). The tool keeps its own settings and that file in step, creating
-// a password when neither has one, so RCon works without any manual setup.
+// ---------- BattlEye config: one pinned folder, written before each start ----------
+// The tool launches the server with -BEpath=<server>\battleye, so BattlEye reads exactly one config file there
+// (renamed to BEServer_x64_active_<n>.cfg while it runs). Without the pin BattlEye picks <profiles>\BattlEye,
+// so both folders are kept when pinning is off or the operator passes their own -BEpath.
 const fsx = require('fs'); const pathx = require('path');
-function beDirs() { const p = settings.paths(); return [pathx.join(p.profilesDir, 'BattlEye'), pathx.join(p.serverDir, 'battleye')]; }
-function beFiles() { const out = []; for (const d of beDirs()) { try { for (const f of fsx.readdirSync(d)) if (/^beserver_x64(?:_active_[a-z0-9]+)?\.cfg$/i.test(f)) out.push(pathx.join(d, f)); } catch { /* no folder */ } } return out; }
+function serverRunning() { try { return !!require('./server').status().running; } catch { return false; } }
+function serverStartedAt() { try { return require('./server').status().startedAt || 0; } catch { return 0; } }
+function pinnedBeDir(s = settings.load()) {
+  const p = settings.paths(s);
+  const own = String(s.extraParams || '').match(/-BEpath=("([^"]+)"|(\S+))/i);
+  if (own) { const d = own[2] || own[3]; return { dir: pathx.isAbsolute(d) ? d : pathx.join(p.serverDir, d), ours: false }; }
+  if ((s.rcon || {}).pinBePath === false) return null;
+  return { dir: pathx.join(p.serverDir, 'battleye'), ours: true };
+}
+// launch argument the server needs for the pin (null when the operator set their own or turned pinning off)
+function beArg(s = settings.load()) { const pin = pinnedBeDir(s); return pin && pin.ours ? `-BEpath=${pin.dir}` : null; }
+function beDirs() { const pin = pinnedBeDir(); if (pin) return [pin.dir]; const p = settings.paths(); return [pathx.join(p.profilesDir, 'BattlEye'), pathx.join(p.serverDir, 'battleye')]; }
+function beFiles(dirs = beDirs()) { const out = []; for (const d of dirs) { try { for (const f of fsx.readdirSync(d)) if (/^beserver_x64(?:_active_[a-z0-9]+)?\.cfg$/i.test(f)) out.push(pathx.join(d, f)); } catch { /* no folder */ } } return out; }
 function beLines(text) { return String(text || '').split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean); }
 function beParse(text) {
   const out = {};
@@ -167,6 +178,14 @@ function readBe() {
     try { const kv = beParse(fsx.readFileSync(f, 'utf8')); if (kv.rconpassword || kv.rconport) return { file: f, password: kv.rconpassword || '', port: kv.rconport ? Number(kv.rconport) : null }; } catch { /* next */ }
   }
   return null;
+}
+// The config BattlEye actually loaded for the running server: the newest _active_ copy written since the start.
+function readActive() {
+  const since = serverStartedAt() - 10000;
+  const all = [...new Set(beFiles([...beDirs(), ...(() => { const p = settings.paths(); return [pathx.join(p.profilesDir, 'BattlEye'), pathx.join(p.serverDir, 'battleye')]; })()]))];
+  const act = all.filter(f => /_active_/i.test(f)).map(f => { try { const st = fsx.statSync(f); return { f, m: Math.max(st.mtimeMs, st.ctimeMs), fresh: !since || Math.max(st.mtimeMs, st.ctimeMs) >= since }; } catch { return null; } }).filter(Boolean).sort((a, b) => (b.fresh - a.fresh) || (b.m - a.m))[0];
+  if (!act) return null;
+  try { const kv = beParse(fsx.readFileSync(act.f, 'utf8')); return { file: act.f, password: kv.rconpassword || '', port: kv.rconport ? Number(kv.rconport) : null }; } catch { return null; }
 }
 // Canonical file: one "Key value" per line, CRLF, our keys first, anything else the admin added kept as is.
 function beRender(text, password, port) {
@@ -182,43 +201,135 @@ function writeBe(password, port) {
     let text = ''; try { text = fsx.readFileSync(main, 'utf8'); } catch { /* new file */ }
     if (!next) next = beRender(text, password, port);
     if (next !== text) fsx.writeFileSync(main, next, 'utf8');
+    // a silent write failure (protected folder, other user) must not pass unnoticed
+    if (fsx.readFileSync(main, 'utf8') !== next) throw new Error(`Could not write ${main} (permissions?).`);
     if (!first) first = main;
   }
-  // an _active_ copy is what a running server actually reads; keep it in step too
-  for (const f of beFiles()) if (!/BEServer_x64\.cfg$/i.test(f)) { try { if (fsx.readFileSync(f, 'utf8') !== next) fsx.writeFileSync(f, next); } catch { /* ignore */ } }
   return first;
 }
-// Make the tool's settings and the BattlEye file agree. Returns what happened.
 function newPassword() { return require('crypto').randomBytes(18).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 16); }
-// Each install gets its own random password, generated once and kept. regenerate: true replaces it with a new one.
+// Credentials the server was started with; filled in before each start, corrected from the active file after it.
+let session = null; // { password, port, from: 'start' | 'active' }
+
+// Make the tool's settings and the BattlEye file agree before a start. While the server runs nothing is written:
+// BattlEye only reads its config at start, so a change then would only create a mismatch. A new password asked for
+// during a run is kept as pending and applied at the next start.
 function ensureConfigured({ regenerate = false } = {}) {
   const c = cfg(); if (c.autoConfigure === false) return { action: 'off' };
+  if (serverRunning()) {
+    if (regenerate) {
+      settings.save({ rcon: { ...c, pendingPassword: newPassword() } });
+      emitRef('console', { source: 'rcon', line: 'RCon: a new random password is saved and takes effect at the next server start. Until then RCon keeps the password the server started with.' });
+      return { action: 'pending' };
+    }
+    const act = readActive();
+    return { action: 'running', port: (act && act.port) || (session && session.port) || Number(c.port) || 2306, active: act ? act.file : null };
+  }
   const be = readBe();
   let password = c.password, port = Number(c.port) || 2306, action = 'ok';
+  if (c.pendingPassword) { password = c.pendingPassword; action = 'regenerated'; }
   if (regenerate) { password = newPassword(); action = 'regenerated'; }
   if (!password && be && be.password) { password = be.password; if (be.port) port = be.port; action = 'from-battleye'; }
   if (!password) { password = newPassword(); action = 'generated'; }
   let needWrite = !be || be.password !== password || be.port !== port;
-  if (!needWrite) { for (const dir of beDirs()) { try { const raw = fsx.readFileSync(pathx.join(dir, 'BEServer_x64.cfg'), 'utf8'); if (beRender(raw, password, port) !== raw) needWrite = true; } catch { needWrite = true; } } for (const f of beFiles()) { try { const raw = fsx.readFileSync(f, 'utf8'); if (beRender(raw, password, port) !== raw) needWrite = true; } catch { /* ignore */ } } }
-  if (needWrite) { try { writeBe(password, port); if (action === 'ok') action = 'wrote-battleye'; } catch (e) { return { action: 'error', error: e.message }; } }
-  try { const configs = require('./configs'); const cur = configs.cfgFormRead(); if (cur && cur.exists && cur.values && cur.values.BattlEye !== 1 && cur.values.BattlEye !== true) { configs.cfgFormWrite({ BattlEye: 1 }); emitRef('console', { source: 'rcon', line: 'RCon: BattlEye was off in serverDZ.cfg (no BattlEye = 1 line); turned it on, RCon needs it.' }); } } catch { /* config not readable yet */ }
-  if (password !== c.password || port !== c.port || c.autoConnect !== true) settings.save({ rcon: { ...c, password, port, host: c.host || '127.0.0.1', autoConnect: true } });
-  if (action !== 'ok') emitRef('console', { source: 'rcon', line: action === 'regenerated' ? `RCon: new random password written to battleye\BEServer_x64.cfg (port ${port}). Restart the server for BattlEye to pick it up.` : action === 'generated' ? `RCon configured: created a password in battleye\\BEServer_x64.cfg (port ${port}).` : action === 'from-battleye' ? `RCon configured from battleye\\BEServer_x64.cfg (port ${port}).` : `RCon: battleye\\BEServer_x64.cfg updated to match the tool's settings (port ${port}).` });
-  return { action, port, file: pathx.join(beDirs()[0], 'BEServer_x64.cfg') };
+  if (!needWrite) { for (const dir of beDirs()) { try { const raw = fsx.readFileSync(pathx.join(dir, 'BEServer_x64.cfg'), 'utf8'); if (beRender(raw, password, port) !== raw) needWrite = true; } catch { needWrite = true; } } }
+  if (needWrite) { try { writeBe(password, port); if (action === 'ok') action = 'wrote-battleye'; } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon: ' + e.message }); return { action: 'error', error: e.message }; } }
+  // stale _active_ copies from a server that did not shut down cleanly would be read as the loaded config
+  for (const f of beFiles()) if (/_active_/i.test(f)) { try { fsx.unlinkSync(f); } catch { /* in use */ } }
+  try { const configs = require('./configs'); const cur = configs.cfgFormRead(); if (cur && cur.exists && cur.values && cur.values.BattlEye !== 1 && cur.values.BattlEye !== true) { configs.cfgFormWrite({ BattlEye: 1 }); emitRef('console', { source: 'rcon', line: 'RCon: BattlEye was off in serverDZ.cfg; turned it on, RCon needs it.' }); } } catch { /* config not readable yet */ }
+  const next = { ...c, password, port, host: c.host || '127.0.0.1', autoConnect: true }; delete next.pendingPassword;
+  if (password !== c.password || port !== c.port || c.autoConnect !== true || c.pendingPassword) settings.save({ rcon: next });
+  session = { password, port, from: 'start' };
+  const file = pathx.join(beDirs()[0], 'BEServer_x64.cfg');
+  if (action !== 'ok') emitRef('console', { source: 'rcon', line: action === 'regenerated' ? `RCon: new random password written to ${file} (port ${port}).` : action === 'generated' ? `RCon configured: created a password in ${file} (port ${port}).` : action === 'from-battleye' ? `RCon configured from ${file} (port ${port}).` : `RCon: ${file} updated to match the tool's settings (port ${port}).` });
+  return { action, port, file };
 }
-// Connect on its own once the server is up: retry every 15 s for up to 10 minutes, stop when connected or the server stops.
-let autoTimer = null, autoUntil = 0;
-function autoConnectLoop() {
-  const c = cfg(); if (!c.autoConnect || !c.password) return;
-  clearInterval(autoTimer); autoUntil = Date.now() + 10 * 60000;
-  const attempt = () => { if (state.connected) { clearInterval(autoTimer); autoTimer = null; return; } if (Date.now() > autoUntil) { clearInterval(autoTimer); autoTimer = null; emitRef('console', { source: 'rcon', line: 'RCon: gave up auto-connecting after 10 minutes. Check the RCon port and BattlEye.' }); return; } connect().catch(() => {}); };
-  setTimeout(attempt, 20000); autoTimer = setInterval(attempt, 15000);
+// The Config Editor saved a BEServer_x64.cfg by hand: adopt its values (now when stopped, at the next start when running).
+function adoptFromFile(text) {
+  const kv = beParse(text); if (!kv.rconpassword && !kv.rconport) return null;
+  const c = cfg();
+  if (serverRunning()) {
+    if (kv.rconpassword && kv.rconpassword !== c.password) settings.save({ rcon: { ...c, pendingPassword: kv.rconpassword, ...(kv.rconport ? { port: Number(kv.rconport) } : {}) } });
+    emitRef('console', { source: 'rcon', line: 'RCon: BattlEye config saved. BattlEye reads it at the next server start; until then RCon keeps the password the server started with.' });
+    return { action: 'pending' };
+  }
+  settings.save({ rcon: { ...c, ...(kv.rconpassword ? { password: kv.rconpassword } : {}), ...(kv.rconport ? { port: Number(kv.rconport) } : {}) } });
+  return { action: 'adopted' };
 }
-function stopAuto() { clearInterval(autoTimer); autoTimer = null; }
-function init(emit) {
-  emitRef = emit;
-  try { ensureConfigured(); } catch { /* server not installed yet */ }
-  if (cfg().autoConnect && cfg().password) setTimeout(() => connect().catch(() => {}), 3000);
+// What to log in with right now: the loaded (active) config when the local server runs, else the settings.
+function sessionCreds() {
+  const c = cfg();
+  const local = /^(127\.|localhost$|::1$)/.test(String(c.host || '127.0.0.1'));
+  if (local && serverRunning()) {
+    const act = readActive();
+    if (act && act.password) return { host: c.host || '127.0.0.1', port: act.port || 2306, password: act.password, from: 'active' };
+    if (session) return { host: c.host || '127.0.0.1', port: session.port, password: session.password, from: session.from };
+  }
+  return { host: c.host || '127.0.0.1', port: Number(c.port) || 2306, password: c.password, from: 'settings' };
 }
 
-module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto };
+// ---------- connect when the server is ready, and say which step is failing ----------
+function setDiag(step, text) { state.diag = { step, text, at: Date.now() }; emitRef('rcon:state', status()); }
+function udpListening(port) {
+  try { const out = require('child_process').execSync('netstat -an -p udp', { encoding: 'utf8', windowsHide: true, timeout: 8000 }); return new RegExp(':' + port + '\\s').test(out); } catch { return null; }
+}
+function rptActive(withinMs = 120000) {
+  try { const p = settings.paths(); const m = fsx.readdirSync(p.profilesDir).filter(f => /\.rpt$/i.test(f)).map(f => fsx.statSync(pathx.join(p.profilesDir, f)).mtimeMs).sort((a, b) => b - a)[0]; return !!m && Date.now() - m < withinMs; } catch { return false; }
+}
+function whyNoPort(port) {
+  const reasons = [];
+  try { const cur = require('./configs').cfgFormRead(); if (cur && cur.values && cur.values.BattlEye !== 1 && cur.values.BattlEye !== true) reasons.push('BattlEye is off in serverDZ.cfg (BattlEye = 1 is missing)'); } catch { /* ignore */ }
+  const dirs = beDirs();
+  if (!dirs.some(d => fsx.existsSync(pathx.join(d, 'BEServer_x64.dll')))) reasons.push(`BEServer_x64.dll is missing in ${dirs[0]}`);
+  if (!readActive()) reasons.push('BattlEye has not loaded its config (no BEServer_x64_active_*.cfg appeared)');
+  return reasons.length ? reasons.join('; ') : `something else is stopping BattlEye from opening port ${port}; check the server console for BattlEye errors`;
+}
+let auto = { timer: null, startedAt: 0, timeouts: 0, wrongPw: 0, busy: false };
+async function attempt() {
+  if (auto.busy) return; auto.busy = true;
+  try {
+    if (state.connected) { stopAuto(); return; }
+    if (!serverRunning()) { setDiag('stopped', 'The server is not running.'); stopAuto(); return; }
+    const creds = sessionCreds();
+    if (!creds.password) { setDiag('failed', 'No RCon password is set. Use "Sync with BEServer_x64.cfg" on the Players page, then restart the server.'); stopAuto(); return; }
+    const mins = Math.round((Date.now() - auto.startedAt) / 60000);
+    const open = udpListening(creds.port);
+    if (open === false) {
+      if (rptActive() || Date.now() - auto.startedAt < 5 * 60000) setDiag('loading', `Server still starting (${mins} min so far); RCon port ${creds.port} is not open yet. The tool connects when it opens.`);
+      else setDiag('failed', `The server stopped making progress and RCon port ${creds.port} never opened: ${whyNoPort(creds.port)}.`);
+      return;
+    }
+    setDiag('logging-in', `RCon port ${creds.port} is open; logging in…`);
+    try {
+      await connect({ host: creds.host, port: creds.port, password: creds.password });
+      const secs = Math.round((Date.now() - auto.startedAt) / 1000);
+      setDiag('connected', `Connected ${secs < 120 ? secs + ' s' : Math.round(secs / 60) + ' min'} after the server started.`); stopAuto();
+    } catch (e) {
+      if (/wrong RCon password/i.test(e.message)) {
+        auto.wrongPw++;
+        const act = readActive();
+        if (act && act.password && act.password !== creds.password && auto.wrongPw < 3) { session = { password: act.password, port: act.port || creds.port, from: 'active' }; setDiag('logging-in', 'The password differed from the one BattlEye loaded; retrying with the loaded one.'); return; }
+        setDiag('failed', 'BattlEye refused the password. The password the server started with is not the one the tool has; restart the server so the tool can set it, or use "Sync with BEServer_x64.cfg".'); stopAuto(); return;
+      }
+      auto.timeouts++;
+      if (auto.timeouts >= 30 && !rptActive()) setDiag('failed', `RCon port ${creds.port} is open but BattlEye does not answer logins. Another program may be using the port, or RestrictRCon is blocking it.`);
+      else setDiag('port-open', `RCon port ${creds.port} is open but BattlEye is not answering yet (it starts answering once the server finishes loading). Retrying…`);
+    }
+  } finally { auto.busy = false; }
+}
+// Started when the server starts; checks every 10 s, no fixed time limit while the server is visibly still loading.
+function autoConnectLoop() {
+  const c = cfg(); if (!c.autoConnect) return;
+  stopAuto(); auto = { timer: null, startedAt: Date.now(), timeouts: 0, wrongPw: 0, busy: false };
+  setDiag('loading', 'Server starting; RCon connects when BattlEye is ready.');
+  auto.timer = setInterval(() => { if (Date.now() - auto.startedAt > 3 * 3600000) { setDiag('failed', 'Gave up after 3 hours.'); stopAuto(); return; } attempt().catch(() => {}); }, 10000);
+}
+function stopAuto() { clearInterval(auto.timer); auto.timer = null; }
+function init(emit) {
+  emitRef = emit;
+  try { if (!serverRunning()) ensureConfigured(); } catch { /* server not installed yet */ }
+  // a server the tool did not start (still running from before) is only tried once
+  if (cfg().autoConnect && cfg().password) setTimeout(() => connect(sessionCreds()).catch(() => {}), 3000);
+}
+
+module.exports = { init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto, beArg, readActive, adoptFromFile, sessionCreds };

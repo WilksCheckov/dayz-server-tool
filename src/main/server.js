@@ -39,6 +39,7 @@ function buildArgs(s) {
     `-port=${s.port}`,
     `-profiles=${s.profilesDir}`
   ];
+  try { const be = require('./rcon').beArg(s); if (be) args.push(be); } catch { /* ignore */ }
   if (s.cpuCount > 0) args.push(`-cpuCount=${s.cpuCount}`);
   for (const part of (s.extraParams || '').split(/\s+/)) if (part) args.push(part);
   const modList = mods.modParam(s, false);
@@ -169,9 +170,21 @@ function stop() {
     const pid = proc.pid;
     const done = () => resolve(status());
     proc.once('exit', done);
-    emitRef('console', { source: 'server', line: `Stopping server (pid ${pid})...` });
-    spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
-    setTimeout(() => { if (proc && proc.pid === pid) { try { proc.kill(); } catch { /* ignore */ } } done(); }, 8000);
+    emitRef('console', { source: 'server', line: `Stopping server (pid ${pid}): asking it to save and shut down...` });
+    // 1. RCon #shutdown when connected (the cleanest: the server saves the world and BattlEye restores its config)
+    let viaRcon = false;
+    try { const rcon = require('./rcon'); if (rcon.status().connected) { viaRcon = true; rcon.command('#shutdown').catch(() => {}); } } catch { /* ignore */ }
+    // 2. otherwise a normal close request to the process (same as closing its console window)
+    if (!viaRcon) spawn('taskkill', ['/PID', String(pid)], { windowsHide: true });
+    // 3. force only if it is still running after the grace period
+    const graceMs = (Number(settings.load().stopGraceSec) || 120) * 1000;
+    setTimeout(() => {
+      if (proc && proc.pid === pid) {
+        emitRef('console', { source: 'server', line: `Server did not stop within ${graceMs / 1000}s; forcing it closed (unsaved progress since the last autosave is lost).` });
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+        setTimeout(() => { if (proc && proc.pid === pid) { try { proc.kill(); } catch { /* ignore */ } } done(); }, 8000);
+      }
+    }, graceMs);
   });
 }
 

@@ -80,6 +80,8 @@ function checks() {
   const port = Number(s.port) || 2302;
   const listeners = udpListeners();
   if (listeners.includes(port)) err(`UDP port ${port} is already in use on this PC: another server (or an old one) is still running. Stop it first or change the port.`);
+  // memory: the server alone wants 4-6 GB; less makes Windows page and the start takes many minutes
+  try { const gb = require('os').totalmem() / 1073741824; if (gb < 8) warn(`This PC has ${gb.toFixed(1)} GB of RAM. The DayZ server wants 4-6 GB on its own, so expect very slow starts and poor performance; 8 GB or more is recommended.`); } catch { /* ignore */ }
   // disk space (best effort)
   try { const st = fs.statfsSync ? fs.statfsSync(p.serverDir) : null; if (st && st.bavail * st.bsize < 2 * 1024 * 1024 * 1024) warn('Less than 2 GB free on the server drive; logs and persistence may fail to write.'); } catch { /* ignore */ }
   return out;

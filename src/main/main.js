@@ -399,10 +399,13 @@ handle('app:exportDiagnostics', async () => {
   if (r.canceled) return null;
   const ud = app.getPath('userData'); const staging = path.join(ud, '_diag'); fs.rmSync(staging, { recursive: true, force: true }); fs.mkdirSync(staging, { recursive: true });
   const copy = (name) => { try { if (fs.existsSync(path.join(ud, name))) fs.copyFileSync(path.join(ud, name), path.join(staging, name)); } catch { /* ignore */ } };
-  for (const n of ['tool.log', 'tool.log.1', 'audit.log', 'stats.json', 'health.json', 'steam-bans.json']) copy(n);
+  for (const n of ['tool.log', 'tool.log.1', 'audit.log', 'stats.json', 'steam-bans.json']) copy(n);
   fs.writeFileSync(path.join(staging, 'settings-scrubbed.json'), JSON.stringify(scrubbedSettings(), null, 2));
   const st = { version: app.getVersion(), packaged: app.isPackaged, electron: process.versions.electron, node: process.versions.node, os: `${require('os').platform()} ${require('os').release()}`, arch: process.arch, exportedAt: new Date().toISOString(), server: (() => { try { return server.status(); } catch { return null; } })(), steam: (() => { try { const x = steamcmd.status(); return { steamcmdInstalled: x.steamcmdInstalled, serverInstalled: x.serverInstalled, serverBuild: x.serverBuild, loggedIn: x.loggedIn }; } catch { return null; } })(), mods: (() => { try { return mods.list().map(m => ({ id: m.id, title: m.title, enabled: m.enabled, installed: m.installed })); } catch { return null; } })(), recentAlerts: (() => { try { return alerts.recent(50); } catch { return null; } })() };
+  try { st.hardware = await require('./sysinfo').collect(); } catch (e) { st.hardware = { error: e.message }; }
+  try { st.rcon = { ...rcon.status(), config: undefined, loadedConfig: (() => { const a = rcon.readActive(); return a ? { file: a.file, port: a.port, passwordMatchesTool: a.password === rcon.cfg().password } : null; })() }; } catch { /* ignore */ }
   fs.writeFileSync(path.join(staging, 'system.json'), JSON.stringify(st, null, 2));
+  try { fs.writeFileSync(path.join(staging, 'health.json'), JSON.stringify({ minutes: health.history(1440), current: health.current() })); } catch { /* ignore */ }
   try { const crashesDir = path.join(settings.load().installDir, 'crashes'); const latest = fs.readdirSync(crashesDir).filter(f => f.endsWith('.json')).sort().slice(-3); for (const f of latest) fs.copyFileSync(path.join(crashesDir, f), path.join(staging, 'crash-' + f)); } catch { /* none */ }
   try { const p = settings.paths(); const rpts = fs.readdirSync(p.profilesDir).filter(f => /\.rpt$/i.test(f)).map(f => ({ f, m: fs.statSync(path.join(p.profilesDir, f)).mtimeMs })).sort((a, b) => b.m - a.m).slice(0, 1); for (const x of rpts) { const buf = fs.readFileSync(path.join(p.profilesDir, x.f)); fs.writeFileSync(path.join(staging, 'latest-' + x.f), buf.subarray(Math.max(0, buf.length - 512 * 1024))); } } catch { /* none */ }
   await zip.zipDir(staging, r.filePath); fs.rmSync(staging, { recursive: true, force: true });
@@ -483,7 +486,7 @@ handle('mods:importUnmanaged', (items) => mods.importUnmanaged(items));
 // Config editor
 handle('configs:list', () => configs.listFiles());
 handle('configs:read', (file) => configs.read(file));
-handle('configs:write', (file, text) => configs.write(file, text));
+handle('configs:write', (file, text) => { const r = configs.write(file, text); if (/BEServer_x64\.cfg$/i.test(String(file))) { try { rcon.adoptFromFile(text); } catch { /* ignore */ } } return r; });
 handle('configs:create', (file, text) => configs.createFile(file, text));
 handle('configs:validate', (file, text) => configs.validate(file, text));
 handle('configs:validateAll', () => configs.validateAll());
