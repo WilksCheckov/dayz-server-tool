@@ -118,6 +118,7 @@ Output lands in `dist\` (NSIS installer and a portable exe).
 
 ## Notes
 
+- **Releasing a new version**: `release.bat` (or the same steps by hand) must publish `dist/latest.yml` and the `.blockmap` together with the two exes; the in-app updater reads `latest.yml` from the latest GitHub release and reports a 404 without it. The updater works in the installed app; the portable exe can check but installs by hand.
 - **Startup speed**: the portable exe unpacks itself (about 85 MB) into a temp folder on every launch, which costs several seconds, and running it from a OneDrive folder adds more. Use the installer (`DayZ-Server-Tool-Setup-<version>.exe`) for day-to-day use: it starts in a second or two and updates itself in place. The tool's own initialisation takes well under a second; the rest is Electron starting.
 
 - The server app installs with an anonymous Steam login. Workshop mods require a Steam account that owns DayZ; enter it on the Install page. The password is kept in memory only.
