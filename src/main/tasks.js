@@ -52,13 +52,12 @@ async function runTask(t, reason = 'manual') {
       case 'wipe-full': case 'wipe-characters': case 'wipe-world': {
         const mission = require('./mission'); const kind = t.type === 'wipe-full' ? 'all' : t.type === 'wipe-world' ? 'world' : 'players';
         if (running) { try { if (rcon.status().connected) await rcon.say(`Server wipe in 1 minute (${kind}).`); } catch { /* ignore */ } await new Promise(r => setTimeout(r, 60000)); log('Stopping server for wipe'); await server.stop(); }
-        await backups.create('pre-wipe');
-        await mission.wipe(kind); log(`${kind} wipe done`);
-        if (running) { server.start(); log('Server started again'); }
+        try { await backups.create('pre-wipe'); await mission.wipe(kind); log(`${kind} wipe done`); }
+        finally { if (running) { try { server.start(); log('Server started again'); } catch (e) { log(`Could not start the server again: ${e.message}`); } } }
         break;
       }
       case 'update': await updater.runNow({ force: true }); break;
-      case 'restart': await scheduler.restartNow(); break;
+      case 'restart': if (!(await scheduler.restartNow())) throw new Error('the restart did not complete (see the lines above)'); break;
       case 'start': if (!running) server.start(); break;
       case 'stop': await server.stop(); break;
       case 'command': await new Promise((resolve, reject) => { const p = spawn('cmd.exe', ['/c', t.payload], { windowsHide: true }); let out = ''; p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { out += d; }); p.on('close', code => { log(`exit ${code}${out.trim() ? ': ' + out.trim().split('\n').slice(-3).join(' | ') : ''}`); code === 0 ? resolve() : reject(new Error('exit ' + code)); }); p.on('error', reject); }); break;
@@ -69,7 +68,7 @@ async function runTask(t, reason = 'manual') {
     const list = settings.load().tasks || []; const i = list.findIndex(x => x.id === t.id); if (i >= 0) { list[i].lastRun = lastRun[t.id]; settings.save({ tasks: list }); }
     emitRef('tasks:changed', {});
     return true;
-  } catch (e) { log(`failed: ${e.message}`); return false; }
+  } catch (e) { log(`failed: ${e.message}`); if (reason !== 'manual') { try { require('./alerts').alert('tool-problem', `Scheduled task failed: ${t.name || t.type}`, e.message); } catch { /* ignore */ } } return false; }
 }
 
 function tick() {

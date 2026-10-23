@@ -123,7 +123,12 @@ function copyKeys(id, src) {
   const keys = [];
   for (const k of modkeys.keysIn(src)) {
     const target = path.join(p.keysDir, path.basename(k));
-    try { fs.copyFileSync(k, target); keys.push(path.basename(k)); } catch { /* ignore */ }
+    try { fs.copyFileSync(k, target); }
+    catch (e) {
+      let same = false; try { same = fs.readFileSync(k).equals(fs.readFileSync(target)); } catch { /* target missing or unreadable */ }
+      if (!same) { emitRef('console', { source: 'mods', line: `Could not copy key ${path.basename(k)} into the keys folder: ${e.message}. Players with this mod are kicked until it is there.` }); try { require('./alerts').alert('tool-problem', `Mod key not copied: ${path.basename(k)}`, e.message); } catch { /* ignore */ } }
+    }
+    keys.push(path.basename(k));
   }
   return keys;
 }
@@ -440,7 +445,7 @@ async function importUnmanaged(items) {
   }
   settings.save({ mods, modCache });
   for (const m of settings.load().mods) {
-    try { link(m.id); } catch { /* not downloaded */ }
+    try { link(m.id); } catch (e) { if (!/not downloaded yet/i.test(e.message)) emitRef('console', { source: 'mods', line: `Could not link ${m.id}: ${e.message}` }); }
   }
   await refreshMeta(items.filter(i => i.kind === 'workshop').map(i => i.id)).catch(() => {});
   emitRef('mods:changed', {});
@@ -503,6 +508,7 @@ function modParam(s, serverSide) {
 
 // Keep the launch strings saved in the server folder so it can be started without the tool
 // (start_server.bat = full command line, modlist.txt = the -mod / -serverMod lines).
+let launchFilesWarned = null;
 function writeLaunchFiles() {
   const s = settings.load();
   const p = settings.paths(s);
@@ -527,7 +533,7 @@ function writeLaunchFiles() {
     fs.writeFileSync(path.join(p.serverDir, 'start_server.bat'), bat, 'utf8');
     fs.writeFileSync(path.join(p.serverDir, 'modlist.txt'), txt, 'utf8');
     return { bat: path.join(p.serverDir, 'start_server.bat'), modlist: path.join(p.serverDir, 'modlist.txt') };
-  } catch { return null; }
+  } catch (e) { if (launchFilesWarned !== e.message) { launchFilesWarned = e.message; emitRef('console', { source: 'mods', line: `Could not update start_server.bat / modlist.txt: ${e.message}. The tool's own launches are not affected.` }); } return null; }
 }
 
 function init(emit) {

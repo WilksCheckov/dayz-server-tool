@@ -11,7 +11,7 @@ function regInstalled(key) {
   try { const out = execSync(`reg query "${key}" /v Installed`, { encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }); return /Installed\s+REG_DWORD\s+0x1/i.test(out); } catch { return false; }
 }
 function udpListeners() {
-  try { const out = execSync('netstat -an -p udp', { encoding: 'utf8', windowsHide: true, timeout: 8000 }); return [...out.matchAll(/UDP\s+(?:0\.0\.0\.0|\d+\.\d+\.\d+\.\d+):(\d+)/g)].map(m => Number(m[1])); } catch { return []; }
+  try { const out = execSync('netstat -an -p udp', { encoding: 'utf8', windowsHide: true, timeout: 8000 }); return [...out.matchAll(/UDP\s+(?:0\.0\.0\.0|\d+\.\d+\.\d+\.\d+):(\d+)/g)].map(m => Number(m[1])); } catch { return null; }
 }
 function missionName(cfgText) { const m = String(cfgText || '').match(/^\s*template\s*=\s*"([^"]+)"/mi); return m ? m[1] : null; }
 
@@ -73,12 +73,12 @@ function checks() {
       let keys = []; try { keys = fs.readdirSync(path.join(dir, 'keys')).filter(f => /\.bikey$/i.test(f)); } catch { try { keys = fs.readdirSync(path.join(dir, 'key')).filter(f => /\.bikey$/i.test(f)); } catch { /* no keys */ } }
       if (keys.length && /verifySignatures\s*=\s*[12]/.test(cfg)) { const have = (() => { try { return fs.readdirSync(keysDir); } catch { return []; } })(); if (!keys.some(k => have.includes(k))) warn(`${folder}: its .bikey is not in the server's keys folder; with verifySignatures on, players with the mod are kicked. The Installed mods page can copy keys.`); }
     }
-  } catch { /* mods module not available */ }
+  } catch (e) { warn('The mod folder and key checks could not run: ' + e.message); }
   // BattlEye
   if (!fs.existsSync(path.join(p.serverDir, 'battleye', 'BEServer_x64.dll')) && !fs.existsSync(path.join(p.profilesDir, 'BattlEye', 'BEServer_x64.dll'))) warn('BattlEye DLL not found (battleye\\BEServer_x64.dll); BattlEye downloads it on first start if it has internet access.');
   // port already in use
   const port = Number(s.port) || 2302;
-  const listeners = udpListeners();
+  const listeners = udpListeners() || (warn('Could not check whether the ports are free (netstat did not answer); if the server fails to start, another program may hold its port.'), []);
   if (listeners.includes(port)) err(`UDP port ${port} is already in use on this PC: another server (or an old one) is still running. Stop it first or change the port.`);
   try { const q = require('./network').queryPort(s), r = Number((s.rcon || {}).port) || 2306; for (const [n, what] of [[q, 'Steam query'], [r, 'RCon']]) if (n !== port && listeners.includes(n)) err(`UDP port ${n} (${what}) is already in use on this PC by another program or server. Change it, or use Fix ports on the Instances page.`); } catch { /* ignore */ }
   // other instances on this PC: the same ports would make one of them fail; the same cores make both lag
@@ -94,7 +94,7 @@ function checks() {
       const mine = require('./cpu').chosen();
       if (mine) for (const e of others) { const c = JSON.parse(fs.readFileSync(path.join(e.data, 'settings.json'), 'utf8')).cpu || {}; if (c.mode === 'manual' && (c.cores || []).some(x => mine.includes(Number(x)))) warn(`This server and ${e.name} are pinned to some of the same CPU cores; they will slow each other down.`); }
     }
-  } catch { /* single instance */ }
+  } catch (e) { warn('The checks against the other instances (ports, cores, memory) could not run: ' + e.message); }
   // Windows Defender scanning every file the server reads is a common cause of starts that take many minutes
   try { const d = require('./sysinfo').cachedDefender(); if (d && d.present && d.realTime !== false && d.excluded !== true) { warn(d.excluded === false ? `Windows Defender scans the server folder (${s.installDir}). On slow machines that alone can stretch a start to 10+ minutes; exclude the folder (button below).` : `Windows Defender is on and probably scans the server folder (${s.installDir}); the tool cannot read the exclusion list without administrator rights. If starts are slow, exclude the folder (button below).`); out.offers.push('defender'); } else if (d && d.present && d.excluded) ok('Server folder excluded from Windows Defender'); } catch { /* ignore */ }
   // CPU: below 4 cores the server and Windows compete for the same cores and starts take many minutes

@@ -38,7 +38,7 @@ async function send(zipPath) {
       const list = fs.readdirSync(c.folder).filter(f => /^backup_.*\.zip$/i.test(f)).sort();
       for (const f of list.slice(0, Math.max(0, list.length - keep))) fs.rmSync(path.join(c.folder, f), { force: true });
       result.folder = 'ok'; log(`Off-site copy saved to ${c.folder}`);
-    } catch (e) { result.folder = e.message; log(`Off-site folder copy failed: ${e.message}`); }
+    } catch (e) { result.folder = e.message; log(`Off-site folder copy failed: ${e.message}`); try { require('./alerts').alert('backup-failed', 'Off-site copy failed', `${c.folder}: ${e.message}`); } catch { /* ignore */ } }
   }
   if (c.ftp && c.ftp.enabled && c.ftp.host) {
     try { await uploadFtp(zipPath, c.ftp); result.ftp = 'ok'; log(`Uploaded to ${c.ftp.host}${c.ftp.dir}`); }

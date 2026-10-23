@@ -3,6 +3,7 @@
 // Results are stored in userData/steam-bans.json so the pages can show them without calling Steam,
 // and everyone is re-checked once a day so a ban that lands after acceptance is noticed.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const { app } = require('electron');
 const settings = require('./settings');
@@ -10,8 +11,8 @@ const lists = require('./lists');
 
 let cache = null, timer = null, running = false, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'steam-bans.json');
-function load() { if (!cache) { try { cache = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { cache = {}; } } return cache; }
-function save() { try { fs.writeFileSync(file(), JSON.stringify(load(), null, 2)); } catch { /* ignore */ } }
+function load() { if (!cache) { cache = jsonstore.readOr(file(), {}); } return cache; }
+function save() { jsonstore.write(file(), load(), true); }
 function apiKey() { return ((settings.load().discord || {}).steamApiKey || '').trim(); }
 
 function get(steamId) { return steamId ? load()[steamId] || null : null; }
@@ -108,8 +109,9 @@ function init(emit) {
   load();
   clearInterval(timer);
   // once a day, first pass a minute after start so the bot and lists are loaded
-  timer = setInterval(() => { if (apiKey()) checkAll().catch(() => {}); }, 24 * 3600 * 1000);
-  setTimeout(() => { const st = state(); if (apiKey() && (!st.lastCheck || Date.now() - st.lastCheck > 20 * 3600 * 1000)) checkAll().catch(() => {}); }, 60 * 1000);
+  const daily = () => checkAll().catch(e => { emitRef('console', { source: 'steam', line: `Daily Steam ban check failed: ${e.message}. New VAC / game bans are not detected until it works again (check the Steam API key on the Discord Bot page).` }); try { require('./alerts').alert('update-failed', 'Daily Steam ban check failed', e.message); } catch { /* ignore */ } });
+  timer = setInterval(() => { if (apiKey()) daily(); }, 24 * 3600 * 1000);
+  setTimeout(() => { const st = state(); if (apiKey() && (!st.lastCheck || Date.now() - st.lastCheck > 20 * 3600 * 1000)) daily(); }, 60 * 1000);
 }
 
 module.exports = { init, get, all, check, checkAll, state, summary, flagged };

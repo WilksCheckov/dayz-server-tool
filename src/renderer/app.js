@@ -1639,7 +1639,7 @@ async function showDeath(id) {
     const ok = await showModal('Refund gear', `<p>Spawn the ${r.gear.length} items ${esc(r.name)} had when they died, in pristine condition, at their feet now?</p><p class="muted">Weapons come without their attachments fitted; attachments, magazines and cargo are spawned as separate items.</p>`, [{ label: 'Refund', value: true, primary: true }, { label: 'Cancel', value: false }]);
     if (!ok) return;
     const res = await ipc.invoke('deathlog:refund', r.id);
-    toast(res.status === 'done' ? `Spawned ${res.ok} of ${res.items} items at ${r.name}'s feet${res.fail ? ` (${res.fail} failed)` : ''}` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed and the server running?', res.status !== 'done');
+    toast(res.status === 'done' && res.ok > 0 ? `Spawned ${res.ok} of ${res.items} items at ${r.name}'s feet${res.fail ? ` (${res.fail} failed)` : ''}` : res.status === 'done' ? `Nothing could be spawned for ${r.name} (${res.fail} item(s) failed: classes from a removed mod?)` : res.status === 'offline' ? `${r.name} is not in game right now` : res.status === 'pending' ? 'The game picked the refund up but has not answered yet; the result shows in the death record when it does.' : res.withdrawn ? 'The game did not pick the refund up in time, so it was withdrawn and nothing was spawned. Is the server running with the bridge script loaded (it loads at server start)?' : 'The server did not answer. Is the bridge script installed and the server running?', !(res.status === 'done' && res.ok > 0) && res.status !== 'pending');
     showDeath(r.id); refreshDeathLog();
   }, e.target);
 }
@@ -2186,7 +2186,7 @@ async function refreshInstances() {
 }
 setInterval(() => { if (document.querySelector('#page-instances.active')) refreshInstances().catch(() => {}); }, 5000);
 ipc.on('instances:changed', () => { refreshInstanceSelect(); if (document.querySelector('#page-instances.active')) refreshInstances(); });
-ipc.on('instances:progress', (p) => { const b = $('instProgress'); b.hidden = p.step === 'Done'; b.innerHTML = `<span>${esc(p.name)}: ${esc(p.step)}${p.detail ? ' — ' + esc(p.detail) : ''}${p.step === 'Failed' ? '' : ' <span class="spinner"></span>'}</span>`; if (p.step === 'Failed') setTimeout(() => { b.hidden = true; }, 15000); });
+ipc.on('instances:progress', (p) => { const b = $('instProgress'); b.hidden = p.step === 'Done'; b.innerHTML = `<span>${esc(p.name)}: ${esc(p.step)}${p.detail ? ' — ' + esc(p.detail) : ''}${/^(Failed|Done)/.test(p.step) ? '' : ' <span class="spinner"></span>'}</span>`; if (p.step === 'Failed') setTimeout(() => { b.hidden = true; }, 15000); });
 $('instList').addEventListener('click', (e) => {
   const card = e.target.closest('.inst'); if (!card) return; const name = card.dataset.name; const x = instList.find(i => i.name === name); const t = e.target;
   const act = (what, msg) => run(async () => { await ipc.invoke('instances:action', name, what); if (msg) toast(msg); refreshInstances(); }, t);
@@ -2241,7 +2241,7 @@ $('btnInstNew').onclick = (e) => run(async () => {
   $('btnInstNew').disabled = true;
   try {
     const r = await ipc.invoke('instances:create', opts);
-    toast(`${r.name} created: game port ${r.ports.game}`);
+    toast(`${r.name} created: game port ${r.ports.game}${r.warnings && r.warnings.length ? ' — with warnings, see above' : ''}`, !!(r.warnings && r.warnings.length));
     await refreshInstanceSelect(); await refreshInstances();
     await ipc.invoke('instances:action', r.name, 'open');
     if ($('niFeeds').checked && opts.bot === 'shared') { try { const f = await ipc.invoke('discord:createFeedChannels', r.name); toast(`${r.name}: ${f.created.length ? 'created ' + f.created.map(n => '#' + n).join(', ') : 'using its existing feed channels'}`); } catch (err) { toast(`Feed channels not created: ${err.message} (use the button on its Discord Bot page later)`, true); } }

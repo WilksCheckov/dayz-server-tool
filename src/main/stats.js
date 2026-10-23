@@ -3,15 +3,16 @@
 // plus queries that combine it with the player database and the heat store for the Statistics page and the
 // optional daily Discord summary.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const { app } = require('electron');
 const settings = require('./settings');
 
 let db = null, timer = null, wasRunning = null;
 const file = () => path.join(app.getPath('userData'), 'stats.json');
-function load() { if (!db) { try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = { days: {}, lastSummary: null }; } db.days = db.days || {}; } return db; }
+function load() { if (!db) { db = jsonstore.readOr(file(), { days: {}, lastSummary: null }); db.days = db.days || {}; } return db; }
 let saveTimer = null;
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }, 3000); }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 3000); }
 const dayKey = (ts = Date.now()) => new Date(ts).toISOString().slice(0, 10);
 function day(ts) { const d = load(); const k = dayKey(ts); if (!d.days[k]) d.days[k] = { players: [], newPlayers: 0, connects: 0, deaths: 0, kills: 0, causes: {}, peak: 0, fpsSum: 0, fpsN: 0, playersSum: 0, playersN: 0, restarts: 0, crashes: 0, uptimeSec: 0, runSec: 0, weapons: {}, hourlyDeaths: new Array(24).fill(0) }; return d.days[k]; }
 
@@ -82,11 +83,12 @@ async function maybePostSummary() {
   const at = (dc.summaryTime || '09:00'); const now = new Date(); const hhmm = now.toTimeString().slice(0, 5);
   if (hhmm !== at) return;
   const d = load(); if (d.lastSummary === dayKey()) return;
-  d.lastSummary = dayKey(); save();
-  try { await require('./discord').postAlert({ title: 'Daily server summary', description: summaryText(), color: 0x4f8cff, channelId: dc.summaryChannelId }); } catch { /* bot offline */ }
+  // marked as sent only once Discord took it, so a bot that was offline at that minute is reported, not skipped quietly
+  try { await require('./discord').postAlert({ title: 'Daily server summary', description: summaryText(), color: 0x4f8cff, channelId: dc.summaryChannelId }); d.lastSummary = dayKey(); save(); }
+  catch (e) { d.lastSummary = dayKey(); save(); emitRef('console', { source: 'stats', line: `Daily summary not posted: ${e.message}. Use Post summary now on the Statistics page.` }); }
 }
 async function postSummaryNow() { const dc = (settings.load().discord || {}); if (!dc.summaryChannelId) throw new Error('Set a summary channel on the Discord Bot page first.'); await require('./discord').postAlert({ title: 'Daily server summary', description: summaryText(), color: 0x4f8cff, channelId: dc.summaryChannelId }); return true; }
 
-function clear() { db = { days: {}, lastSummary: null }; try { fs.writeFileSync(file(), JSON.stringify(db)); } catch { /* ignore */ } }
+function clear() { db = { days: {}, lastSummary: null }; jsonstore.write(file(), db); }
 function init() { load(); clearInterval(timer); timer = setInterval(tick, 60000); }
 module.exports = { init, recordEvent, recordSample, recordCrash, overview, totals, summaryText, postSummaryNow, clear };

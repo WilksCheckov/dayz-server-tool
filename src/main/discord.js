@@ -49,7 +49,7 @@ async function startShared() {
     let h = null; try { h = await control.request(instance.managerData, 'bot/status', undefined, 4000); } catch { h = null; }
     const was = state.running;
     state.running = !!(h && h.running); state.tag = h && h.tag; state.guildName = h && h.guildName; state.error = state.running ? null : 'The main instance\'s bot is not running.';
-    if (state.running !== was) { addLog(state.running ? `Using the main instance's bot (${state.tag}).` : 'The main instance\'s bot is offline; posts wait until it is back.'); if (state.running) applyLiveLog(); else stopTail(); }
+    if (state.running !== was) { addLog(state.running ? `Using the main instance's bot (${state.tag}).` : 'The main instance\'s bot is offline; this server\'s posts are dropped until it is back.'); if (state.running) applyLiveLog(); else stopTail(); }
     emitRef('discord:state', status());
   };
   state.startedAt = Date.now();
@@ -168,14 +168,15 @@ async function getSteamInfo(steamid64) {
   if (!key) return null;
   try { const r = await require('./steambans').check(steamid64); if (r) return r; } catch { /* fall through */ }
   try {
+    const j = (r) => { if (!r.ok) throw new Error(`Steam API HTTP ${r.status}${r.status === 403 ? ' (invalid key)' : r.status === 429 ? ' (rate limited)' : ''}`); return r.json(); };
     const [b, s] = await Promise.all([
-      fetch(`https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${key}&steamids=${steamid64}`).then(r => r.json()),
-      fetch(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${key}&steamids=${steamid64}`).then(r => r.json())
+      fetch(`https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${key}&steamids=${steamid64}`).then(j),
+      fetch(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${key}&steamids=${steamid64}`).then(j)
     ]);
     const bans = b && b.players && b.players[0], sum = s && s.response && s.response.players && s.response.players[0];
     if (!bans || !sum) return null;
     return { vacBanned: bans.VACBanned, vacBans: bans.NumberOfVACBans, gameBans: bans.NumberOfGameBans, tradeBanned: bans.EconomyBan !== 'none', communityBanned: !!bans.CommunityBanned, isPrivate: sum.communityvisibilitystate !== 3, personaName: sum.personaname };
-  } catch { return null; }
+  } catch (e) { warnOnce('steamlookup', `Steam lookup failed: ${e.message}. Applications show the Steam checks as unknown until it works.`); return null; }
 }
 
 // ---------- command definitions ----------
@@ -262,7 +263,12 @@ async function postAlert({ title, description, color, channelId }) {
   if (!ch) throw new Error('no channel');
   await ch.send({ embeds: [new EmbedBuilder().setTitle(title).setDescription(String(description || '-').slice(0, 4000)).setColor(color || 0x4f8cff).setTimestamp(new Date())] });
 }
-async function postLog(text) { const ch = await channel(cfg().logChannelId); if (ch) ch.send(text).catch(() => {}); }
+// A post that cannot be delivered (channel deleted, wrong ID, missing permission) is said on the Bot page, once per
+// channel every 10 minutes, instead of disappearing.
+const warned = {};
+function warnOnce(key, msg) { const now = Date.now(); if (warned[key] && now - warned[key] < 600000) return; warned[key] = now; addLog(msg); }
+const sendFailed = (what, id) => e => warnOnce(what + id, `${what} not posted to channel ${id}: ${e && e.message || e}`);
+async function postLog(text) { const id = cfg().logChannelId; if (!id) return; const ch = await channel(id); if (!ch) return warnOnce('log' + id, `Action log channel ${id} not found or not visible to the bot.`); ch.send(text).catch(sendFailed('Action log', id)); }
 async function guild() { try { return client ? await client.guilds.fetch(cfg().guildId) : null; } catch { return null; } }
 async function member(discordId) { const g = await guild(); if (!g || !discordId) return null; return g.members.fetch(discordId).catch(() => null); }
 
@@ -399,11 +405,11 @@ function deathEmbed(r) {
   if (r.attackers && r.attackers.length) e.addFields({ name: 'Damage sources before death', value: r.attackers.map(a => `${a.name}${a.player ? '' : ' (' + (a.kind || 'environment') + ')'}: ${a.hits} hit${a.hits === 1 ? '' : 's'}, ${Math.round(a.damage)} dmg`).join('\n').slice(0, 1000) });
   if (r.gear && r.gear.length) { const counts = {}; for (const g of r.gear) counts[g.c] = (counts[g.c] || 0) + 1; e.addFields({ name: `Gear (${r.gear.length} items, ${r.gearFromCorpse ? 'from the body' : 'last snapshot before death'})`, value: Object.entries(counts).map(([c, n]) => n > 1 ? `${c} ×${n}` : c).join(', ').slice(0, 1000) }); }
   else e.addFields({ name: 'Gear', value: 'No snapshot (bridge script not running when they died)' });
-  if (r.refunds && r.refunds.length) e.addFields({ name: 'Refunds', value: r.refunds.map(f => `<t:${Math.floor(f.ts / 1000)}:R> by ${f.by}: ${f.ok}/${f.items} items`).join('\n').slice(0, 1000) });
+  if (r.refunds && r.refunds.length) e.addFields({ name: 'Refunds', value: r.refunds.map(f => `<t:${Math.floor(f.ts / 1000)}:R> by ${f.by}: ${f.ok}/${f.items} items${f.status !== 'done' ? ' (' + f.status + ', nothing spawned)' : ''}`).join('\n').slice(0, 1000) });
   e.setFooter({ text: `/refund id:${r.id} spawns this gear at the player's feet while they are online` });
   return e;
 }
-async function postDeath(r) { const c = cfg(); if (!state.running || !c.deathLogChannelId || !r) return; const ch = await channel(c.deathLogChannelId); if (ch) ch.send({ embeds: [deathEmbed(r)] }).catch(() => {}); }
+async function postDeath(r) { const c = cfg(); if (!state.running || !c.deathLogChannelId || !r) return; const ch = await channel(c.deathLogChannelId); if (!ch) return warnOnce('death' + c.deathLogChannelId, `Death log channel ${c.deathLogChannelId} not found or not visible to the bot.`); ch.send({ embeds: [deathEmbed(r)] }).catch(sendFailed('Death log', c.deathLogChannelId)); }
 function feedEvent(ev) {
   if ((!client && !shared()) || !state.running || !ev || !ev.type) return;
   if (ev.ts < Date.now() - 2 * 60 * 1000) return; // replayed history, not live
@@ -421,10 +427,10 @@ async function flushFeeds() {
   feedTimer = null;
   for (const [chId, lines] of Object.entries(feedQueue)) {
     delete feedQueue[chId];
-    const ch = await channel(chId); if (!ch) continue;
+    const ch = await channel(chId); if (!ch) { warnOnce('feed' + chId, `Feed channel ${chId} not found or not visible to the bot; kill / join posts are dropped.`); continue; }
     let chunk = '';
-    for (const l of lines) { if (chunk.length + l.length + 1 > 1900) { await ch.send(chunk).catch(() => {}); chunk = ''; } chunk += (chunk ? '\n' : '') + l; }
-    if (chunk) await ch.send(chunk).catch(() => {});
+    for (const l of lines) { if (chunk.length + l.length + 1 > 1900) { await ch.send(chunk).catch(sendFailed('Feed', chId)); chunk = ''; } chunk += (chunk ? '\n' : '') + l; }
+    if (chunk) await ch.send(chunk).catch(sendFailed('Feed', chId));
   }
 }
 
@@ -515,7 +521,7 @@ async function banUser({ steamId, discordId, reason, bannedBy, expiresAt, name }
   const g = await guild();
   if (discordId && g) {
     if (!expiresAt) g.members.ban(discordId, { reason: `Permanently banned: ${reason}` }).catch(e => addLog(`Discord ban failed: ${e.message}`));
-    else if (m) { const ms = Math.min(new Date(expiresAt) - Date.now(), 28 * 86400000); if (ms > 0) m.timeout(ms, `Temporarily banned: ${reason}`).catch(() => {}); }
+    else if (m) { const ms = Math.min(new Date(expiresAt) - Date.now(), 28 * 86400000); if (ms > 0) m.timeout(ms, `Temporarily banned: ${reason}`).catch(e => addLog(`Discord timeout failed for ${discordId}: ${e.message} (the bot needs Moderate Members and a role above theirs)`)); }
   }
   const embed = new EmbedBuilder().setColor(0x8b0000).setTitle('Player Banned').addFields(
     { name: 'Discord User', value: discordId ? `<@${discordId}>` : 'Unknown', inline: true },
@@ -526,7 +532,8 @@ async function banUser({ steamId, discordId, reason, bannedBy, expiresAt, name }
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Success').setCustomId(`unban-${steamId}-${discordId || '0'}`).setLabel('Unban'));
   const ch = await channel(cfg().adminChannelId);
   let msg = null;
-  if (ch) msg = await ch.send({ embeds: [embed], components: [row] }).catch(() => null);
+  if (ch) msg = await ch.send({ embeds: [embed], components: [row] }).catch(e => { addLog(`Ban notice not posted to the admin channel: ${e.message}`); return null; });
+  else addLog(cfg().adminChannelId ? `Ban notice not posted: admin channel ${cfg().adminChannelId} not found or not visible to the bot.` : 'Ban notice not posted: no admin channel set.');
   store().bans.push({ messageId: msg ? msg.id : null, steamId, discordId: discordId || null, reason, bannedBy: bannedBy || null, bannedAt: new Date().toISOString(), expiresAt: expiresAt || null, status: 'banned', name: name || '' });
   if (discordId && store().applications[discordId]) store().applications[discordId].status = 'banned';
   saveStore();
@@ -542,9 +549,9 @@ async function unbanUser({ steamId, discordId, unbannedBy }) {
   const g = await guild();
   if (did) await setRole(did, cfg().bannedRoleId, false);
   if (did && g) {
-    if (!ban || !ban.expiresAt) g.members.unban(did, 'Ban lifted').catch(() => {});
+    if (!ban || !ban.expiresAt) g.members.unban(did, 'Ban lifted').catch(e => { if (!/Unknown Ban/i.test(e.message)) addLog(`Discord unban failed for ${did}: ${e.message}; lift it by hand in Server Settings → Bans.`); });
     const m = await member(did);
-    if (m) { m.timeout(null, 'Ban lifted').catch(() => {}); m.send('You have been unbanned and your whitelist access has been restored.').catch(() => {}); }
+    if (m) { m.timeout(null, 'Ban lifted').catch(e => addLog(`Removing the Discord timeout failed for ${did}: ${e.message}`)); m.send('You have been unbanned and your whitelist access has been restored.').catch(() => {}); }
   }
   const appRec = did && store().applications[did];
   if (appRec && appRec.status === 'banned') { appRec.status = 'accepted'; await applyWhitelist({ steamId: appRec.steamId, discordId: did, name: appRec.characterName }); }
@@ -575,7 +582,7 @@ async function checkExpiredBans() {
     const m = await g.members.fetch(b.discordId).catch(() => null);
     if (!m || (m.communicationDisabledUntilTimestamp && m.communicationDisabledUntilTimestamp > now)) continue;
     const ms = Math.min(new Date(b.expiresAt) - now, 28 * 86400000);
-    if (ms > 0) m.timeout(ms, 'Renewing temporary ban').catch(() => {});
+    if (ms > 0) m.timeout(ms, 'Renewing temporary ban').catch(e => warnOnce('renew' + b.discordId, `Renewing the Discord timeout failed for ${b.discordId}: ${e.message}`));
   }
 }
 
@@ -727,7 +734,10 @@ async function execute(name, sub, opt, user) {
     if (!r.gear || !r.gear.length) return { content: `Death #${r.id} of ${r.name} has no gear snapshot (the bridge script was not running).` };
     try {
       const res = await dl.refund(r.id, { by: who });
-      if (res.status === 'done') { await postLog(`↩️ ${who} refunded ${res.ok}/${res.items} items to ${r.name} (death #${r.id})`); return { content: `✅ Refunded ${res.ok} of ${res.items} items to **${r.name}** at their feet${res.fail ? ` (${res.fail} could not be spawned)` : ''}.` }; }
+      if (res.status === 'done' && res.ok > 0) { await postLog(`↩️ ${who} refunded ${res.ok}/${res.items} items to ${r.name} (death #${r.id})`); return { content: `✅ Refunded ${res.ok} of ${res.items} items to **${r.name}** at their feet${res.fail ? ` (${res.fail} could not be spawned)` : ''}.` }; }
+      if (res.status === 'done') return { content: `❌ Nothing could be spawned for **${r.name}**: all ${res.fail} item(s) failed (classes from a removed mod?).` };
+      if (res.status === 'pending') return { content: 'The game picked the refund up but has not answered yet; its result is recorded on the death when it does. Check with /death before trying again.' };
+      if (res.withdrawn) return { content: 'The game did not pick the refund up in time, so it was withdrawn and nothing was spawned. Safe to try again once the server is up with the bridge script loaded.' };
       if (res.status === 'offline') return { content: `${r.name} is not in game right now; they must be online and alive to receive a refund.` };
       return { content: 'The server did not answer in time. Is the bridge script installed (Death log page) and the server running?' };
     } catch (e) { return { content: '⚠️ ' + e.message }; }

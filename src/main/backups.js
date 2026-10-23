@@ -33,7 +33,8 @@ function stamp(d = new Date()) {
 function robocopy(src, dest) {
   return new Promise((resolve) => {
     const proc = spawn('robocopy', [src, dest, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'], { windowsHide: true });
-    proc.on('close', code => resolve(code)); // robocopy codes < 8 are success
+    proc.on('close', code => resolve(code)); // robocopy: < 8 success, 8-15 some files not copied, 16 nothing copied
+    proc.on('error', () => resolve(16));
   });
 }
 
@@ -66,7 +67,7 @@ async function create(label = 'manual') {
     let any = false;
     for (const src of sources()) {
       if (!fs.existsSync(src.src)) { log(`Skipping ${src.name} (not found)`); continue; }
-      if (src.type === 'dir') await robocopy(src.src, path.join(staging, src.name));
+      if (src.type === 'dir') { const rc = await robocopy(src.src, path.join(staging, src.name)); if (rc >= 16) throw new Error(`Copying ${src.name} failed completely (robocopy code ${rc}): access denied or the path is wrong.`); if (rc >= 8) log(`Some files in ${src.name} could not be copied (in use or access denied); the backup has the rest.`); }
       else if (src.type === 'json') { const dst = path.join(staging, src.name); fs.mkdirSync(dst, { recursive: true }); for (const n of fs.readdirSync(src.src)) if (/\.json$/i.test(n)) { try { fs.copyFileSync(path.join(src.src, n), path.join(dst, n)); } catch { /* ignore */ } } }
       else fs.copyFileSync(src.src, path.join(staging, src.name));
       any = true;
@@ -131,7 +132,7 @@ async function restore(name) {
     for (const src of sources()) {
       const from = path.join(staging, src.name);
       if (!fs.existsSync(from)) continue;
-      if (src.type === 'dir') { fs.mkdirSync(src.restoreTo, { recursive: true }); await robocopy(from, src.restoreTo); }
+      if (src.type === 'dir') { fs.mkdirSync(src.restoreTo, { recursive: true }); const rc = await robocopy(from, src.restoreTo); if (rc >= 8) throw new Error(`Restoring ${src.name} failed (robocopy code ${rc}): files are in use or access was denied. Stop the server and try again; the folder may now be partly restored.`); }
       else fs.copyFileSync(from, src.restoreTo);
       log(`Restored ${src.name}`);
     }

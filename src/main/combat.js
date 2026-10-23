@@ -2,14 +2,15 @@
 // Combat statistics from the admin log: damage dealt and taken, hits by weapon, body parts, kill distances,
 // kills per weapon per player, rivalries and base-building actions. Aggregated counters in userData/combat.json.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const { app } = require('electron');
 
 let db = null, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'combat.json');
-function load() { if (!db) { try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = {}; } db.players = db.players || {}; db.weapons = db.weapons || {}; db.parts = db.parts || {}; db.pairs = db.pairs || {}; db.totals = db.totals || { hits: 0, damage: 0, kills: 0, pveHitsTaken: 0 }; } return db; }
+function load() { if (!db) { db = jsonstore.readOr(file(), {}); db.players = db.players || {}; db.weapons = db.weapons || {}; db.parts = db.parts || {}; db.pairs = db.pairs || {}; db.totals = db.totals || { hits: 0, damage: 0, kills: 0, pveHitsTaken: 0 }; } return db; }
 let saveTimer = null;
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }, 2000); }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 2000); }
 function player(key, name) { const d = load(); if (!d.players[key]) d.players[key] = { name, dealt: 0, taken: 0, hits: 0, hitsTaken: 0, headshots: 0, kills: 0, killsBy: {}, deathsBy: {}, longestKill: 0, distSum: 0, distN: 0, builds: 0, pveTaken: 0, parts: {}, hitDistSum: 0, hitDistN: 0, recentHits: [], recentKills: [], lastPos: null, flags: {}, flagScore: 0, lastFlagAt: 0 }; const p = d.players[key]; if (name) p.name = name; p.parts = p.parts || {}; p.recentHits = p.recentHits || []; p.recentKills = p.recentKills || []; p.flags = p.flags || {}; p.flagScore = p.flagScore || 0; p.hitDistSum = p.hitDistSum || 0; p.hitDistN = p.hitDistN || 0; return p; }
 
 // ---------- suspicious activity ----------

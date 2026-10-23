@@ -71,7 +71,11 @@ function read(kind) {
     const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
     exists = true;
     entries = lines.map(l => parseLine(kind, l)).filter(Boolean);
-  } catch { /* missing file */ }
+  } catch (e) {
+    // only a missing file means an empty list; anything else must not be taken as empty, or the next add or remove
+    // would write a list with just that one entry over the real one
+    if (e.code !== 'ENOENT') throw new Error(`Could not read ${path.basename(file)} (${e.message}); not changing it. Close whatever has it open (OneDrive, an editor, antivirus) and try again.`);
+  }
   entries = entries.map(e => {
     const note = n[e.id] || (e.steamId && n[e.steamId]) || {};
     return { ...e, name: e.name || note.name || '', note: e.reason || note.note || '', added: note.added || null };

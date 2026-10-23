@@ -2,6 +2,7 @@
 // Player database built incrementally from the admin logs (.ADM): sessions, playtime, kills/deaths, name history,
 // last position, joined with the whitelist/ban lists and the Discord bot's applications.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const { app } = require('electron');
 const settings = require('./settings');
@@ -10,12 +11,16 @@ const server = require('./server');
 
 let emitRef = () => {};
 let timer = null;
+// A reader that keeps failing (a locked .ADM, a log line it cannot parse) is said once per kind every 10 minutes:
+// the player database, kill feed, combat flags, death log, gear snapshots and dupe check all depend on it.
+const lastProblem = {};
+function problem(what, e) { const now = Date.now(); const k = what + '|' + (e && e.message); if (lastProblem[k] && now - lastProblem[k] < 600000) return; lastProblem[k] = now; emitRef('console', { source: 'players', line: `${what} failed: ${e && e.message || e}` }); }
 let db = null; // { players: {key: rec}, files: {name: {offset, date, lastTime}}, peaks: {YYYY-MM-DD: n}, online: {key: startTs} }
 
 function file() { return path.join(app.getPath('userData'), 'players.json'); }
-function load() { if (db) return db; try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = null; } db = { players: {}, files: {}, peaks: {}, online: {}, ...(db || {}) }; return db; }
+function load() { if (db) return db; db = jsonstore.readOr(file(), null); db = { players: {}, files: {}, peaks: {}, online: {}, ...(db || {}) }; return db; }
 let saveTimer = null;
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }, 2000); }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 2000); }
 
 function rec(key, name, id) {
   const d = load();
@@ -89,8 +94,8 @@ function applyEvent(ev, d) {
 
 // Read new bytes from the newest ADM files and apply them.
 function ingest() {
-  try { require('./deathlog').ingestGear(); } catch { /* bridge not installed */ }
-  try { require('./anticheat').ingest(); } catch { /* nothing to read */ }
+  try { require('./deathlog').ingestGear(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the gear snapshots (refunds need them)', e); }
+  try { require('./anticheat').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the dupe detector\'s log', e); }
   const d = load();
   const p = settings.paths();
   let files = [];
@@ -109,7 +114,7 @@ function ingest() {
       const lines = (meta.rest + buf.toString('utf8', 0, n)).split(/\r?\n/);
       meta.rest = lines.pop() || '';
       const ctx = { date: meta.date, lastSec: meta.lastSec };
-      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch { /* ignore */ } try { require('./combat').record(ev); } catch { /* ignore */ } try { require('./deathlog').record(ev); } catch { /* ignore */ } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch { /* ignore */ } } }
+      for (const line of lines) { const ev = parseLine(line, ctx); if (ev && ev.type) { applyEvent(ev, d); applied++; try { require('./discord').feedEvent(ev); } catch { /* bot not loaded */ } try { require('./heat').record(ev); } catch (e) { problem('Heatmap', e); } try { require('./combat').record(ev); } catch (e) { problem('Combat log', e); } try { require('./deathlog').record(ev); } catch (e) { problem('Death log', e); } try { require('./stats').recordEvent(ev, ev.type === 'connect' && !!ev._new); } catch (e) { problem('Statistics', e); } } }
       meta.date = ctx.date; meta.lastSec = ctx.lastSec;
     } finally { fs.closeSync(fd); }
     d.files[x.f] = meta;
@@ -166,9 +171,9 @@ function rebuild() { db = { players: {}, files: {}, peaks: {}, online: {} }; try
 function init(emit) {
   emitRef = emit;
   load();
-  try { ingest(); } catch { /* ignore */ }
+  try { ingest(); } catch (e) { problem('Reading the admin logs', e); }
   clearInterval(timer);
-  timer = setInterval(() => { if (server.status().running) { try { ingest(); } catch { /* ignore */ } } }, 10000);
+  timer = setInterval(() => { if (server.status().running) { try { ingest(); } catch (e) { problem('Reading the admin logs', e); } } }, 10000);
 }
 
 module.exports = { init, ingest, all, get, setNote, remove, stats, rebuild, parseLine };

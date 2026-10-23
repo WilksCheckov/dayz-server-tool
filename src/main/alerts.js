@@ -30,6 +30,7 @@ const KINDS = {
   'duplicate-item': { label: 'Duplicate item detected (possible duping)', color: 0xff5f5f, cooldownSec: 0 },
   'suspicious-player': { label: 'Flagged player joined (possible alt or banned account)', color: 0xf5b942, cooldownSec: 60 },
   'steam-ban': { label: 'Player picked up a Steam ban', color: 0xff5f5f, cooldownSec: 0 },
+  'tool-problem': { label: 'Tool problem: a save, copy, key, scheduled job or background instance failed', color: 0xf5b942, cooldownSec: 300 },
   'test': { label: 'Test alert', color: 0x4f8cff, cooldownSec: 0 }
 };
 
@@ -59,19 +60,23 @@ async function alert(kind, title, details = '', { force = false } = {}) {
   emitRef('alerts:new', entry);
   if (!kind.startsWith('server-')) emitRef('console', { source: 'alert', line: `${title}${details ? ' — ' + String(details).split('\n')[0] : ''}` });
   const c = cfg();
-  const jobs = [];
+  const jobs = []; const errors = [];
+  // an alert that cannot be delivered is said once per channel every 10 minutes (and a test alert shows the reason)
+  const failed = (where, e) => { const msg = `${where} alert not delivered: ${e && e.message || e}`; errors.push(msg); if (kind === 'test' || !undelivered[where] || now - undelivered[where] > 600000) { undelivered[where] = now; emitRef('console', { source: 'alert', line: msg }); } };
   if (c.toast[kind]) {
     try { if (Notification.isSupported()) new Notification({ title: `DayZ Admin Tools: ${title}`, body: String(details || meta.label).slice(0, 200) }).show(); } catch { /* ignore */ }
   }
   if (c.discord[kind]) {
-    jobs.push((async () => { try { const discord = require('./discord'); await discord.postAlert({ title, description: details || meta.label, color: meta.color, channelId: c.alertChannelId }); } catch { /* bot offline */ } })());
+    jobs.push((async () => { try { const discord = require('./discord'); await discord.postAlert({ title, description: details || meta.label, color: meta.color, channelId: c.alertChannelId }); } catch (e) { failed('Discord', e); } })());
   }
   if (c.webhook[kind] && c.webhookUrl) {
-    jobs.push(fetch(c.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'DayZ Admin Tools', embeds: [{ title, description: String(details || meta.label).slice(0, 2000), color: meta.color, timestamp: new Date(now).toISOString() }] }) }).catch(() => {}));
+    jobs.push(fetch(c.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'DayZ Admin Tools', embeds: [{ title, description: String(details || meta.label).slice(0, 2000), color: meta.color, timestamp: new Date(now).toISOString() }] }) }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}${r.status === 404 ? ' (the webhook was deleted)' : ''}`); }).catch(e => failed('webhook', e)));
   }
   await Promise.all(jobs);
+  if (kind === 'test' && errors.length) throw new Error(errors.join('; '));
   return true;
 }
+const undelivered = {};
 
 function init(emit) { emitRef = emit; }
 

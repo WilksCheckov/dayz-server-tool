@@ -50,7 +50,7 @@ async function gateway({ refresh = false } = {}) {
   }
   cached = null;
   const lan = (() => { try { return require('./network').lanIps()[0].ip; } catch { return null; } })();
-  const guess = lan ? lan.replace(/.d+$/, '.1') : 'your router';
+  const guess = lan ? lan.replace(/\.\d+$/, '.1') : 'your router';
   throw new Error(`Your router did not answer UPnP (other devices did). Either enable UPnP in the router's settings (usually http://${guess}) and try again, or forward the ports there by hand to this PC${lan ? ' (' + lan + ')' : ''}.`);
 }
 async function soap(gw, action, args) {
@@ -89,7 +89,7 @@ async function unmap(ports) {
 async function status(ports) {
   const gw = await gateway(); const lan = await lanIpFor(gw); const mapped = [];
   for (let i = 0; i < 200; i++) {
-    let b; try { b = await soap(gw, 'GetGenericPortMappingEntry', { NewPortMappingIndex: i }); } catch { break; }
+    let b; try { b = await soap(gw, 'GetGenericPortMappingEntry', { NewPortMappingIndex: i }); } catch { await new Promise(r => setTimeout(r, 500)); try { b = await soap(gw, 'GetGenericPortMappingEntry', { NewPortMappingIndex: i }); } catch { break; } }
     const g = k => (b.match(new RegExp(`<${k}>([^<]*)</${k}>`)) || [])[1];
     mapped.push({ port: Number(g('NewExternalPort')), proto: g('NewProtocol'), client: g('NewInternalClient'), desc: g('NewPortMappingDescription') });
   }

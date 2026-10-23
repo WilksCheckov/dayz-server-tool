@@ -4,6 +4,7 @@
 // refunds (the bridge script spawns the gear at the player's feet). The bridge script is a small Enforce class the
 // tool writes into the mission's init.c between markers; the game loads mission scripts unpacked, so no mod is needed.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const crypto = require('crypto');
 const { app } = require('electron');
@@ -13,11 +14,11 @@ let db = null, saveTimer = null, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'deathlog.json');
 function load() {
   if (db) return db;
-  try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = null; }
+  db = jsonstore.readOr(file(), null);
   db = { deaths: [], nextId: 1, pending: {}, gear: {}, gearFile: { offset: 0, rest: '' }, lastDeathAt: {}, ...(db || {}) };
   return db;
 }
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }, 500); }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 500); }
 
 const MAX_DEATHS = 5000, MAX_PENDING = 300, PENDING_MS = 20 * 60000, GEAR_PER_PLAYER = 30;
 
@@ -179,7 +180,7 @@ function requireBridge() {
   if (!bridgeStatus().installed) throw new Error('The bridge script is not installed in the mission (Death log page → Install)');
 }
 // Queue one command for the bridge script and wait for its answer (it polls every three seconds).
-async function sendCommand(cmd, { by = 'app', timeoutMs = 25000 } = {}) {
+async function sendCommand(cmd, { by = 'app', timeoutMs = 25000, onLate = null } = {}) {
   requireBridge();
   const nonce = crypto.randomBytes(6).toString('hex');
   const dir = bridgeDir(); fs.mkdirSync(dir, { recursive: true });
@@ -195,7 +196,28 @@ async function sendCommand(cmd, { by = 'app', timeoutMs = 25000 } = {}) {
     const m = txt.match(new RegExp('^' + nonce + '\\|(\\w+)\\|(\\d+)\\|(\\d+)', 'm'));
     if (m) { const res = { status: m[1], ok: Number(m[2]), fail: Number(m[3]) }; try { require('./audit').log('app', by, 'bridge:' + (cmd.type || 'refund'), `${cmd.id}: ${res.status}${cmd.what ? ' (' + cmd.what + ')' : ''}`); } catch { /* ignore */ } return res; }
   }
-  return { status: 'timeout', ok: 0, fail: 0 };
+  // No answer in time. If the game has not picked the command up, take it back out of the queue so it cannot run
+  // later (an admin who clicks again would otherwise refund twice). If it was picked up, keep watching for the result.
+  const label = `${cmd.type || 'refund'} for ${cmd.id}`;
+  let queued = null; try { queued = fs.readFileSync(cmdFile, 'utf8'); } catch { /* the bridge took the file */ }
+  if (queued !== null && queued.includes(nonce + '|')) {
+    try { fs.writeFileSync(cmdFile, queued.split(/\r?\n/).filter(l => l && !l.startsWith(nonce + '|')).map(l => l + '\r\n').join('')); }
+    catch (e) { emitRef('console', { source: 'deathlog', line: `Could not withdraw the ${label} from the queue (${e.message}); it may still run when the game reads it.` }); return { status: 'pending', ok: 0, fail: 0 }; }
+    emitRef('console', { source: 'deathlog', line: `The game did not pick up the ${label} within ${Math.round(timeoutMs / 1000)} s; it was withdrawn and nothing was done.` });
+    return { status: 'timeout', withdrawn: true, ok: 0, fail: 0 };
+  }
+  emitRef('console', { source: 'deathlog', line: `The game picked up the ${label} but has not answered yet; its result is recorded when it does.` });
+  (async () => {
+    const end = Date.now() + 180000;
+    while (Date.now() < end) {
+      await new Promise(r => setTimeout(r, 3000));
+      let txt = ''; try { txt = fs.readFileSync(resFile, 'utf8'); } catch { /* not yet */ }
+      const m = txt.match(new RegExp('^' + nonce + '\\|(\\w+)\\|(\\d+)\\|(\\d+)', 'm'));
+      if (m) { const res = { status: m[1], ok: Number(m[2]), fail: Number(m[3]) }; emitRef('console', { source: 'deathlog', line: `The ${label} finished late: ${res.status}${res.status === 'done' ? ` (${res.ok} ok, ${res.fail} failed)` : ''}.` }); if (onLate) onLate(res); return; }
+    }
+    emitRef('console', { source: 'deathlog', line: `No result for the ${label} after 3 minutes; check in game whether it happened before trying again.` });
+  })().catch(() => {});
+  return { status: 'pending', ok: 0, fail: 0 };
 }
 function findPlayer(ref) {
   const players = require('./players');
@@ -230,14 +252,15 @@ async function refund(deathId, { by = 'app', items = null } = {}) {
   if (!rec) throw new Error('Death record not found');
   const list = (items || (rec.gear || []).map(i => i.c)).filter(Boolean);
   if (!list.length) throw new Error('No gear recorded for this death');
-  const res = await sendCommand({ type: 'refund', id: rec.key, items: list }, { by }); res.items = list.length;
-  if (res.status !== 'timeout') { rec.refunds.push({ ts: Date.now(), by, ...res }); save(); emitRef('deathlog:changed', { id: rec.id }); }
+  const keep = (r) => { rec.refunds.push({ ts: Date.now(), by, ...r, items: list.length }); save(); emitRef('deathlog:changed', { id: rec.id }); };
+  const res = await sendCommand({ type: 'refund', id: rec.key, items: list }, { by, onLate: keep }); res.items = list.length;
+  if (res.status !== 'timeout' && res.status !== 'pending') keep(res);
   return res;
 }
 
 // ---------- queries ----------
 function summary(r) {
-  return { id: r.id, hasPos: !!deathPos(r), ts: r.ts, name: r.name, key: r.key, cause: r.cause, causeText: r.causeText, killer: r.killer, weapon: r.weapon, ammo: r.ammo, distance: r.distance, finalPart: r.finalPart, totalDamage: r.totalDamage, hitCount: r.hits.length, source: r.source || null, sources: (r.attackers || []).map(x => ({ name: x.name, kind: x.kind || sourceKind(x.name, x.player), hits: x.hits, damage: Math.round(x.damage) })), gearCount: r.gear ? r.gear.length : null, refunds: r.refunds.length, online: online(r.key) };
+  return { id: r.id, hasPos: !!deathPos(r), ts: r.ts, name: r.name, key: r.key, cause: r.cause, causeText: r.causeText, killer: r.killer, weapon: r.weapon, ammo: r.ammo, distance: r.distance, finalPart: r.finalPart, totalDamage: r.totalDamage, hitCount: r.hits.length, source: r.source || null, sources: (r.attackers || []).map(x => ({ name: x.name, kind: x.kind || sourceKind(x.name, x.player), hits: x.hits, damage: Math.round(x.damage) })), gearCount: r.gear ? r.gear.length : null, refunds: r.refunds.filter(f => f.status === 'done' && f.ok > 0).length, refundAttempts: r.refunds.length, online: online(r.key) };
 }
 function list({ q = '', cause = '', since = 0, limit = 300 } = {}) {
   const needle = String(q || '').toLowerCase();
@@ -316,8 +339,9 @@ function ensureBridge() {
   const c = settings.load().deathlog || {};
   if (c.bridge === false) return { action: 'off' };
   try {
+    try { const q = path.join(bridgeDir(), 'commands.txt'); const left = fs.readFileSync(q, 'utf8').split(/\r?\n/).filter(Boolean).length; fs.unlinkSync(q); if (left) emitRef('console', { source: 'deathlog', line: `Dropped ${left} refund / heal / teleport command(s) still queued from before; they would otherwise run now.` }); } catch { /* no queue */ }
     const st = bridgeStatus();
-    if (st.error) return { action: 'error', error: st.error };
+    if (st.error) { emitRef('console', { source: 'deathlog', line: 'Bridge script not checked: ' + st.error + '. Refunds, heals, teleports and gear snapshots will not work this run.' }); return { action: 'error', error: st.error }; }
     if (st.upToDate) return { action: 'ok' };
     installBridge(); return { action: st.installed ? 'updated' : 'installed' };
   } catch (e) { emitRef('console', { source: 'deathlog', line: 'Bridge script: ' + e.message }); return { action: 'error', error: e.message }; }

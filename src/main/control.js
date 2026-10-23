@@ -41,7 +41,8 @@ function start(handlerMap) {
     });
   });
   srv.listen(0, '127.0.0.1', () => {
-    try { fs.writeFileSync(file(), JSON.stringify({ pid: process.pid, port: srv.address().port, token, version: require('electron').app.getVersion(), startedAt: Date.now() })); } catch { /* ignore */ }
+    try { fs.writeFileSync(file(), JSON.stringify({ pid: process.pid, port: srv.address().port, token, version: require('electron').app.getVersion(), startedAt: Date.now() })); }
+    catch (e) { try { require('./alerts').alert('tool-problem', 'Instance control file not written', `${file()}: ${e.message}. The main window cannot see or manage this instance and may start a second copy of it.`); } catch { /* ignore */ } }
   });
   srv.on('error', () => {});
 }

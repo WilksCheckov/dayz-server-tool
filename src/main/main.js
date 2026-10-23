@@ -99,7 +99,7 @@ function refreshTray() {
     { label: 'Open DayZ Admin Tools', click: () => showWindow() },
     { type: 'separator' },
     { label: st.running ? 'Stop server' : 'Start server', click: () => { try { st.running ? server.stop() : server.start(); } catch (e) { emit('console', { source: 'server', line: e.message }); } } },
-    { label: 'Restart server', enabled: st.running, click: () => server.restart().catch(() => {}) },
+    { label: 'Restart server', enabled: st.running, click: () => server.restart().catch(e => { emit('console', { source: 'server', line: 'Restart failed: ' + e.message }); alerts.alert('server-critical', 'Restart failed: the server may be down', e.message); }) },
     { label: 'Backup now', click: () => backups.create('tray').catch(() => {}) },
     ...(instances.registry().list.length ? [{ type: 'separator' }, ...instances.registry().list.map(x => ({ label: x.name, submenu: [
       { label: 'Open', click: () => instances.action(x.name, 'open').catch(e => emit('console', { source: 'instances', line: e.message })) },
@@ -374,7 +374,7 @@ handle('app:importSettings', async () => {
 handle('update:state', () => updateState);
 handle('update:check', async () => { if (!autoUpd) throw new Error('Updater not available.'); if (!app.isPackaged) throw new Error('Updates only work in the installed app, not when running from source.'); await autoUpd.checkForUpdates(); return updateState; });
 handle('update:download', async () => { if (!autoUpd) throw new Error('Updater not available.'); await autoUpd.downloadUpdate(); return updateState; });
-handle('update:install', async () => { if (!autoUpd) throw new Error('Updater not available.'); if (instance.isChild) throw new Error('Install updates from the main window.'); await instances.beforeAppUpdate().catch(() => {}); quitting = true; autoUpd.quitAndInstall(); return true; });
+handle('update:install', async () => { if (!autoUpd) throw new Error('Updater not available.'); if (instance.isChild) throw new Error('Install updates from the main window.'); await instances.beforeAppUpdate(); quitting = true; autoUpd.quitAndInstall(); return true; });
 
 // Mission tools
 handle('mission:list', () => mission.list());
@@ -497,7 +497,7 @@ handle('instances:applyPorts', (b) => {
 handle('cpu:status', () => cpu.status());
 handle('cpu:detect', async () => { await cpu.detect(); return cpu.status(); });
 handle('cpu:save', async (c) => { settings.save({ cpu: { mode: 'all', cores: [], priority: 'normal', ...(settings.load().cpu || {}), ...(c || {}) } }); const st = server.status(); if (st.running && st.pid) await cpu.apply(st.pid); return cpu.status(); });
-handle('mods:relinkAll', () => { const out = []; for (const m of settings.load().mods) { try { mods.link(m.id); out.push(m.id); } catch { /* not downloaded */ } } settings.save({ relinkMods: false }); return out; });
+handle('mods:relinkAll', () => { const out = [], failed = []; for (const m of settings.load().mods) { try { mods.link(m.id); out.push(m.id); } catch (e) { failed.push(`${m.id}: ${e.message}`); } } if (!failed.length) settings.save({ relinkMods: false }); return { linked: out, failed }; });
 
 // Website
 handle('website:status', () => website.status());
@@ -612,7 +612,8 @@ app.whenReady().then(() => {
   toollog.init();
   toollog.info(`startup: process had been running for ${Math.round(process.uptime() * 1000)} ms before Electron was ready`);
   timed('alerts', () => alerts.init(emit));
-  try { if (steamcmd.loadSavedCredentials()) emit('console', { source: 'steamcmd', line: `Using remembered Steam login for ${settings.load().steamUser}.` }); } catch { /* ignore */ }
+  require('./jsonstore').init(emit);
+  try { if (steamcmd.loadSavedCredentials()) emit('console', { source: 'steamcmd', line: `Using remembered Steam login for ${settings.load().steamUser}.` }); } catch (e) { emit('console', { source: 'steamcmd', line: e.message }); setTimeout(() => alerts.alert('tool-problem', 'Steam login needs entering again', e.message), 5000); }
   timed('crashes', () => crashes.init(emit));
   timed('mods', () => mods.init(emit));
   modkeys.init(emit);
@@ -633,7 +634,7 @@ app.whenReady().then(() => {
   control.route('status', async () => localStatus());
   control.route('window', async () => { showWindow(); if (win) { win.setAlwaysOnTop(true); win.focus(); win.setAlwaysOnTop(false); } return true; });
   control.route('quit', async () => { setTimeout(() => { quitting = true; app.quit(); }, 200); return true; });
-  if (instance.isChild && settings.load().relinkMods) setTimeout(() => { try { handlerMap.get('mods:relinkAll')(); emit('console', { source: 'mods', line: 'Linked the copied mods into this instance\'s server folder.' }); } catch { /* ignore */ } }, 2000);
+  if (instance.isChild && settings.load().relinkMods) setTimeout(() => { try { const r = handlerMap.get('mods:relinkAll')(); emit('console', { source: 'mods', line: `Linked ${r.linked.length} copied mod(s) into this instance's server folder.${r.failed.length ? ' Not linked (tried again at the next start): ' + r.failed.join('; ') : ''}` }); } catch (e) { emit('console', { source: 'mods', line: 'Linking the copied mods failed: ' + e.message }); } }, 2000);
   mission.init(emit); tasks.init(emit); offsite.init(emit);
   // Optional: bring the DayZ server up a few seconds after the tool starts (for unattended reboots).
   if (appPrefs().autoStartServer) setTimeout(() => { try { if (!server.status().running) { emit('console', { source: 'server', line: 'Auto-starting the server (Settings → start with the tool).' }); server.start(); } } catch (e) { emit('console', { source: 'server', line: 'Auto-start failed: ' + e.message }); } }, Math.max(3, Number(appPrefs().autoStartDelaySec) || 10) * 1000);

@@ -31,7 +31,7 @@ function loadSavedCredentials() {
   const s = settings.load();
   if (!s.steamPassEnc || !s.steamUser) return false;
   try { const { safeStorage } = require('electron'); creds.user = s.steamUser; creds.pass = safeStorage.decryptString(Buffer.from(s.steamPassEnc, 'base64')); return true; }
-  catch { return false; }
+  catch (e) { throw new Error(`The remembered Steam password could not be read (${e.message}); log in again on the Installation page, or scheduled mod updates will fail.`); }
 }
 
 function hasCredentials() {
@@ -207,7 +207,8 @@ async function getLatestBuild(emit = () => {}) {
     } catch { buildId = null; }
   }
   if (!buildId) { const m = text.match(/"public"\s*\{[^}]*"buildid"\s*"(\d+)"/); buildId = m ? m[1] : null; }
-  if (buildId) latestCache = { at: Date.now(), appId: s.serverAppId, buildId };
+  if (!buildId) throw new Error('SteamCMD did not return the latest server build' + (r.error ? ` (${r.error})` : '') + '; it may be rate limited or offline.');
+  latestCache = { at: Date.now(), appId: s.serverAppId, buildId };
   return buildId;
 }
 

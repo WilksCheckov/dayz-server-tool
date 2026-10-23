@@ -15,12 +15,13 @@ const { app } = require('electron');
 const instance = require('./instance');
 const control = require('./control');
 const settings = require('./settings');
+const jsonstore = require('./jsonstore');
 
 let emitRef = () => {};
 const managerData = () => instance.isChild ? instance.managerData : app.getPath('userData');
 const regFile = () => path.join(managerData(), 'instances.json');
-function registry() { try { return { root: '', list: [], ...JSON.parse(fs.readFileSync(regFile(), 'utf8')) }; } catch { return { root: '', list: [] }; } }
-function saveRegistry(r) { fs.writeFileSync(regFile(), JSON.stringify(r, null, 2)); }
+function registry() { return { root: '', list: [], ...(jsonstore.readOr(regFile(), {}) || {}) }; }
+function saveRegistry(r) { if (!jsonstore.write(regFile(), r, true)) throw new Error('Could not save the instance list (see the console).'); }
 function readSettings(dataDir) { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8')); } catch { return {}; } }
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/;
 
@@ -77,7 +78,7 @@ function writeQueryPort(cfgPath, port) {
   fs.writeFileSync(cfgPath, t);
 }
 function writePorts(e, b) {
-  const s = readSettings(e.data);
+  const s = jsonstore.read(path.join(e.data, 'settings.json')) || {};
   s.port = b.game; s.steamQueryPort = b.query;
   s.rcon = { ...(s.rcon || {}), port: b.rcon };
   s.website = { ...(s.website || {}), port: b.web };
@@ -110,7 +111,11 @@ function startTool(name) {
   const x = exe();
   const child = spawn(x.file, [...x.pre, `--dzat-instance=${e.dir}`, `--dzat-manager=${managerData()}`], { detached: true, stdio: 'ignore', windowsHide: true, env: (() => { const e = { ...process.env }; delete e.ELECTRON_RUN_AS_NODE; return e; })() });
   child.unref();
-  emitRef('console', { source: 'instances', line: `Started the tool for instance ${e.name}.` });
+  emitRef('console', { source: 'instances', line: `Starting the tool for instance ${e.name}…` });
+  waitFor(async () => !!control.info(e.data), 45000).then(up => {
+    if (up) emitRef('console', { source: 'instances', line: `${e.name}'s tool is running.` });
+    else { emitRef('console', { source: 'instances', line: `${e.name}'s tool did not start within 45 s. Open its folder's tool\\tool.log for the reason.` }); try { require('./alerts').alert('tool-problem', `Instance ${e.name} did not start`, 'Its restarts, backups, RCon and bot are not running.'); } catch { /* ignore */ } }
+  });
   return { pid: child.pid };
 }
 async function waitFor(fn, ms) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await new Promise(r => setTimeout(r, 500)); } return false; }
@@ -192,6 +197,7 @@ async function create(opts) {
   }
   fs.mkdirSync(path.join(dir, 'tool'), { recursive: true });
   const e = { name, dir, data: path.join(dir, 'tool') };
+  const warnings = [];
   try {
     if (src && opts.copyServer) {
       progress(name, 'Copying the server files', `from ${src.name}`);
@@ -202,8 +208,8 @@ async function create(opts) {
     }
     if (src) {
       progress(name, 'Copying SteamCMD', 'so this instance can update itself');
-      await robocopy(path.join(src.dir, 'steamcmd'), path.join(dir, 'steamcmd'), ['/XD', 'steamapps', 'logs', 'dumps', 'appcache', 'depotcache']).catch(() => {});
-      if (opts.copyMods) { progress(name, 'Copying the Workshop mods'); await robocopy(path.join(src.dir, 'steamcmd', 'steamapps', 'workshop'), path.join(dir, 'steamcmd', 'steamapps', 'workshop')).catch(() => {}); }
+      await robocopy(path.join(src.dir, 'steamcmd'), path.join(dir, 'steamcmd'), ['/XD', 'steamapps', 'logs', 'dumps', 'appcache', 'depotcache']).catch(e => warnings.push('SteamCMD was not copied (' + e.message + '); the instance downloads it again when it first updates.'));
+      if (opts.copyMods) { progress(name, 'Copying the Workshop mods'); await robocopy(path.join(src.dir, 'steamcmd', 'steamapps', 'workshop'), path.join(dir, 'steamcmd', 'steamapps', 'workshop')).catch(e => warnings.push('The Workshop mods were not fully copied (' + e.message + '); use Update on its Installed mods page to download the missing ones.')); }
     }
     progress(name, 'Writing its settings');
     const base = src && opts.copySettings !== false ? readSettings(src.data) : {};
@@ -222,17 +228,20 @@ async function create(opts) {
     progress(name, 'Assigning ports');
     const r = registry(); r.root = root; r.list.push({ name, dir, autoStart: opts.autoStart !== false, created: Date.now() }); saveRegistry(r);
     const b = await freeBlock(e.data); writePorts(e, b);
-    progress(name, 'Done', `game port ${b.game}, query ${b.query}, RCon ${b.rcon}, website ${b.web}`);
+    for (const w of warnings) emitRef('console', { source: 'instances', line: `${name}: ${w}` });
+    progress(name, warnings.length ? 'Done with warnings' : 'Done', warnings.length ? warnings.join(' ') : `game port ${b.game}, query ${b.query}, RCon ${b.rcon}, website ${b.web}`);
     emitRef('instances:changed', {});
-    return { name, dir, ports: b };
+    return { name, dir, ports: b, warnings };
   } catch (err) { progress(name, 'Failed', err.message); throw err; }
 }
 
 async function remove(name, { deleteFiles = false } = {}) {
   const e = byName(name); if (e.main) throw new Error('The main instance cannot be removed.');
   const st = await status(e).catch(() => null);
+  if (!st && control.info(e.data)) throw new Error(`${e.name} did not answer, so it is not known whether its server runs. Open it and stop the server first.`);
   if (st && st.server && st.server.running) throw new Error('Stop its server first.');
-  await stopTool(name).catch(() => {});
+  const stopped = await stopTool(name);
+  if (stopped && stopped.stopped === false) throw new Error(`${e.name}'s tool did not close; try again.`);
   const r = registry(); r.list = r.list.filter(x => x.name !== e.name); saveRegistry(r);
   if (deleteFiles) { progress(name, 'Deleting its folder'); fs.rmSync(e.dir, { recursive: true, force: true }); }
   emitRef('instances:changed', {});
@@ -244,8 +253,10 @@ function rename(newName) { if (!NAME_RE.test(newName)) throw new Error('Use 1-32
 // ---------- updates of the app: background tools are closed before installing and started again after ----------
 async function beforeAppUpdate() {
   const r = registry(); const running = [];
-  for (const x of r.list) { const data = path.join(x.dir, 'tool'); if (control.info(data)) { running.push(x.name); await stopTool(x.name).catch(() => {}); } }
+  const stuck = [];
+  for (const x of r.list) { const data = path.join(x.dir, 'tool'); if (control.info(data)) { running.push(x.name); const res = await stopTool(x.name).catch(() => ({ stopped: false })); if (res.stopped === false) stuck.push(x.name); } }
   r.relaunch = running; saveRegistry(r);
+  if (stuck.length) throw new Error(`These instances' tools did not close: ${stuck.join(', ')}. Close them (tray or Task Manager) and install again.`);
 }
 
 // ---------- main-window side: start background tools, keep the list fresh, restart outdated ones ----------
@@ -262,7 +273,7 @@ function init(emit) {
     for (const x of registry().list) {
       const c = control.info(path.join(x.dir, 'tool'));
       // a background tool left on an older version after an app update: restart it (its server keeps running)
-      if (c && c.version && c.version !== app.getVersion()) { emit('console', { source: 'instances', line: `Restarting ${x.name}'s tool on version ${app.getVersion()} (its server keeps running).` }); await stopTool(x.name).catch(() => {}); try { startTool(x.name); } catch { /* ignore */ } }
+      if (c && c.version && c.version !== app.getVersion()) { emit('console', { source: 'instances', line: `Restarting ${x.name}'s tool on version ${app.getVersion()} (its server keeps running).` }); await stopTool(x.name).catch(() => {}); try { startTool(x.name); } catch (e) { emit('console', { source: 'instances', line: `Could not restart ${x.name}'s tool: ${e.message}` }); } }
     }
   }, 60000);
 }

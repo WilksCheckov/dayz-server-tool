@@ -190,7 +190,7 @@ function start() {
       return { ...status(), installingRuntimes: true };
     }
     if (pf.error.length) { for (const e of pf.error) emitRef('console', { source: 'preflight', line: 'Problem: ' + e }); throw new Error('Not started: ' + pf.error[0] + (pf.error.length > 1 ? ` (+${pf.error.length - 1} more, see the console)` : '')); }
-  } catch (e) { if (/^Not started:/.test(e.message)) throw e; }
+  } catch (e) { if (/^Not started:/.test(e.message)) throw e; emitRef('console', { source: 'preflight', line: `The checks before start failed to run (${e.message}); starting without them.` }); }
   try { require('./rcon').ensureConfigured(); } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon auto-configuration failed: ' + e.message }); }
   try { require('./deathlog').ensureBridge(); } catch (e) { emitRef('console', { source: 'deathlog', line: 'Bridge script: ' + e.message }); }
   try { require('./anticheat').ensure(); } catch (e) { emitRef('console', { source: 'anticheat', line: 'Anti-dupe mod: ' + e.message }); }
@@ -216,9 +216,12 @@ function start() {
   try { require('./cpu').apply(proc.pid); } catch { /* ignore */ }
   proc.on('error', err => {
     emitRef('console', { source: 'server', line: `Failed to start: ${err.message}` });
+    // no exit event follows a spawn error: clear the state so the server does not show as running
+    if (proc && !proc.pid) { proc = null; startedAt = null; stage = null; forgetProc(); stopRptTail(false); emitRef('server:status', status()); }
+    alerts.alert('server-critical', 'Server failed to start', err.message);
   });
   emitRef('server:status', status());
-  alerts.alert('server-up', 'Server started', `pid ${proc.pid}`);
+  if (proc && proc.pid) alerts.alert('server-up', 'Server started', `pid ${proc.pid}`);
   return status();
 }
 
@@ -250,7 +253,7 @@ function attachExit(p) {
     }
     if (!wasManual && cfg.autoRestart && !crashLoop) {
       emitRef('console', { source: 'server', line: 'Auto-restart in 10s...' });
-      restartTimer = setTimeout(() => { restartTimer = null; try { start(); } catch (e) { emitRef('console', { source: 'server', line: `Auto-restart failed: ${e.message}` }); } }, 10000);
+      restartTimer = setTimeout(() => { restartTimer = null; try { start(); } catch (e) { emitRef('console', { source: 'server', line: `Auto-restart failed: ${e.message}` }); alerts.alert('server-critical', 'Auto-restart failed: the server is down', e.message); } }, 10000);
       emitRef('server:status', status());
     }
   });
@@ -267,7 +270,7 @@ function stop() {
     emitRef('console', { source: 'server', line: `Stopping server (pid ${pid}): asking it to save and shut down...` });
     // 1. RCon #shutdown when connected (the cleanest: the server saves the world and BattlEye restores its config)
     let viaRcon = false;
-    try { const rcon = require('./rcon'); if (rcon.status().connected) { viaRcon = true; rcon.command('#shutdown').catch(() => {}); } } catch { /* ignore */ }
+    try { const rcon = require('./rcon'); if (rcon.status().connected) { viaRcon = true; rcon.command('#shutdown').catch(e => { emitRef('console', { source: 'server', line: `RCon #shutdown failed (${e.message}); asking Windows to close it instead.` }); spawn('taskkill', ['/PID', String(pid)], { windowsHide: true }); }); } } catch { /* ignore */ }
     // 2. otherwise a normal close request to the process (same as closing its console window)
     if (!viaRcon) spawn('taskkill', ['/PID', String(pid)], { windowsHide: true });
     // 3. force only if it is still running after the grace period

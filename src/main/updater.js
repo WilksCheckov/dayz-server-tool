@@ -22,7 +22,7 @@ function cfg() {
 
 // Find out what is out of date without changing anything.
 async function check({ quiet = false } = {}) {
-  if (checking) return lastCheck;
+  if (checking) { while (checking) await new Promise(r => setTimeout(r, 500)); return lastCheck; }
   checking = true;
   const log = line => { if (!quiet) emitRef('console', { source: 'updater', line }); };
   const result = { at: Date.now(), server: { installed: null, latest: null, available: false }, mods: [], error: null };
@@ -30,15 +30,16 @@ async function check({ quiet = false } = {}) {
     const st = steamcmd.status();
     result.server.installed = st.serverBuild ? st.serverBuild.buildId : null;
     if (st.steamcmdInstalled) {
-      try { result.server.latest = await steamcmd.getLatestBuild(emitRef); } catch (e) { log('Could not read the latest server build: ' + e.message); }
+      try { result.server.latest = await steamcmd.getLatestBuild(emitRef); } catch (e) { result.error = 'Could not read the latest server build: ' + e.message; log(result.error); }
       result.server.available = !!(result.server.installed && result.server.latest && String(result.server.installed) !== String(result.server.latest));
     }
-    try { result.mods = (await mods.checkUpdates()).map(m => ({ id: m.id, title: m.title })); } catch (e) { log('Mod update check failed: ' + e.message); }
+    try { result.mods = (await mods.checkUpdates()).map(m => ({ id: m.id, title: m.title })); } catch (e) { result.error = (result.error ? result.error + '; ' : '') + 'Mod update check failed: ' + e.message; log('Mod update check failed: ' + e.message); }
     if (result.server.available || result.mods.length) {
       const what = [result.server.available ? `server build ${result.server.installed} → ${result.server.latest}` : null, result.mods.length ? `${result.mods.length} mod(s): ${result.mods.map(m => m.title).join(', ')}` : null].filter(Boolean).join('; ');
       log('Updates available: ' + what);
       alerts.alert('update-available', 'Updates available', what);
-    } else log('Server and mods are up to date.');
+    } else if (result.error) log('Update check incomplete, so it is not known whether updates are waiting: ' + result.error);
+    else log('Server and mods are up to date.');
   } catch (e) { result.error = e.message; }
   finally { checking = false; lastCheck = result; emitRef('updater:state', state()); }
   return result;
@@ -50,13 +51,13 @@ function schedule() {
   const c = cfg();
   // Dashboard check: periodic, independent of whether automatic installs are on.
   const every = Math.max(15, Number(c.checkEveryMinutes) || 60);
-  tickTimer = setInterval(() => tick().catch(() => {}), 30000);
+  tickTimer = setInterval(() => tick().catch(e => { emitRef('console', { source: 'updater', line: 'Scheduled update failed: ' + e.message }); alerts.alert('update-failed', 'Scheduled update failed', e.message); }), 30000);
   setTimeout(() => check({ quiet: true }).catch(() => {}), 20000);
   tickTimer._every = every;
   if (!c.enabled) return;
   if (c.mode === 'interval') {
     const hours = Math.max(0.25, Number(c.intervalHours) || 6);
-    timer = setInterval(() => (c.onlyIfUpdates ? runIfNeeded() : runNow()).catch(() => {}), hours * 3600 * 1000);
+    timer = setInterval(() => (c.onlyIfUpdates ? runIfNeeded() : runNow()).catch(e => { emitRef('console', { source: 'updater', line: 'Scheduled update failed: ' + e.message }); alerts.alert('update-failed', 'Scheduled update failed', e.message); }), hours * 3600 * 1000);
   }
 }
 
@@ -76,6 +77,7 @@ async function tick() {
 // Scheduled slot: check first, and only stop/update/restart when something is actually out of date.
 async function runIfNeeded() {
   const r = await check();
+  if (r && r.error && !r.server.available && !r.mods.length) { emitRef('console', { source: 'updater', line: 'Scheduled update skipped: the update check failed (' + r.error + ').' }); alerts.alert('update-failed', 'Update check failed; nothing was updated', r.error); return { skipped: true, reason: 'check failed' }; }
   if (!r.server.available && !r.mods.length) { emitRef('console', { source: 'updater', line: 'Scheduled check: nothing to update, server left running.' }); return { skipped: true, reason: 'up to date' }; }
   return runNow({ force: true });
 }

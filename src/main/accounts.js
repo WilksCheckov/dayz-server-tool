@@ -3,6 +3,7 @@
 // shared-IP matching between players, a suspicion score, and an alert when a flagged player joins.
 // Nothing here proves an alt; it surfaces the signals a human would look at.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const crypto = require('crypto');
 const { app } = require('electron');
@@ -11,8 +12,8 @@ const lists = require('./lists');
 
 let db = null, emitRef = () => {}, onlineGuids = new Set(), checking = false;
 const file = () => path.join(app.getPath('userData'), 'accounts.json');
-function load() { if (!db) { try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = {}; } db.ips = db.ips || {}; db.names = db.names || {}; db.steam = db.steam || {}; db.guidBySteam = db.guidBySteam || {}; } return db; }
-function save() { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }
+function load() { if (!db) { db = jsonstore.readOr(file(), {}); db.ips = db.ips || {}; db.names = db.names || {}; db.steam = db.steam || {}; db.guidBySteam = db.guidBySteam || {}; } return db; }
+function save() { jsonstore.write(file(), load()); }
 function apiKey() { return ((settings.load().discord || {}).steamApiKey || '').trim(); }
 function cfg() { const s = settings.load(); return { alertScore: 4, newAccountDays: 90, fewGames: 3, ...(s.accounts || {}) }; }
 

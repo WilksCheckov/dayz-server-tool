@@ -3,6 +3,7 @@
 // its persistence data and reports two live items sharing one ID. Also ingests the engine persistent-ID check the
 // bridge script does across online players. Detections go to the alert channels and the suspicious flags.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const crypto = require('crypto');
 const { app } = require('electron');
@@ -12,8 +13,8 @@ const MOD_FOLDER = '@DayZAdminTools';
 const MOD_VERSION = 3;
 let db = null, saveTimer = null, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'anticheat.json');
-function load() { if (db) return db; try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = null; } db = { dupes: [], nextId: 1, log: { offset: 0, rest: '' }, lastStats: null, ...(db || {}) }; return db; }
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }, 500); }
+function load() { if (db) return db; db = jsonstore.readOr(file(), null); db = { dupes: [], nextId: 1, log: { offset: 0, rest: '' }, lastStats: null, ...(db || {}) }; return db; }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 500); }
 function cfg() { return { mod: false, ...(settings.load().anticheat || {}) }; }
 
 // ---------- PBO writer (unpacked entries, "prefix" property, trailing SHA1 as the game tools write it) ----------

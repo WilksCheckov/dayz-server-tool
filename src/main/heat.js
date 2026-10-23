@@ -3,6 +3,7 @@
 // events: compact [ts, x, z, kind] rows (kind: 0 travel/any, 1 hit, 2 build, 3 logout, 4 login, 5 death), capped;
 // deaths: full records with the cause. Summaries can be filtered by time in the renderer.
 const fs = require('fs');
+const jsonstore = require('./jsonstore');
 const path = require('path');
 const { app } = require('electron');
 const settings = require('./settings');
@@ -11,9 +12,9 @@ const N = 128, MAX_EVENTS = 300000, MAX_DEATHS = 50000;
 const KIND = { travel: 0, hit: 1, build: 2, logout: 3, login: 4, death: 5 };
 let db = null, mapKeyCache = { at: 0, key: null }, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'heat.json');
-function load() { if (!db) { try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = { maps: {} }; } db.maps = db.maps || {}; } return db; }
+function load() { if (!db) { db = jsonstore.readOr(file(), { maps: {} }); db.maps = db.maps || {}; } return db; }
 let saveTimer = null;
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { fs.writeFileSync(file(), JSON.stringify(load())); } catch { /* ignore */ } }, 2000); }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 2000); }
 function forMap(key) { const d = load(); if (!d.maps[key] || !d.maps[key].events) d.maps[key] = { N, events: [], deaths: [], since: Date.now() }; return d.maps[key]; }
 function currentMap() {
   if (Date.now() - mapKeyCache.at < 60000) return mapKeyCache.key;

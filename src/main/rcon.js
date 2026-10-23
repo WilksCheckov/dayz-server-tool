@@ -339,7 +339,13 @@ function sessionCreds() {
 
 // ---------- connect when the server is ready, and say which step is failing ----------
 function fmtElapsed(ms) { const s = Math.round(ms / 1000); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + String(s % 60).padStart(2, '0') + ' s'; }
-function setDiag(step, text) { state.diag = { step, text, at: Date.now() }; emitRef('rcon:state', status()); }
+// A connection that cannot be made is said in the console and as an alert (once per reason), not only on the Players
+// page: restart warnings, player counts and kicks all depend on RCon.
+function setDiag(step, text) {
+  const changed = !state.diag || state.diag.step !== step || state.diag.text !== text;
+  state.diag = { step, text, at: Date.now() }; emitRef('rcon:state', status());
+  if (step === 'failed' && changed) { emitRef('console', { source: 'rcon', line: 'RCon could not connect: ' + text }); try { require('./alerts').alert('rcon-lost', 'RCon could not connect', text); } catch { /* ignore */ } }
+}
 function udpListening(port) {
   try { const out = require('child_process').execSync('netstat -an -p udp', { encoding: 'utf8', windowsHide: true, timeout: 8000 }); return new RegExp(':' + port + '\\s').test(out); } catch { return null; }
 }

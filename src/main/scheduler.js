@@ -55,14 +55,15 @@ function nextBackup(now = Date.now()) {
   return base + hours * 3600 * 1000;
 }
 
+// true when the server is back up, false when the restart was skipped or failed (callers report it)
 async function doRestart(reason) {
-  if (restartInProgress) return;
+  if (restartInProgress) { emitRef('console', { source: 'scheduler', line: `Restart (${reason}) not started: another restart is still in progress.` }); return false; }
   restartInProgress = true;
   const log = line => emitRef('console', { source: 'scheduler', line });
   try {
     const c = restartCfg();
     const wasRunning = server.status().running;
-    if (c.onlyWhenRunning && !wasRunning) { log(`Scheduled restart (${reason}) skipped: server not running.`); return; }
+    if (c.onlyWhenRunning && !wasRunning) { log(`Scheduled restart (${reason}) skipped: server not running.`); return false; }
     log(`Scheduled restart (${reason}).`);
     alerts.alert('restart', 'Scheduled restart', reason);
     if (wasRunning && rcon.status().connected) {
@@ -72,8 +73,11 @@ async function doRestart(reason) {
     if (wasRunning) await server.stop();
     if (c.backupBefore) { try { await backups.create('restart'); } catch (e) { log(`Backup before restart failed: ${e.message}`); } }
     try { server.start(); } finally { server.setMaintenance(null); }
+    return true;
   } catch (e) {
     log(`Scheduled restart failed: ${e.message}`);
+    alerts.alert('server-critical', 'Restart failed: the server may be down', `${reason}: ${e.message}`);
+    return false;
   } finally {
     lastRestartAt = Date.now();
     restartInProgress = false;
@@ -92,6 +96,10 @@ async function warnPlayers(now) {
   if (!rcon.status().connected) {
     // within the warning window (plus 3 minutes of lead time) without RCon: connect now so the warnings can go out
     if ((next - now) / 60000 <= firstWarn + 3 && rconNudgedFor !== next) { rconNudgedFor = next; emitRef('console', { source: 'scheduler', line: 'Restart warnings are due soon and RCon is not connected; connecting now.' }); try { rcon.reconcile({ force: true }); } catch { /* ignore */ } }
+    if (!warned[next]) warned = { [next]: new Set() };
+    const missed = (c.warnMinutes || []).filter(m => !warned[next].has(m) && (next - now) / 60000 <= m);
+    for (const m of missed) { warned[next].add(m); emitRef('console', { source: 'scheduler', line: `Restart warning (${m} min) not sent: RCon is not connected.` }); }
+    if (missed.length) alerts.alert('rcon-lost', 'Restart warnings not sent', `RCon is not connected, so players were not warned ${missed.join(', ')} minute(s) before the restart.`);
     return;
   }
   if (!warned[next]) warned = { [next]: new Set() };
