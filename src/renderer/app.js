@@ -715,6 +715,14 @@ $('btnImportMods').onclick = (e) => run(async () => {
   toast('Imported');
 }, e.target);
 document.querySelectorAll('.ll-copy').forEach(b => b.onclick = () => { const t = $(b.dataset.for).textContent; if (t.startsWith('-')) { navigator.clipboard.writeText(t); toast('Copied'); } else toast('Nothing to copy'); });
+ipc.on('console', (m) => { if (m && m.source === 'preflight' && /Visual C\+\+ 2015-2022 x64 runtime is not installed/.test(m.line || '') && !window._vcOffered) { window._vcOffered = true; setTimeout(async () => { const ok = await showModal('Runtime missing', '<p>The server cannot start because the Microsoft Visual C++ 2015-2022 x64 runtime is not installed on this PC.</p><p class="muted">The tool can download it from Microsoft and run the installer (Windows asks for permission).</p>', [{ label: 'Install it now', value: true, primary: true }, { label: 'Not now', value: false }]); if (ok) { toast('Downloading and installing the Visual C++ runtime…'); try { const res = await ipc.invoke('server:installVcRedist'); toast(res.installed ? 'Visual C++ runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); } catch (e) { toast(e.message, true); } } window._vcOffered = false; }, 300); } });
+$('btnPreflight').onclick = (e) => run(async () => {
+  const r = await ipc.invoke('server:preflight');
+  const li = (items, cls) => items.map(t => `<li class="${cls}">${esc(t)}</li>`).join('');
+  const needsVc = r.error.some(t => /Visual C\+\+/.test(t));
+  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, needsVc ? [{ label: 'Install the runtime now', value: 'vc', primary: true }, { label: 'Close', value: true }] : [{ label: 'Close', value: true, primary: true }]);
+  if (choice === 'vc') { toast('Downloading and installing the Visual C++ runtime…'); const res = await ipc.invoke('server:installVcRedist'); toast(res.installed ? 'Visual C++ runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); }
+}, e.target);
 $('btnCopyFullLine').onclick = () => { navigator.clipboard.writeText($('cmdline').textContent.replace(/^DayZServer_x64\.exe /, '')); toast('Launch line copied'); };
 $('btnEditServerMod').onclick = () => run(async () => {
   const ll = await ipc.invoke('mods:launchLines');

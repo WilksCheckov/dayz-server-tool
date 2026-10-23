@@ -87,6 +87,11 @@ function start() {
   const p = settings.paths(s);
   if (!fs.existsSync(p.serverExe)) throw new Error('DayZServer_x64.exe not found. Install the server first.');
   if (!fs.existsSync(p.configPath)) throw new Error(`Config file not found: ${p.configPath}`);
+  try {
+    const pf = require('./preflight').checks();
+    for (const w of pf.warn) emitRef('console', { source: 'preflight', line: 'Check: ' + w });
+    if (pf.error.length) { for (const e of pf.error) emitRef('console', { source: 'preflight', line: 'Problem: ' + e }); throw new Error('Not started: ' + pf.error[0] + (pf.error.length > 1 ? ` (+${pf.error.length - 1} more, see the console)` : '')); }
+  } catch (e) { if (/^Not started:/.test(e.message)) throw e; }
   try { require('./rcon').ensureConfigured(); } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon auto-configuration failed: ' + e.message }); }
   try { require('./deathlog').ensureBridge(); } catch (e) { emitRef('console', { source: 'deathlog', line: 'Bridge script: ' + e.message }); }
   try { require('./anticheat').ensure(); } catch (e) { emitRef('console', { source: 'anticheat', line: 'Anti-dupe mod: ' + e.message }); }

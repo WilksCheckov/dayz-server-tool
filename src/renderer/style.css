@@ -491,3 +491,8 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 #page-stats > .grid-2 > .card, #page-stats > .stats-rows > .card { flex-shrink: 0; }
 
 #page-stats > .card { flex-shrink: 0; }
+
+.checklist { margin: 6px 0 0 18px; padding: 0; font-size: 12.5px; }
+.checklist li.bad { color: var(--bad); }
+.checklist li.warn { color: var(--warn); }
+.checklist li.ok { color: var(--muted); }

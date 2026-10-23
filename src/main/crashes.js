@@ -49,7 +49,7 @@ async function report({ code, startedAt, ranFor }) {
     if (rpt) { try { summary = logs.summarize(rpt.f); } catch { summary = null; } }
     const meta = {
       name, at: Date.now(), exitCode: code, ranForSec: ranFor || null, files: collected,
-      verdict: summary ? summary.verdict : { level: 'warn', text: 'No RPT found to analyse.' },
+      verdict: summary ? summary.verdict : (() => { try { const v = require('./preflight').exitVerdict(code, ranFor, false); return { level: v.level, text: v.text + (v.hints.length ? '\n' + v.hints.join('\n') : '') }; } catch { return { level: 'warn', text: `No RPT was written (exit code ${code} after ${ranFor}s): the server did not get as far as loading the mission.` }; } })(),
       topErrors: summary ? summary.groups.slice(0, 5).map(g => ({ label: g.label, count: g.count, sample: g.sample.slice(0, 200) })) : [],
       counts: summary ? summary.perCategory : []
     };
