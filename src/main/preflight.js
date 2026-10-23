@@ -41,9 +41,9 @@ function checks() {
     if (!mission) err('serverDZ.cfg has no template = "…" line, so the server does not know which mission to load.');
     else {
       const md = path.join(p.serverDir, 'mpmissions', mission);
-      if (!fs.existsSync(md)) err(`Mission folder not found: mpmissions\\${mission} (check the template line in serverDZ.cfg).`);
+      if (!fs.existsSync(md)) err(`Mission folder not found: mpmissions\\${mission}. Check the template line in serverDZ.cfg; for a stock map, validate the server files on the Installation page.`);
       else {
-        if (!fs.existsSync(path.join(md, 'init.c'))) err(`mpmissions\\${mission}\\init.c is missing.`);
+        if (!fs.existsSync(path.join(md, 'init.c'))) err(`mpmissions\\${mission}\\init.c is missing. The stock server ships it, so the install is incomplete: run Install / Update server on the Installation page with "Validate files" ticked and let it finish (a modded map instead needs its mission folder copied in).`);
         if (!fs.existsSync(path.join(md, 'db', 'types.xml'))) warn(`mpmissions\\${mission}\\db\\types.xml is missing; the economy cannot start.`);
         ok(`Mission ${mission} present`);
       }
