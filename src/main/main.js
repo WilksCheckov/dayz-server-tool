@@ -367,6 +367,7 @@ handle('mission:gameplay', () => mission.gameplay());
 handle('mission:saveGameplay', (changes) => mission.saveGameplay(changes));
 handle('mission:mapInfo', () => mission.mapInfo());
 handle('mission:setMapImage', (src) => mission.setMapImage(src));
+handle('mission:exportMapImage', async () => { const info = mission.mapInfo(); if (!info.image) throw new Error('There is no map image on this PC yet.'); const r = await dialog.showSaveDialog(win, { defaultPath: path.basename(info.image), filters: [{ name: 'Images', extensions: [path.extname(info.image).slice(1) || 'png'] }] }); if (r.canceled) return null; mission.exportMapImage(r.filePath); shell.showItemInFolder(r.filePath); return r.filePath; });
 handle('mission:buildMap', (opts) => mission.buildMapImage(opts || {}));
 handle('heat:summary', (since) => heat.summary(null, Number(since) || 0));
 handle('lootmap:items', () => lootmap.items());

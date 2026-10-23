@@ -90,33 +90,45 @@ const WORLDS = { chernarusplus: 15360, enoch: 12800, sakhal: 10240, namalsk: 128
 const MAP_LABELS = { chernarusplus: 'Chernarus', enoch: 'Livonia', sakhal: 'Sakhal', namalsk: 'Namalsk', deerisle: 'Deer Isle', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', iztek: 'Iztek', melkart: 'Melkart', valning: 'Valning' };
 function mapsDir() { return path.join(settings.load().installDir, 'maps'); }
 // Which map the active mission uses, its size, and the image for it if one has been added to <installDir>\maps\<map>.(png|jpg).
-function mapInfo() {
+// The active mission's map key (chernarusplus, enoch, …) on its own, so helpers can use it without calling mapInfo().
+function mapKey() {
   const md = configs.missionDir();
   const name = md ? path.basename(md) : null;
   const map = name ? (name.match(/\.([A-Za-z0-9_]+)$/) || [])[1] || null : null;
-  const key = map ? map.toLowerCase() : null;
+  return { name, key: map ? map.toLowerCase() : null };
+}
+function mapInfo() {
+  const { name, key } = mapKey();
   let image = null;
   try { fs.mkdirSync(mapsDir(), { recursive: true }); for (const ext of ['png', 'jpg', 'jpeg', 'webp']) { const f = path.join(mapsDir(), key + '.' + ext); if (key && fs.existsSync(f)) { image = f; break; } } } catch { /* ignore */ }
-  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, mapsDir: mapsDir(), building: !!building };
+  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, mapsDir: mapsDir(), building: !!building, canBuild: key && !image ? canBuild() : undefined, noClientText: NO_CLIENT };
 }
 // Build the map image from the game's satellite tiles (DayZ client install or a map mod). Runs in a worker.
 let building = null;
-function mapSources() { const info = mapInfo(); if (!info.map) return []; return require('./mapbuild').findWorldData(info.map, settings.paths().serverDir); }
+function mapSources() { const { key } = mapKey(); if (!key) return []; return require('./mapbuild').findWorldData(key, settings.paths().serverDir); }
+function canBuild() {
+  try { const stub = path.join(settings.paths().serverDir, 'addons').toLowerCase(); return mapSources().some(x => !path.dirname(x.path).toLowerCase().startsWith(stub) || x.size > 100 * 1024 * 1024); } catch { return false; }
+}
+const NO_CLIENT = 'This PC has no map to build from: the DayZ server files only contain placeholder map tiles, and the real satellite map comes with the DayZ game client. On a PC that has DayZ installed, open this tool\'s Map page and press "Save map image…", copy the file here, then press "Set map image…". It is a one-time step per map.';
 async function buildMapImage({ force = false } = {}) {
   const info = mapInfo();
   if (!info.map) throw new Error('No active mission, so the map is unknown.');
   if (info.image && !force) return info;
   if (building) return building;
   const src = mapSources()[0];
-  if (!src) throw new Error(`No satellite data found for "${info.map}". Install the DayZ client through Steam on this PC (the map lives in its worlds_${info.map}_data.pbo), or add ${info.map}.png to the maps folder.`);
+  if (!src || !canBuild()) { const e = new Error(NO_CLIENT); e.code = 'NO_CLIENT'; throw e; }
   const out = path.join(mapsDir(), info.map + '.png');
   emitRef('console', { source: 'map', line: `Building the ${info.label || info.map} map from ${src.path}...` });
   emitRef('map:progress', { map: info.map, progress: 0 });
   building = require('./mapbuild').buildAsync({ pboPath: src.path, outPath: out, scale: 4 }, p => emitRef('map:progress', { map: info.map, progress: p }))
     .then(r => { emitRef('console', { source: 'map', line: `Map image ready: ${r.width}x${r.height} from ${r.tiles} tiles.` }); emitRef('map:progress', { map: info.map, progress: 1, done: true }); return mapInfo(); })
-    .catch(e => { emitRef('console', { source: 'map', line: 'Map build failed: ' + e.message }); emitRef('map:progress', { map: info.map, error: e.message }); throw e; })
+    .catch(e => { emitRef('console', { source: 'map', line: (/placeholder tiles/i.test(e.message) ? 'Map image not built: ' + NO_CLIENT : 'Map build failed: ' + e.message) }); emitRef('map:progress', { map: info.map, error: e.message }); throw e; })
     .finally(() => { building = null; });
   return building;
+}
+function exportMapImage(dest) {
+  const info = mapInfo(); if (!info.image) throw new Error('There is no map image on this PC yet. Build it first (needs the DayZ client installed).');
+  fs.copyFileSync(info.image, dest); return dest;
 }
 function setMapImage(src) {
   const info = mapInfo();
@@ -130,4 +142,4 @@ function setMapImage(src) {
 }
 
 function init(emit) { emitRef = emit; }
-module.exports = { init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage, buildMapImage };
+module.exports = { exportMapImage, init, list, switchMission, wipe, gameplay, saveGameplay, mapInfo, setMapImage, buildMapImage };

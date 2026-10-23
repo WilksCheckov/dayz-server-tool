@@ -230,17 +230,23 @@ function mapInit() {
   $('btnMapOpenDir').onclick = () => ipc.invoke('mission:openMapsDir');
   $('btnMapRefresh').onclick = () => run(async () => { heatCache.at = 0; mapState.players.at = 0; await loadMapInfo(); scheduleDraw(); }); $('mapOnlineOnly').onchange = scheduleDraw;
   $('btnMapBuild').onclick = (e) => run(() => ensureMapImage(true), e.target);
+  $('btnMapSaveImage').onclick = (e) => run(async () => { const f = await ipc.invoke('mission:exportMapImage'); if (f) toast('Map image saved: copy it to the server PC and use "Set map image…" there'); }, e.target);
   ipc.on('map:progress', p => { if (p.error) { $('mapDetected').textContent = 'Map build failed: ' + p.error; return; } if (!p.done) $('mapDetected').textContent = `Building the map image from the game files… ${Math.round((p.progress || 0) * 100)}%`; });
   window.addEventListener('resize', () => { if (document.querySelector('#page-map.active') && mapState.info) scheduleDraw(); });
 }
 let mapBuildTried = null, mapLiveTimer = null;
+function showMapNotice(text) { const n = $('mapNotice'); if (!n) return; n.hidden = !text; n.textContent = text || ''; }
 async function ensureMapImage(force) {
   const i = mapState.info; if (!i || !i.map) return;
+  showMapNotice(i.image ? '' : (i.canBuild === false ? i.noClientText : ''));
   if (i.image && !force) return;
+  // without the DayZ client there is nothing to build from: the notice says what to do instead of an error
+  if (!force && i.canBuild === false) return;
   if (!force && mapBuildTried === i.map) return;
   mapBuildTried = i.map;
   try { toast('Building the ' + (i.label || i.map) + ' map from the game files…'); await ipc.invoke('mission:buildMap', { force: !!force }); await loadMapInfo(); scheduleDraw(); toast('Map image ready'); }
-  catch (e) { toast(e.message, true); }
+  catch (e) { if (/placeholder tiles|no map to build from/i.test(e.message)) { showMapNotice(mapState.info && mapState.info.noClientText || e.message); if (force) toast('This PC has no DayZ client to build the map from; see the note on the map.', true); } else toast(e.message, true); }
+  if (mapState.info && mapState.info.image) showMapNotice('');
 }
 function mapLive(on) { clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) { mapState.players.at = 0; scheduleDraw(); } else mapLive(false); }, 5000); }
 function showPlayerPopup(r) {

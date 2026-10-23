@@ -424,7 +424,8 @@
             <span class="muted" id="mapDetected">Detecting map from the active mission…</span>
             <span class="grow"></span>
             <button class="btn" id="btnMapBuild" title="Build the map image from the game's satellite tiles (needs the DayZ client installed on this PC, or a map mod)">Rebuild map image</button>
-            <button class="btn" id="btnMapPickImage">Set map image…</button>
+            <button class="btn" id="btnMapPickImage" title="Use a map image file (for example one saved on a PC that has DayZ installed)">Set map image…</button>
+            <button class="btn" id="btnMapSaveImage" title="Save this map image to a file, to copy it to a server PC that has no DayZ client">Save map image…</button>
             <button class="btn" id="btnMapOpenDir">Open maps folder</button>
             <label class="check"><input type="checkbox" id="mapOnlineOnly"> online only</label>
             <button class="btn" id="btnMapRefresh">Refresh</button>
@@ -440,7 +441,7 @@
             <button class="btn small danger" id="btnHeatClear">Clear</button>
           </div>
           <div class="map-layout">
-            <div class="card grow map-card"><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
+            <div class="card grow map-card"><div class="map-notice" id="mapNotice" hidden></div><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
             <div class="card loot-panel" id="vehPanel" hidden>
               <div class="card-title">Vehicles <span class="muted" id="vehWhen"></span></div>
               <div class="row gap wrap"><label class="check"><input type="checkbox" id="vehShowSpawns" checked> Spawn points</label><label class="check"><input type="checkbox" id="vehShowLive" checked> Vehicles now</label></div>
