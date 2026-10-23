@@ -36,6 +36,8 @@ function run() {
     if (!fs.existsSync(meta)) problems.push({ level: 'info', mod: m.title, text: 'No meta.cpp (fine for local mods, unusual for workshop mods).' });
   }
   for (const [pbo, owners] of Object.entries(pboOwners)) if (owners.length > 1) problems.push({ level: 'warning', mod: owners.join(' + '), text: `Duplicate PBO ${pbo} in ${owners.length} mods; the last one in load order wins and the others may misbehave.` });
+  // keys: same file name with different keys, stale copies, leftovers from removed mods
+  try { for (const k of require('./modkeys').map().keys) if (['conflict', 'outdated', 'orphan'].includes(k.status)) problems.push({ level: k.status === 'conflict' ? 'error' : k.status === 'outdated' ? 'warning' : 'info', mod: k.mods.map(x => x.title).join(' + ') || k.file, text: k.file + ': ' + k.note }); } catch { /* keys folder unreadable */ }
   let cfgText = ''; try { cfgText = fs.readFileSync(p.configPath, 'utf8'); } catch { /* ignore */ }
   const vs = cfgText.match(/verifySignatures\s*=\s*(\d)/);
   if (vs && vs[1] !== '2') problems.push({ level: 'warning', mod: 'serverDZ.cfg', text: `verifySignatures is ${vs[1]}; 2 is required for signed mods to be enforced.` });

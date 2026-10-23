@@ -506,3 +506,6 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 
 .load-bar { height: 6px; margin-top: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
 .load-fill { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .8s ease; }
+
+.keys-card { flex: none; }
+.keys-card code { font-size: 12px; }

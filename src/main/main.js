@@ -64,6 +64,7 @@ const tasks = require('./tasks');
 const network = require('./network');
 const offsite = require('./offsite');
 const modcheck = require('./modcheck');
+const modkeys = require('./modkeys');
 const profiles = require('./profiles');
 const scheduler = require('./scheduler');
 
@@ -199,7 +200,7 @@ function createWindow() {
 }
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
-const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:cleanup)$/;
+const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:cleanup)$/;
 function handle(channel, fn) {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
@@ -450,6 +451,10 @@ handle('offsite:test', (c) => offsite.testFtp(c));
 
 // Mod checks
 handle('mods:check', () => modcheck.run());
+handle('mods:keys', () => modkeys.map());
+handle('mods:keyPlan', (id) => { const s = settings.load(); const c = s.modCache[id] || {}; const p = settings.paths(s); const files = [...new Set([...(c.keys || []), ...modkeys.keysIn(String(id).startsWith('@') ? path.join(p.serverDir, id) : path.join(p.workshopDir, String(id))).map(k => path.basename(k))])]; return modkeys.plan(id, files); });
+handle('mods:removeOrphanKeys', (files) => modkeys.removeOrphans(files));
+handle('mods:fixKey', (file) => modkeys.fix(file));
 
 // Profiles
 handle('profiles:list', () => profiles.list());
@@ -568,6 +573,7 @@ app.whenReady().then(() => {
   try { if (steamcmd.loadSavedCredentials()) emit('console', { source: 'steamcmd', line: `Using remembered Steam login for ${settings.load().steamUser}.` }); } catch { /* ignore */ }
   timed('crashes', () => crashes.init(emit));
   timed('mods', () => mods.init(emit));
+  modkeys.init(emit);
   timed('server', () => server.init(emit));
   timed('updater', () => updater.init(emit));
   timed('backups', () => backups.init(emit));

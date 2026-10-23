@@ -578,6 +578,7 @@ function modRow(m) {
             ${m.updateAvailable ? '<span class="badge warn">update available</span>' : ''}
             ${m.missingDeps && m.missingDeps.length ? `<span class="badge bad" title="Required: ${esc(m.missingDeps.join(', '))}">missing ${m.missingDeps.length} dependency</span>` : ''}
             ${m.fileSize ? `<span>${fmtBytes(m.fileSize)}</span>` : ''}
+            ${modKeyBadges(m)}
           </div>
         </div>
         <div class="actions">
@@ -589,8 +590,29 @@ function modRow(m) {
         </div>
       </div>`;
 }
+const KEY_STATUS = { ok: ['ok', 'in use'], shared: ['ok', 'shared'], base: ['', 'game key'], orphan: ['warn', 'leftover'], missing: ['bad', 'missing'], outdated: ['warn', 'outdated'], conflict: ['bad', 'name clash'], unused: ['', 'mod disabled'] };
+function modKeyBadges(m) {
+  const info = state.keyMap && state.keyMap.mods.find(x => x.id === m.id);
+  const keys = info ? info.keys : (m.keys || []).map(file => ({ file, status: 'ok', sharedWith: [] }));
+  return keys.map(k => `<span class="badge ${k.status === 'missing' || k.status === 'conflict' ? 'bad' : k.status === 'outdated' ? 'warn' : ''}" title="${esc(k.sharedWith.length ? 'Key shared with ' + k.sharedWith.join(', ') + '; kept until all of them are removed' : 'Key used only by this mod; removed with it')}">key ${esc(k.file)}${k.sharedWith.length ? ' · shared' : ''}</span>`).join('');
+}
+function renderKeys() {
+  const km = state.keyMap; if (!km) return;
+  const c = km.counts;
+  $('keysSummary').textContent = `· ${km.keys.length} in total${c.shared ? `, ${c.shared} shared` : ''}${c.orphan ? `, ${c.orphan} leftover` : ''}${c.missing ? `, ${c.missing} missing` : ''}${c.outdated ? `, ${c.outdated} outdated` : ''}${c.conflict ? `, ${c.conflict} name clash` : ''}`;
+  $('btnKeysOrphans').hidden = !c.orphan;
+  $('btnKeysOrphans').textContent = `Remove leftover key${c.orphan > 1 ? 's' : ''} (${c.orphan})`;
+  $('keysTable').querySelector('tbody').innerHTML = km.keys.map(k => {
+    const [cls, label] = KEY_STATUS[k.status] || ['', k.status];
+    const users = k.mods.map(x => `${esc(x.title)}${x.managed ? '' : ' <span class="muted">(not managed)</span>'}${x.enabled === false ? ' <span class="muted">(off)</span>' : ''}${x.notDownloaded ? ' <span class="muted">(not downloaded)</span>' : ''}`).join(', ') || `<span class="muted">${k.status === 'base' ? 'DayZ itself' : 'no mod'}</span>`;
+    const act = k.status === 'orphan' ? `<button class="btn small danger key-del" data-file="${esc(k.file)}">Remove</button>` : (k.status === 'missing' || k.status === 'outdated') ? `<button class="btn small key-fix" data-file="${esc(k.file)}">Fix</button>` : '';
+    return `<tr title="${esc(k.note + (k.sameAs ? ' Same key as ' + k.sameAs.join(', ') + '.' : ''))}"><td><code>${esc(k.file)}</code></td><td>${esc(k.authority)}</td><td>${users}</td><td><span class="badge ${cls}">${label}</span></td><td>${act}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">No keys folder yet.</td></tr>';
+}
 async function refreshMods() {
   state.mods = await ipc.invoke('mods:list');
+  try { state.keyMap = await ipc.invoke('mods:keys'); } catch { state.keyMap = null; }
+  renderKeys();
   const list = $('modList');
   if (!state.mods.length) { list.innerHTML = '<div class="empty">No mods yet. Find mods on the Workshop page, paste a workshop ID or collection above, or use Import found to pick up mods already in the server folder.</div>'; }
   else {
@@ -642,7 +664,9 @@ $('modList').addEventListener('click', (e) => {
   if (e.target.classList.contains('mod-remove')) {
     return run(async () => {
       const deps = await ipc.invoke('mods:dependents', id);
-      const choice = await showModal(`Remove ${m.title}?`, `${deps.length ? `<p><b>Warning:</b> ${esc(deps.join(', '))} require this mod and will fail to load without it.</p>` : ''}<p class="muted">Removing unlinks it from the server and deletes its keys (unless shared with another mod).</p>`,
+      const kp = await ipc.invoke('mods:keyPlan', id);
+      const keyText = (kp.remove.length ? `<p>Keys deleted with it: <b>${esc(kp.remove.join(', '))}</b></p>` : '') + kp.keep.map(k => `<p class="muted">Key ${esc(k.file)} stays: also used by ${esc(k.by.join(', '))}.</p>`).join('') || '<p class="muted">It ships no keys.</p>';
+      const choice = await showModal(`Remove ${m.title}?`, `${deps.length ? `<p><b>Warning:</b> ${esc(deps.join(', '))} require this mod and will fail to load without it.</p>` : ''}<p class="muted">Removing unlinks it from the server.</p>${keyText}`,
         m.local ? [{ label: 'Remove from list', value: 'keep', primary: true }, { label: 'Cancel', value: null }]
           : [{ label: 'Remove and delete files', value: 'delete', primary: true }, { label: 'Remove, keep download', value: 'keep' }, { label: 'Cancel', value: null }]);
       if (!choice) return;
@@ -2056,6 +2080,20 @@ $('btnNetRemoveRules').onclick = (e) => run(async () => { await ipc.invoke('netw
 // ---------- player map ----------
 // map page code lives in map.js
 
+
+// ---------- server keys ----------
+$('btnKeysOpen').onclick = () => state.keyMap && ipc.invoke('shell:openPath', state.keyMap.keysDir);
+$('btnKeysOrphans').onclick = (e) => run(async () => {
+  const files = state.keyMap.keys.filter(k => k.status === 'orphan').map(k => k.file);
+  const ok = await showModal('Remove leftover keys?', `<p>No mod in the server or download folders ships these keys:</p><p><b>${esc(files.join(', '))}</b></p><p class="muted">They were left by mods that are gone. If you load a mod from somewhere else that needs one, re-add its key.</p>`, [{ label: 'Remove', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  if (!ok) return;
+  const r = await ipc.invoke('mods:removeOrphanKeys', files); toast(`Removed ${r.removed.length} key(s)`);
+}, e.target);
+$('keysTable').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.classList.contains('key-del')) run(async () => { const r = await ipc.invoke('mods:removeOrphanKeys', [b.dataset.file]); toast(r.removed.length ? `Removed ${b.dataset.file}` : 'Not removed: a mod uses it'); }, b);
+  if (b.classList.contains('key-fix')) run(async () => { await ipc.invoke('mods:fixKey', b.dataset.file); toast(`Copied ${b.dataset.file}`); }, b);
+});
 
 // ---------- mod safety check ----------
 $('btnModCheck').onclick = (e) => run(async () => {

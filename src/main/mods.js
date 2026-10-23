@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
+const modkeys = require('./modkeys');
 const steamcmd = require('./steamcmd');
 const vdf = require('./vdf');
 
@@ -115,28 +116,12 @@ function localWorkshopState() {
   } catch { return {}; }
 }
 
-function findKeys(dir) {
-  const out = [];
-  const walk = (d, depth) => {
-    if (depth > 3) return;
-    let entries = [];
-    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const full = path.join(d, e.name);
-      if (e.isDirectory()) walk(full, depth + 1);
-      else if (/\.bikey$/i.test(e.name)) out.push(full);
-    }
-  };
-  walk(dir, 0);
-  return out;
-}
-
 function copyKeys(id, src) {
   const s = settings.load();
   const p = settings.paths(s);
   fs.mkdirSync(p.keysDir, { recursive: true });
   const keys = [];
-  for (const k of findKeys(src)) {
+  for (const k of modkeys.keysIn(src)) {
     const target = path.join(p.keysDir, path.basename(k));
     try { fs.copyFileSync(k, target); keys.push(path.basename(k)); } catch { /* ignore */ }
   }
@@ -150,8 +135,10 @@ function link(id) {
   if (isLocal(id)) {
     const dest = path.join(p.serverDir, id);
     if (!fs.existsSync(dest)) throw new Error(`Local mod folder ${id} not found.`);
+    const before = (s.modCache[id] || {}).keys; // read before saving: save updates the loaded settings in place
     const keys = copyKeys(id, dest);
     settings.save({ modCache: { ...s.modCache, [id]: { ...(s.modCache[id] || {}), folderName: id, keys, title: readMetaName(dest) || id } } });
+    releaseDropped(id, before, keys);
     return { folderName: id, keys };
   }
   const src = path.join(p.workshopDir, String(id));
@@ -164,9 +151,17 @@ function link(id) {
     if (st.isSymbolicLink() || st.isDirectory()) fs.rmSync(dest, { recursive: true, force: true });
   } catch { /* not there */ }
   fs.symlinkSync(src, dest, 'junction');
+  const before = (s.modCache[id] || {}).keys; // read before saving: save updates the loaded settings in place
   const keys = copyKeys(id, src);
   settings.save({ modCache: { ...s.modCache, [id]: { ...(s.modCache[id] || {}), folderName, keys, title: (s.modCache[id] || {}).title || readMetaName(src) || folderName } } });
+  releaseDropped(id, before, keys);
   return { folderName, keys };
+}
+
+// An update that ships a new key (authors re-sign) leaves the old one behind: remove it unless another mod uses it.
+function releaseDropped(id, before, now) {
+  const gone = (before || []).filter(k => !now.some(n => n.toLowerCase() === k.toLowerCase()));
+  if (gone.length) modkeys.release(id, gone, (settings.load().modCache[id] || {}).title);
 }
 
 function unlink(id) {
@@ -177,10 +172,9 @@ function unlink(id) {
     const dest = path.join(p.serverDir, c.folderName);
     try { if (fs.lstatSync(dest).isSymbolicLink()) fs.unlinkSync(dest); } catch { /* ignore */ }
   }
-  for (const k of c.keys || []) {
-    const shared = Object.entries(s.modCache).some(([oid, oc]) => oid !== String(id) && (oc.keys || []).includes(k));
-    if (!shared) { try { fs.unlinkSync(path.join(p.keysDir, k)); } catch { /* ignore */ } }
-  }
+  // the keys it shipped: those in its folder now plus those recorded when it was linked
+  const own = [...new Set([...(c.keys || []), ...modkeys.keysIn(isLocal(id) ? path.join(p.serverDir, id) : path.join(p.workshopDir, String(id))).map(k => path.basename(k))])];
+  modkeys.release(id, own, c.title);
 }
 
 // ---------- listing ----------

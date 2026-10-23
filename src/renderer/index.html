@@ -611,6 +611,11 @@
             <div class="card-title">Installed mods <span class="muted">drag to reorder · drag between sections to move between -mod and -serverMod</span></div>
             <div id="modList" class="mod-list"></div>
           </div>
+          <div class="card keys-card">
+            <div class="row gap"><div class="card-title" style="margin:0">Server keys <span class="muted" id="keysSummary"></span></div><span class="grow"></span><button class="btn small" id="btnKeysOrphans" hidden>Remove leftover keys</button><button class="btn small" id="btnKeysOpen" title="Open the server's keys folder">Open folder</button></div>
+            <p class="muted small">Which mod ships which .bikey. Removing a mod (or an update that changes its key) deletes its key, unless another mod in the server or download folder uses the same key.</p>
+            <div class="table-wrap" style="max-height:220px"><table class="table" id="keysTable"><thead><tr><th>Key file</th><th>Signer</th><th>Used by</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
         </section>
 
         <!-- UPDATES -->
