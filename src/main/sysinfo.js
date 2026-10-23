@@ -30,7 +30,7 @@ async function collect() {
     defenderStatus().catch(() => null),
     ps(`(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average).Average`)
   ]);
-  if (media) { const [type, bus, name] = media.split('|'); out.disk = { mediaType: type || 'unknown', bus: bus || 'unknown', name: name || '' }; }
+  if (media) { const [type, bus, name] = media.split('|'); out.disk = { mediaType: type || 'unknown', bus: bus || 'unknown', name: name || '' }; diskCache = out.disk; }
   if (defenderNow) out.defender = { present: defenderNow.present, realTime: defenderNow.realTime, serverFolderExcluded: defenderNow.excluded };
   if (cpuLoad) out.cpuLoadPercent = Number(cpuLoad) || null;
   return out;
@@ -63,6 +63,15 @@ function defenderStatus({ refresh = false } = {}) {
   return defBusy;
 }
 function cachedDefender() { return defCache; }
+let diskCache = null;
+function cachedDisk() { return diskCache; }
+// disk type of the server drive, looked up in the background (PowerShell storage cmdlets can take seconds)
+async function checkDisk() {
+  const p = settings.paths(); const drive = (p.serverDir.match(/^([A-Za-z]):/) || [])[1]; if (!drive) return null;
+  const media = await ps(`$d=Get-Partition -DriveLetter ${drive} -ErrorAction SilentlyContinue | Get-Disk -ErrorAction SilentlyContinue; if($d){ $pd=Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object DeviceId -eq $d.Number; "$($pd.MediaType)|$($pd.BusType)|$($d.FriendlyName)" }`, 30000);
+  if (media) { const [type, bus, name] = media.split('|'); diskCache = { mediaType: type || 'unknown', bus: bus || 'unknown', name: name || '' }; }
+  return diskCache;
+}
 // Adds the install folder (and the server exe) to Defender's exclusions; Windows asks for permission.
 async function addDefenderExclusion(emit = () => {}) {
   const dir = String(settings.load().installDir || '').replace(/[\\/]+$/, '');
@@ -81,4 +90,4 @@ async function addDefenderExclusion(emit = () => {}) {
   emit('console', { source: 'preflight', line: st.excluded ? `${dir} is now excluded from Defender scans.` : 'The exclusion command finished; Defender does not report it yet (it may need a moment, or a policy blocks it).' });
   return { code, ...st };
 }
-module.exports = { collect, defenderStatus, cachedDefender, addDefenderExclusion };
+module.exports = { collect, defenderStatus, cachedDefender, addDefenderExclusion, cachedDisk, checkDisk };

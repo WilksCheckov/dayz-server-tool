@@ -30,10 +30,20 @@ const STAGES = [
   { key: 'ready', label: 'ready', re: /\[CE\]\[Hive\] :: Init sequence finished/ }
 ];
 let stage = null;
+// Share of a whole start at which each step begins. Defaults from measured starts; replaced by this machine's own
+// timings after its first complete start, so the loading bar fills evenly and can estimate the time left.
+const DEFAULT_PROFILE = { fractions: [0, 0.03, 0.4, 0.6, 0.62, 0.97, 1], totalMs: 0 };
+let stageTimes = [];
+function loadProfile() { const p = settings.load().loadProfile; return p && Array.isArray(p.fractions) && p.fractions.length === STAGES.length && p.totalMs > 0 ? p : DEFAULT_PROFILE; }
 function setStage(i) {
   if (stage && i <= stage.index) return;
   const st = STAGES[i];
-  stage = { key: st.key, label: st.label, index: i, total: STAGES.length - 1, at: Date.now(), ready: st.key === 'ready' };
+  if (i === 0) stageTimes = [];
+  for (let k = 0; k <= i; k++) if (stageTimes[k] === undefined) stageTimes[k] = Date.now() - (startedAt || Date.now());
+  stage = { key: st.key, label: st.label, index: i, total: STAGES.length - 1, at: Date.now(), ready: st.key === 'ready', profile: loadProfile() };
+  if (stage.ready && stageTimes.length === STAGES.length && stageTimes[i] > 5000) {
+    const total = stageTimes[i]; settings.save({ loadProfile: { fractions: stageTimes.map(t => Math.min(1, t / total)), totalMs: total, at: Date.now() } });
+  }
   emitRef('server:stage', { ...stage, startedAt });
   if (stage.ready) emitRef('console', { source: 'server', line: `Server finished loading in ${Math.round((Date.now() - startedAt) / 1000)} s.` });
 }

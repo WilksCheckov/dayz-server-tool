@@ -368,7 +368,7 @@ async function attempt() {
       // fall back to plain retries when the server log cannot be followed, or a stage never ends
       const noLog = stg.key === 'starting' && Date.now() - auto.startedAt > 3 * 60000;
       const stuck = Date.now() - stg.at > 30 * 60000;
-      if (!noLog && !stuck) { setDiag('loading', `Server loading: ${stg.label} (step ${stg.index} of ${stg.total}, ${fmtElapsed(Date.now() - auto.startedAt)} so far). RCon connects as soon as loading finishes.`); return; }
+      if (!noLog && !stuck) { setDiag('loading', `Server loading: ${stg.label} (${fmtElapsed(Date.now() - auto.startedAt)} so far). RCon connects as soon as loading finishes.`); return; }
     }
     const open = udpListening(creds.port);
     if (open === false) {

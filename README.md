@@ -2,6 +2,23 @@
 
 A small Windows desktop app (Electron) for running a DayZ Standalone dedicated server.
 
+## System requirements
+
+The tool itself is light (about 150–300 MB of memory, plus about 55 MB per full-resolution map). The DayZ server it runs is what needs the hardware.
+
+| | Minimum | Recommended |
+|---|---|---|
+| Use | small vanilla server, up to about 20 players | 60 players, mods |
+| CPU | 4 cores | 4 or more fast cores (the server's main loop runs on one thread, so clock speed matters) |
+| Memory | 8 GB | 16 GB |
+| Disk | SSD, 30 GB free | NVMe SSD, 50 GB free |
+| Windows | Windows 10 or Server 2019, 64-bit | Windows 11 or Server 2022/2025 with Desktop Experience |
+| Network | the game, query and RCon ports open (UDP 2302–2305, 27016, 2306); the website port if used (TCP 8080) | at least 20 Mbit/s upload for a full server |
+
+Why these numbers: on a 2-core, 8 GB virtual server with a slow disk, a vanilla Chernarus start took more than 11 minutes, mostly waiting on the disk; on a modern desktop with an NVMe SSD it takes about 40 seconds. A spinning disk or Windows Defender scanning the server folder makes starts far slower (Check before start reports both and offers the Defender exclusion).
+
+The tool installs the Windows runtimes the server needs (Visual C++ 2015-2022 x64 and DirectX June 2010) on first run. Server Core installs of Windows Server lack some desktop components DayZ uses; use the Desktop Experience edition.
+
 ## Features
 
 - **Install & update** the DayZ server through SteamCMD (downloaded automatically on first use). Stable or Experimental branch.
@@ -33,7 +50,7 @@ A small Windows desktop app (Electron) for running a DayZ Standalone dedicated s
 - **RCon stays connected**: a keep-alive goes out every 25 s, and there is no silence timeout: a quiet or frozen server never ends the session. After 90 s without a reply the tool quietly re-sends its login on the same connection, so the session resumes even if BattlEye had forgotten it. Only a real network error ends the connection, and then it reconnects by itself (an alert goes out only if that fails for 2 minutes); pressing Disconnect keeps it disconnected until you press Connect or the server starts again.
 - **Status bar**: the top right shows Server, RCon, Bot and Web as On or Off (Server also shows Restarting and Updating). Each opens its page when clicked and explains its state on hover; RCon is amber when it should be on and is reconnecting.
 - **RCon follows the server's lifecycle**: RCon is expected on once the server has finished loading, and off while it is stopped, loading, restarting on schedule or updating, so planned downtime raises no errors or alerts and the status bar says why it is off. The tool checks every 15 s and on every server change whether RCon should be on and reconnects when it should; before scheduled restart warnings are due it makes sure RCon is connected so the warnings go out.
-- **Loading stages**: while the server starts, the Dashboard and the Players page show the stage from the server log (loading game data, Steam ready, economy starting, loading map data, persistence loaded, ready) and the time so far. RCon logs in once the log says "Init sequence finished", which is when BattlEye starts answering; pressing Connect earlier explains that instead of timing out.
+- **Loading bar**: while the server starts, the Dashboard shows a progress bar with the current step from the server log (loading game data, Steam ready, economy starting, loading map data, persistence loaded), the percentage, the time so far and, once the tool has seen one full start on that machine, the time left. The bar is paced by that machine's own previous start, so it fills evenly on slow and fast machines alike. RCon logs in once the log says "Init sequence finished", which is when BattlEye starts answering; pressing Connect earlier explains that instead of timing out.
 - **Windows Defender**: Check before start reports when Defender scans the server folder (a common cause of 10+ minute starts on servers) and offers to add the exclusion.
 - **Graceful stop**: Stop and scheduled restarts send `#shutdown` over RCon when connected (otherwise a normal close request), so the server saves the world and BattlEye restores its config; the process is only forced closed if it is still running after 2 minutes (`stopGraceSec` in settings).
 - **RCon that copes with slow machines**: the tool launches the server with `-BEpath` pointing at `battleye\`, so BattlEye reads exactly one config file. It connects when BattlEye is ready (port open, login answered) instead of on a fixed timer, with no time limit while the server is still loading, and the Players page says which step is failing (still loading, port not open and why, not answering, wrong password). Passwords never change while the server runs: a new one is applied at the next start, and the tool logs in with the config BattlEye actually loaded. Secrets are redacted from the audit log, and the diagnostics export includes hardware facts and the live health samples.

@@ -320,17 +320,36 @@ function renderServer(st) {
   $('btnStart').disabled = running; $('btnStop').disabled = !running && !st.restartPending; $('btnRestart').disabled = !running;
   updateUptime();
 }
+// Progress of a start: where the current step begins and ends in this machine's last start, filled by time spent in it.
+function loadProgress(st) {
+  const stg = st.stage, prof = stg.profile || { fractions: [0, 0.03, 0.4, 0.6, 0.62, 0.97, 1], totalMs: 0 };
+  const f = prof.fractions, i = stg.index, f0 = f[i] || 0, f1 = f[i + 1] !== undefined ? f[i + 1] : 1;
+  const now = Date.now(), elapsed = now - st.startedAt;
+  let within = 0.5;
+  if (prof.totalMs > 0) { const expected = Math.max(1000, (f1 - f0) * prof.totalMs); within = Math.min(0.95, (now - stg.at) / expected); }
+  else within = Math.min(0.9, (now - stg.at) / 60000);
+  const pct = Math.min(0.99, f0 + (f1 - f0) * within);
+  // time left: from the last start's total, scaled by how this start is going so far
+  let leftMs = null;
+  if (prof.totalMs > 0 && pct > 0.05) { const est = Math.max(prof.totalMs, elapsed / pct); leftMs = Math.max(0, est - elapsed); }
+  return { pct, leftMs };
+}
 function updateUptime() {
   const st = state.server;
   if (!st) return;
-  if (st.running && st.stage && !st.stage.ready) $('statUptime').textContent = `Loading: ${st.stage.label} (step ${st.stage.index} of ${st.stage.total}) · ${fmtDuration(Date.now() - st.startedAt)}`;
+  const loading = st.running && st.stage && !st.stage.ready;
+  $('loadBar').hidden = !loading;
+  if (loading) {
+    const p = loadProgress(st); $('loadFill').style.width = Math.round(p.pct * 100) + '%';
+    $('statUptime').textContent = `Loading: ${st.stage.label} · ${Math.round(p.pct * 100)}% · ${fmtDuration(Date.now() - st.startedAt)}${p.leftMs !== null ? ' · about ' + fmtDuration(p.leftMs) + ' left' : ''}`;
+  }
   else if (st.running) $('statUptime').textContent = 'Uptime ' + fmtDuration(Date.now() - st.startedAt);
   else if (st.lastExit) $('statUptime').textContent = `Last exit code ${st.lastExit.code} at ${fmtDate(st.lastExit.at)} after ${fmtDuration(st.lastExit.ranFor * 1000)}`;
   else $('statUptime').textContent = 'Not started this session';
 }
 setInterval(updateUptime, 1000);
 ipc.on('server:status', (st) => { renderServer(st); updateModsBanner(); });
-ipc.on('server:stage', (stg) => { if (state.server) { state.server.stage = stg; updateUptime(); } ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
+ipc.on('server:stage', (stg) => { if (state.server) { state.server.stage = stg; if (stg && stg.startedAt) state.server.startedAt = stg.startedAt; updateUptime(); } ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
 ipc.on('server:maintenance', (m) => { if (state.server) { state.server.maintenance = m; renderServer(state.server); } ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
 ipc.on('server:status', () => { ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
 const startServer = (e) => run(async () => renderServer(await ipc.invoke('server:start')), e.target);

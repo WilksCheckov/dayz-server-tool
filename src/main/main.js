@@ -243,7 +243,7 @@ handle('server:status', () => server.status());
 handle('server:start', () => server.start());
 handle('server:stop', () => server.stop());
 handle('server:restart', () => server.restart());
-handle('server:preflight', async () => { try { await require('./sysinfo').defenderStatus({ refresh: true }); } catch { /* ignore */ } return require('./preflight').checks(); });
+handle('server:preflight', async () => { try { await Promise.all([require('./sysinfo').defenderStatus({ refresh: true }), require('./sysinfo').cachedDisk() ? null : require('./sysinfo').checkDisk()]); } catch { /* ignore */ } return require('./preflight').checks(); });
 handle('server:addDefenderExclusion', () => require('./sysinfo').addDefenderExclusion(emit));
 handle('server:installVcRedist', () => require('./preflight').installVcRedist(emit));
 handle('server:installDirectX', () => require('./preflight').installDirectX(emit));
@@ -593,7 +593,7 @@ app.whenReady().then(() => {
   timed('deathlog', () => deathlog.init(emit));
   timed('anticheat', () => anticheat.init(emit));
   timed('maplink', () => require('./maplink').init(emit));
-  setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); }, 15000);
+  setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); require('./sysinfo').checkDisk().catch(() => {}); }, 15000);
   if (app.isPackaged && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {
     require('./preflight').ensureRuntimes(emit).then(r => {
       if (r.action === 'ok' || r.action === 'installed') { settings.save({ runtimesReady: true }); if (r.action === 'installed') emit('console', { source: 'preflight', line: 'First-run setup done: the runtimes the server needs are installed.' }); }

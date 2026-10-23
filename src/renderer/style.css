@@ -503,3 +503,6 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .veh-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
 .map-notice { margin-bottom: 8px; padding: 8px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--text); font-size: 12.5px; line-height: 1.45; }
+
+.load-bar { height: 6px; margin-top: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.load-fill { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .8s ease; }
