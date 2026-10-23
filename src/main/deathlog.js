@@ -46,6 +46,21 @@ function causeOf(a, body) {
   return { cause: 'unknown', text: 'died' };
 }
 
+// Label a damage source: a player name stays as is; a class name becomes "infected", "animal", "fall" and so on.
+function sourceKind(name, isPlayer) {
+  if (isPlayer) return 'player';
+  const c = String(name || '');
+  if (/^zmb|zombie|infected/i.test(c)) return 'infected';
+  if (/^animal_|wolf|bear|boar|cow|deer|goat|sheep|hen|pig/i.test(c)) return 'animal';
+  if (/fall/i.test(c)) return 'fall';
+  if (/explo|grenade|mine|claymore/i.test(c)) return 'explosion';
+  if (/fire|barrel|fireplace|burn/i.test(c)) return 'fire';
+  if (/vehicle|car|truck|offroad|sedan|hatchback|boat|heli/i.test(c)) return 'vehicle';
+  if (/contaminat|gas|toxic/i.test(c)) return 'gas';
+  if (/bleed/i.test(c)) return 'bleeding';
+  return 'environment';
+}
+function sourceLabel(a) { return a.player ? a.name : `${a.name} (${a.kind || sourceKind(a.name, false)})`; }
 // ---------- recording (fed by players.ingest with every parsed admin-log event) ----------
 function pendingFor(key) { const d = load(); if (!d.pending[key]) d.pending[key] = []; return d.pending[key]; }
 function record(ev) {
@@ -68,6 +83,7 @@ function record(ev) {
   const { cause, text } = causeOf(a, ev.body);
   if (rec) {
     if (rec.cause === 'unknown' && cause !== 'unknown') { rec.cause = cause; rec.causeText = text; }
+    if (!rec.source && a && (a.attackerName || a.attackerClass)) rec.source = a.attackerName ? { name: a.attackerName, kind: 'player' } : { name: a.attackerClass, kind: sourceKind(a.attackerClass, false) };
     if (!rec.killer && a && a.attackerName) { rec.killer = { name: a.attackerName, id: a.attackerId || null }; rec.weapon = a.weapon || rec.weapon; rec.distance = a.distance !== null && a.distance !== undefined ? a.distance : rec.distance; }
     save(); return;
   }
@@ -78,7 +94,7 @@ function record(ev) {
   for (const h of hits) {
     const part = h.part || 'unknown';
     byPart[part] = byPart[part] || { hits: 0, damage: 0 }; byPart[part].hits++; byPart[part].damage += h.damage; total += h.damage;
-    attackers[h.by] = attackers[h.by] || { name: h.by, id: h.byId, player: h.player, hits: 0, damage: 0 }; attackers[h.by].hits++; attackers[h.by].damage += h.damage;
+    attackers[h.by] = attackers[h.by] || { name: h.by, id: h.byId, player: h.player, kind: sourceKind(h.by, h.player), hits: 0, damage: 0 }; attackers[h.by].hits++; attackers[h.by].damage += h.damage;
   }
   const lastHit = hits.length ? hits[hits.length - 1] : null;
   rec = {
@@ -90,7 +106,8 @@ function record(ev) {
     distance: a && a.distance !== null && a.distance !== undefined ? a.distance : (lastHit && lastHit.distance !== null ? lastHit.distance : null),
     finalPart: lastHit ? lastHit.part : null, finalDamage: lastHit ? lastHit.damage : null,
     hits, byPart, totalDamage: Math.round(total * 10) / 10, attackers: Object.values(attackers).sort((x, y) => y.damage - x.damage),
-    gear: null, gearTs: null, refunds: []
+    gear: null, gearTs: null, refunds: [],
+    source: a && a.attackerName ? { name: a.attackerName, kind: 'player' } : a && a.attackerClass ? { name: a.attackerClass, kind: sourceKind(a.attackerClass, false) } : lastHit ? { name: lastHit.by, kind: sourceKind(lastHit.by, lastHit.player) } : null
   };
   // a plain "died" with a player hit moments before is for practical purposes a player kill
   if (rec.cause === 'unknown' && lastHit && ts - lastHit.ts <= 60000) {
@@ -220,7 +237,7 @@ async function refund(deathId, { by = 'app', items = null } = {}) {
 
 // ---------- queries ----------
 function summary(r) {
-  return { id: r.id, hasPos: !!deathPos(r), ts: r.ts, name: r.name, key: r.key, cause: r.cause, causeText: r.causeText, killer: r.killer, weapon: r.weapon, ammo: r.ammo, distance: r.distance, finalPart: r.finalPart, totalDamage: r.totalDamage, hitCount: r.hits.length, gearCount: r.gear ? r.gear.length : null, refunds: r.refunds.length, online: online(r.key) };
+  return { id: r.id, hasPos: !!deathPos(r), ts: r.ts, name: r.name, key: r.key, cause: r.cause, causeText: r.causeText, killer: r.killer, weapon: r.weapon, ammo: r.ammo, distance: r.distance, finalPart: r.finalPart, totalDamage: r.totalDamage, hitCount: r.hits.length, source: r.source || null, sources: (r.attackers || []).map(x => ({ name: x.name, kind: x.kind || sourceKind(x.name, x.player), hits: x.hits, damage: Math.round(x.damage) })), gearCount: r.gear ? r.gear.length : null, refunds: r.refunds.length, online: online(r.key) };
 }
 function list({ q = '', cause = '', since = 0, limit = 300 } = {}) {
   const needle = String(q || '').toLowerCase();
@@ -315,4 +332,4 @@ function housekeeping() {
 }
 
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };
+module.exports = { init, sourceKind, sourceLabel, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };

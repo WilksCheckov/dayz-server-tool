@@ -288,13 +288,14 @@ async function canTouchTicket(interaction, t) { return isAllowed(interaction) ||
 const feedQueue = {}; let feedTimer = null;
 function deathLine(r) {
   const range = r.distance !== null && r.distance !== undefined ? ` from ${Math.round(r.distance)} m` : '';
-  return r.cause === 'player' && r.killer ? `killed by **${r.killer.name}**${r.weapon ? ` with ${r.weapon}` : ''}${range}${r.finalPart ? ` (${r.finalPart})` : ''}` : r.causeText;
+  return r.cause === 'player' && r.killer ? `killed by **${r.killer.name}**${r.weapon ? ` with ${r.weapon}` : ''}${range}${r.finalPart ? ` (${r.finalPart})` : ''}` : r.source ? `${r.causeText} — ${r.source.name} (${r.source.kind})` : r.causeText;
 }
 function deathEmbed(r) {
   const e = new EmbedBuilder().setColor(r.cause === 'player' ? 0x8b0000 : 0x6b7280).setTitle(`Death #${r.id}: ${r.name}`).setDescription(deathLine(r)).setTimestamp(new Date(r.ts));
   const parts = Object.entries(r.byPart || {}).sort((a, b) => b[1].damage - a[1].damage).map(([p, v]) => `${p}: ${v.hits} hit${v.hits === 1 ? '' : 's'}, ${Math.round(v.damage)} dmg`).join('\n');
   if (parts) e.addFields({ name: `Damage by body part (${r.hits.length} hits, ${Math.round(r.totalDamage)} total)`, value: parts.slice(0, 1000) });
-  if (r.attackers && r.attackers.length > 1) e.addFields({ name: 'Attackers', value: r.attackers.map(a => `${a.name}: ${a.hits} hits, ${Math.round(a.damage)} dmg`).join('\n').slice(0, 1000) });
+  if (r.source && !(r.cause === 'player' && r.killer)) e.addFields({ name: 'Final damage source', value: `${r.source.name} (${r.source.kind})`, inline: true });
+  if (r.attackers && r.attackers.length) e.addFields({ name: 'Damage sources before death', value: r.attackers.map(a => `${a.name}${a.player ? '' : ' (' + (a.kind || 'environment') + ')'}: ${a.hits} hit${a.hits === 1 ? '' : 's'}, ${Math.round(a.damage)} dmg`).join('\n').slice(0, 1000) });
   if (r.gear && r.gear.length) { const counts = {}; for (const g of r.gear) counts[g.c] = (counts[g.c] || 0) + 1; e.addFields({ name: `Gear (${r.gear.length} items, ${r.gearFromCorpse ? 'from the body' : 'last snapshot before death'})`, value: Object.entries(counts).map(([c, n]) => n > 1 ? `${c} ×${n}` : c).join(', ').slice(0, 1000) }); }
   else e.addFields({ name: 'Gear', value: 'No snapshot (bridge script not running when they died)' });
   if (r.refunds && r.refunds.length) e.addFields({ name: 'Refunds', value: r.refunds.map(f => `<t:${Math.floor(f.ts / 1000)}:R> by ${f.by}: ${f.ok}/${f.items} items`).join('\n').slice(0, 1000) });
