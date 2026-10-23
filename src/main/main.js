@@ -574,6 +574,10 @@ handle('discord:status', () => discord.status());
 handle('discord:start', () => discord.start());
 handle('discord:stop', () => discord.stop());
 handle('discord:applyLiveLog', () => discord.applyLiveLog());
+// main instance: create a shared instance's own feed channels; a background instance asks the main one to do it
+handle('discord:createFeedChannels', (name) => instance.isChild ? control.call(instance.managerData, 'discord:createFeedChannels', name || instance.name) : discord.createFeedChannels(name));
+// set by the main instance after it created this instance's feed channels
+handle('discord:setChannels', (ids) => { const ok = {}; for (const k of ['killFeedChannelId', 'joinFeedChannelId', 'deathLogChannelId']) if (ids && /^\d{5,25}$/.test(String(ids[k] || ''))) ok[k] = String(ids[k]); settings.save({ discord: { ...(settings.load().discord || {}), ...ok } }); try { discord.applyLiveLog(); } catch { /* ignore */ } return discord.status(); });
 handle('discord:setMode', async (mode) => { if (!['own', 'shared', 'off'].includes(mode)) throw new Error('Unknown mode.'); if (mode === 'shared' && !instance.isChild) throw new Error('The main instance hosts the shared bot.'); await discord.stop(true); settings.save({ discord: { ...(settings.load().discord || {}), mode, autoStart: mode === 'shared' ? true : (settings.load().discord || {}).autoStart } }); if (mode === 'shared') await discord.start().catch(() => {}); return discord.status(); });
 handle('discord:commands', () => discord.buildCommands().map(c => ({ name: c.name, description: c.description, subs: (c.options || []).filter(o => o.type === 1).map(o => o.name) })));
 

@@ -63,6 +63,35 @@ async function remoteExecute(target, name, sub, opt, user) {
   try { const r = await control.request(e.data, 'bot/execute', { name, sub, opt, user: user ? { id: user.id, tag: user.tag } : null }, 300000); return { ...r, log: r.log ? `[${e.name}] ${r.log}` : r.log }; }
   catch (err) { return { content: `❌ ${e.name}: ${err.message}` }; }
 }
+// Each shared server can get its own kill feed, join feed and death log: the main bot creates the channels next to
+// its own feed channels (same category) and the instance saves them. Existing channels of the same name are reused.
+const FEEDS = [['killFeedChannelId', 'kill-feed', 'kills and deaths'], ['joinFeedChannelId', 'joins', 'players joining and leaving'], ['deathLogChannelId', 'death-log', 'every death with the damage and gear']];
+async function createFeedChannels(instanceName) {
+  if (instance.isChild) throw new Error('The main instance creates the channels.');
+  if (!client || !state.running) throw new Error('Start the main bot first.');
+  const inst = require('./instances').byName(instanceName);
+  if (inst.main) throw new Error('The main instance uses the channels set on its own Discord page.');
+  const g = await guild(); if (!g) throw new Error('The bot is not in the configured Discord server.');
+  const c = cfg();
+  const near = await channel(c.killFeedChannelId || c.joinFeedChannelId || c.deathLogChannelId || c.logChannelId);
+  const parent = near && near.parentId ? near.parentId : null;
+  const slug = inst.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'server';
+  const all = await g.channels.fetch();
+  const ids = {}; const made = [];
+  for (const [key, suffix, what] of FEEDS) {
+    const name = `${slug}-${suffix}`;
+    let ch = [...all.values()].find(x => x && x.name === name && x.type === ChannelType.GuildText && (x.parentId || null) === parent);
+    if (!ch) {
+      try { ch = await g.channels.create({ name, type: ChannelType.GuildText, parent: parent || undefined, topic: `${inst.name}: ${what}`, reason: `DayZ Admin Tools: feeds for ${inst.name}` }); made.push(name); }
+      catch (e) { throw new Error(/Missing Permissions/i.test(e.message) ? 'The bot lacks the Manage Channels permission: re-invite it with the invite link on the Discord Bot page, or give its role Manage Channels.' : e.message); }
+    }
+    ids[key] = ch.id;
+  }
+  await control.call(inst.data, 'discord:setChannels', ids);
+  addLog(`${inst.name}: ${made.length ? 'created ' + made.map(n => '#' + n).join(', ') : 'reusing its existing feed channels'}.`);
+  return { created: made, channels: ids };
+}
+
 // whitelist, priority and bans made through the shared bot apply to every server that shares it
 const MIRRORED = ['whitelist', 'priority', 'ban', 'bebans'];
 function mirror(op, kind, ...args) {
@@ -108,7 +137,7 @@ function hostChannels() {
 function status() {
   const c = cfg();
   return { ...state, mode: mode(), shared: shared(), sharedWith: sharedTargets().map(e => e.name), instance: instance.isChild ? instance.name : null, log: log.slice(-60), config: { ...c, token: c.token ? '••••' + c.token.slice(-4) : '' }, hasToken: !!c.token,
-    inviteUrl: state.appId ? `https://discord.com/oauth2/authorize?client_id=${state.appId}&scope=bot%20applications.commands&permissions=1101659225094` : null,
+    inviteUrl: state.appId ? `https://discord.com/oauth2/authorize?client_id=${state.appId}&scope=bot%20applications.commands&permissions=1101659225110` : null,
     store: { applications: Object.keys(store().applications).length, bans: store().bans.filter(b => b.status === 'banned').length, tickets: (store().tickets || []).filter(t => t.status === 'open').length } };
 }
 
@@ -1083,4 +1112,4 @@ function init(emit) {
   else if (mode() !== 'off' && cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000);
 }
 
-module.exports = { postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };

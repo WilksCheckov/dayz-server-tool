@@ -1132,7 +1132,7 @@ function renderDiscord(st) {
   $('btnDiscordInvite').disabled = !st.inviteUrl;
   if (st.mode) $('discordMode').value = st.mode;
   for (const id of ['dcSteps', 'dcTokenWrap', 'dcGuildWrap']) $(id).hidden = !!st.shared;
-  $('dcSharedNote').hidden = !st.shared;
+  $('dcSharedNote').hidden = !st.shared; $('dcFeedsRow').hidden = !st.shared;
   if (st.shared) $('discordStatusText').textContent = st.running ? `Using the main instance's bot (${st.tag})` : 'Shared: the main instance\'s bot is offline';
   $('discordInfo').textContent = st.running
     ? `${st.commands} slash commands registered${st.guildName ? ' in ' + st.guildName : ''}${st.presence ? ' · status: ' + st.presence : ''}${st.liveLogPosted ? ' · ' + st.liveLogPosted + ' log batches posted' : ''}${st.error ? ' · ' + st.error : ''}`
@@ -2230,6 +2230,7 @@ $('btnInstNew').onclick = (e) => run(async () => {
     <label class="check"><input type="checkbox" id="niSettings" checked> Copy the tool settings (restarts, backups, alerts, website…)</label></div>
     <label class="field">CPU cores <select id="niCpu" class="input"><option value="auto">Auto: its own share, so servers do not share cores</option><option value="all">Windows decides</option></select></label>
     <label class="field">Discord bot <select id="niBot" class="input"><option value="shared">Shared with the main instance</option><option value="own">Its own bot (set the token in its window)</option><option value="off">Off</option></select></label>
+    <label class="check" title="Needs the main bot running"><input type="checkbox" id="niFeeds" checked> With a shared bot: give it its own kill feed, join feed and death log channels (the main bot creates them)</label>
     <label class="check"><input type="checkbox" id="niSteam" checked> Use this window's Steam login, so it can update itself (stays encrypted in its own folder)</label>
     <label class="check"><input type="checkbox" id="niAuto" checked> Start it with the main window</label>
     <p class="muted small">Ports are picked automatically: the next free block (game port +100, query +100, RCon +100, website +1). Passwords and tokens are not copied: each instance keeps its own, encrypted for its own folder.</p>`;
@@ -2243,6 +2244,7 @@ $('btnInstNew').onclick = (e) => run(async () => {
     toast(`${r.name} created: game port ${r.ports.game}`);
     await refreshInstanceSelect(); await refreshInstances();
     await ipc.invoke('instances:action', r.name, 'open');
+    if ($('niFeeds').checked && opts.bot === 'shared') { try { const f = await ipc.invoke('discord:createFeedChannels', r.name); toast(`${r.name}: ${f.created.length ? 'created ' + f.created.map(n => '#' + n).join(', ') : 'using its existing feed channels'}`); } catch (err) { toast(`Feed channels not created: ${err.message} (use the button on its Discord Bot page later)`, true); } }
     if ($('niSteam').checked) { try { if (await ipc.invoke('instances:shareSteamLogin', r.name)) toast(`${r.name} uses the same Steam login`); } catch (err) { toast('Steam login not shared: ' + err.message, true); } }
   } finally { $('btnInstNew').disabled = false; }
 }, e.target);
@@ -2270,6 +2272,7 @@ $('cpuGrid').addEventListener('change', () => saveCpu({ cores: [...document.quer
 $('btnCpuDetect').onclick = (e) => run(async () => { cpuState = await ipc.invoke('cpu:detect'); renderCpu(); }, e.target);
 
 // ---------- bot mode of a background instance ----------
+$('btnDcFeeds').onclick = (e) => run(async () => { const r = await ipc.invoke('discord:createFeedChannels'); toast(r.created.length ? `Created ${r.created.map(n => '#' + n).join(', ')}` : 'Using the existing feed channels'); renderDiscord(await ipc.invoke('discord:status')); await loadSettings(); loadDiscordForm(); }, e.target);
 $('discordMode').onchange = (e) => run(async () => { renderDiscord(await ipc.invoke('discord:setMode', e.target.value)); });
 
 refreshInstanceSelect();

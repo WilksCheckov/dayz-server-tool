@@ -940,6 +940,7 @@
             <div class="card">
               <div class="card-title">Bot settings</div>
               <p class="muted" id="dcSharedNote" hidden>This instance uses the main instance's bot: no token needed here. Channels left empty use the main instance's channels; posts are labelled with this instance's name, and the main bot's commands get a server option for it. Whitelist, priority and bans made through the bot apply to every server sharing it.</p>
+              <div class="row gap" id="dcFeedsRow" hidden><button class="btn small" id="btnDcFeeds" title="The main bot creates #<name>-kill-feed, #<name>-joins and #<name>-death-log next to its own feed channels and this instance posts there">Create this server's own feed channels</button></div>
               <ol class="muted steps" id="dcSteps">
                 <li>Go to <a href="#" class="ext" data-url="https://discord.com/developers/applications">discord.com/developers/applications</a>, create an application, open <b>Bot</b>, click <b>Reset Token</b> and paste it below.</li>
                 <li>In Discord, enable <b>Developer Mode</b> (Settings → Advanced), right-click your server → <b>Copy Server ID</b>.</li>
