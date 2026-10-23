@@ -9,7 +9,7 @@ const { app } = require('electron');
 const settings = require('./settings');
 
 const MOD_FOLDER = '@DayZAdminTools';
-const MOD_VERSION = 2;
+const MOD_VERSION = 3;
 let db = null, saveTimer = null, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'anticheat.json');
 function load() { if (db) return db; try { db = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { db = null; } db = { dupes: [], nextId: 1, log: { offset: 0, rest: '' }, lastStats: null, ...(db || {}) }; return db; }
@@ -114,7 +114,9 @@ function liveLoot() {
   const head = (lines[0] || '').split('|'); const endLine = lines.filter(l => l.startsWith('#end|')).pop();
   if (head[0] !== '#begin' || !endLine) return lootCache.data || { available: false, reason: 'The mod is writing item positions right now; try again in a moment.' };
   const classes = [], idx = new Map(), places = ['-'], pidx = new Map([['-', 0]]); const items = [];
+  const vehicles = [];
   for (const l of lines) {
+    if (l.startsWith('#veh|')) { const v = l.split('|'); vehicles.push({ cls: v[1], x: Number(v[2]) || 0, z: Number(v[3]) || 0, health: Number(v[4]) }); continue; }
     if (!l || l[0] === '#') continue;
     const p = l.split('|'); if (p.length < 4) continue;
     let ci = idx.get(p[0]); if (ci === undefined) { ci = classes.length; classes.push(p[0]); idx.set(p[0], ci); }
@@ -126,7 +128,7 @@ function liveLoot() {
   // category of each class from the mission's types (lower-case match, DayZ class names are case-insensitive)
   let cats = {}; try { for (const it of require('./lootmap').items()) cats[it.name.toLowerCase()] = (it.category && it.category[0]) || ''; } catch { cats = {}; }
   const classCat = classes.map(c => cats[c.toLowerCase()] || '');
-  lootCache = { mtime: st.mtimeMs, data: { available: true, at, count: items.length, classes, classCat, places, items } };
+  lootCache = { mtime: st.mtimeMs, data: { available: true, at, count: items.length, classes, classCat, places, items, vehicles, vehiclesKnown: Number(String(head[2] || '').replace(/\D/g, '')) >= 3 || vehicles.length > 0 } };
   return lootCache.data;
 }
 function init(emit) { emitRef = emit; load(); }

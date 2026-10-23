@@ -3,7 +3,8 @@
 // items sharing one ID the moment the copy appears and writes it to $profile:DayZAdminTools/dupes.log.
 class DZAT_Dupe
 {
-	static const int VERSION = 2;
+	static const int VERSION = 3;
+	static ref array<EntityAI> s_Vehicles = new array<EntityAI>();
 	static int s_ExportEvery = 5;
 	static int s_ScanCount = 0;
 	static const string DIR = "$profile:DayZAdminTools";
@@ -197,6 +198,8 @@ class DZAT_Dupe
 				vector pos = root.GetPosition();
 				string where = "-";
 				if (root != e) where = root.GetType();
+				// vehicles without a script class to hook (motorbikes) are found through the parts they carry
+				if (root != e && Transport.Cast(root) && s_Vehicles.Find(root) < 0) s_Vehicles.Insert(root);
 				string line = e.GetType() + "|" + Math.Round(pos[0]).ToString() + "|" + Math.Round(pos[2]).ToString() + "|" + where;
 				if (inChunk > 0) chunk = chunk + "\n";
 				chunk = chunk + line;
@@ -211,6 +214,18 @@ class DZAT_Dupe
 			}
 		}
 		if (inChunk > 0) FPrintln(fh, chunk);
+		// vehicles: "#veh|class|x|z|health 0-1"
+		for (int v = s_Vehicles.Count() - 1; v >= 0; v--)
+		{
+			EntityAI car = s_Vehicles[v];
+			if (!car)
+			{
+				s_Vehicles.Remove(v);
+				continue;
+			}
+			vector cp = car.GetPosition();
+			FPrintln(fh, "#veh|" + car.GetType() + "|" + Math.Round(cp[0]).ToString() + "|" + Math.Round(cp[2]).ToString() + "|" + car.GetHealth01("", "").ToString());
+		}
 		FPrintln(fh, "#end|" + n.ToString());
 		CloseFile(fh);
 	}
@@ -247,5 +262,24 @@ modded class ItemBase
 	string DZAT_GetUid()
 	{
 		return m_DZAT_Uid;
+	}
+}
+
+// Vehicles are not items: keep a list of the live ones so their positions can be exported with the loot.
+modded class CarScript
+{
+	override void EEInit()
+	{
+		super.EEInit();
+		if (GetGame().IsServer() && DZAT_Dupe.s_Vehicles.Find(this) < 0) DZAT_Dupe.s_Vehicles.Insert(this);
+	}
+}
+
+modded class BoatScript
+{
+	override void EEInit()
+	{
+		super.EEInit();
+		if (GetGame().IsServer() && DZAT_Dupe.s_Vehicles.Find(this) < 0) DZAT_Dupe.s_Vehicles.Insert(this);
 	}
 }

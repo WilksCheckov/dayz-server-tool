@@ -499,3 +499,5 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 
 .pill-link { cursor: pointer; }
 .pill-link:hover { border-color: var(--border-strong); }
+
+.veh-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }

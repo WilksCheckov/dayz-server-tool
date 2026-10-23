@@ -431,7 +431,7 @@
           </div>
           <div class="row gap wrap map-overlay-bar">
             <b>Overlay</b>
-            <select id="mapOverlay" class="input" style="width:230px"><option value="none">None</option><option value="travel">Travel heat (where players go)</option><option value="hits">Combat heat (hits)</option><option value="building">Base building heat</option><option value="logouts">Logout spots</option><option value="logins">Login / spawn spots</option><option value="deaths">Death heat (where players die)</option><option value="causes">Deaths by cause (who killed them)</option><option value="loot">Loot spawn locations (pick an item)</option><option value="liveloot">Actual loot now (live from the server)</option></select>
+            <select id="mapOverlay" class="input" style="width:230px"><option value="none">None</option><option value="travel">Travel heat (where players go)</option><option value="hits">Combat heat (hits)</option><option value="building">Base building heat</option><option value="logouts">Logout spots</option><option value="logins">Login / spawn spots</option><option value="deaths">Death heat (where players die)</option><option value="causes">Deaths by cause (who killed them)</option><option value="loot">Loot spawn locations (pick an item)</option><option value="liveloot">Actual loot now (live from the server)</option><option value="vehicles">Vehicles (spawn points and where they are now)</option></select>
             <select id="mapRange" class="input" style="width:120px" title="Time range for the heat overlays"><option value="24">Last 24 h</option><option value="168">Last 7 days</option><option value="720" selected>Last 30 days</option><option value="all">All time</option></select>
             <label class="field inline">Opacity <input id="mapOverlayAlpha" type="range" min="20" max="100" value="70" style="width:110px"></label>
             <span class="muted" id="mapOverlayInfo"></span>
@@ -441,6 +441,11 @@
           </div>
           <div class="map-layout">
             <div class="card grow map-card"><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
+            <div class="card loot-panel" id="vehPanel" hidden>
+              <div class="card-title">Vehicles <span class="muted" id="vehWhen"></span></div>
+              <div class="row gap wrap"><label class="check"><input type="checkbox" id="vehShowSpawns" checked> Spawn points</label><label class="check"><input type="checkbox" id="vehShowLive" checked> Vehicles now</label></div>
+              <div id="vehList" class="ip-list"></div>
+            </div>
             <div class="card loot-panel" id="liveLootPanel" hidden>
               <div class="card-title">Actual loot <span class="muted" id="liveLootWhen"></span></div>
               <div class="row gap"><input id="liveLootSearch" class="input" placeholder="Search items…"><select id="liveLootCat" class="input" style="width:110px"><option value="">All types</option></select></div>

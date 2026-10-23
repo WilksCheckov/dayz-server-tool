@@ -371,6 +371,7 @@ handle('mission:buildMap', (opts) => mission.buildMapImage(opts || {}));
 handle('heat:summary', (since) => heat.summary(null, Number(since) || 0));
 handle('lootmap:items', () => lootmap.items());
 handle('lootmap:spawns', (name) => lootmap.spawns(name));
+handle('lootmap:vehicleSpawns', () => lootmap.vehicleSpawns());
 handle('stats:overview', () => stats.overview());
 handle('stats:reset', () => { stats.clear(); return true; });
 handle('stats:summaryText', () => stats.summaryText());

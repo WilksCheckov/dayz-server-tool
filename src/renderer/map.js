@@ -34,6 +34,7 @@ async function drawMap() {
   await drawOverlay(ctx, c);
   drawLoot(ctx, c);
   drawLiveLoot(ctx, c);
+  drawVehicles(ctx, c);
   // players
   if (!mapState.players.at || Date.now() - mapState.players.at > 4000) { try { const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 }); mapState.players = Object.assign(rows.filter(r => r.lastPos), { at: Date.now() }); } catch { /* ignore */ } }
   const pts = mapState.players.filter(r => !$('mapOnlineOnly').checked || r.online);
@@ -69,7 +70,7 @@ function drawHeatGrid(ctx, c, N, cells, max, alpha) {
 function binEvents(events, N, size, kind) { const grid = new Map(); let max = 0; for (const e of events) { if (kind !== null && e[3] !== kind) continue; const gx = Math.min(N - 1, Math.max(0, Math.floor(e[1] / size * N))), gz = Math.min(N - 1, Math.max(0, Math.floor(e[2] / size * N))); const i = gz * N + gx; const v = (grid.get(i) || 0) + 1; grid.set(i, v); if (v > max) max = v; } return { cells: [...grid.entries()], max }; }
 async function drawOverlay(ctx, c) {
   const mode = $('mapOverlay').value; const info = $('mapOverlayInfo');
-  if (mode === 'none' || mode === 'loot' || mode === 'liveloot') { if (mode === 'none') info.textContent = ''; return; }
+  if (mode === 'none' || mode === 'loot' || mode === 'liveloot' || mode === 'vehicles') { if (mode === 'none') info.textContent = ''; return; }
   const h = await heatData(); const alpha = Number($('mapOverlayAlpha').value) / 100;
   if (!h || (!h.events.length && !h.deaths.length)) { info.textContent = 'No data in this time range. It fills from the admin log (-adminlog) while players play; "Rebuild from all logs" reads older logs.'; return; }
   const N = h.N, size = h.size;
@@ -125,6 +126,50 @@ function drawLiveLoot(ctx, c) {
   info.textContent = `${pts.length.toLocaleString()} item(s)${liveLootPick ? ' of ' + liveLootPick : ''}: ${ground.toLocaleString()} on the ground, ${(pts.length - ground).toLocaleString()} in containers, tents or vehicles · as of ${new Date(L.at).toLocaleTimeString()} (updates every 5 min) · zoom in for single items (yellow = ground, blue = stored)`;
 }
 
+// ----- vehicles: spawn points from the mission, live positions from the anti-dupe mod -----
+const VEH_COLORS = ['#ff5252', '#4fc3f7', '#ffd54f', '#81c784', '#ba68c8', '#ff8a65', '#90a4ae', '#f06292', '#aed581', '#7986cb'];
+let vehSpawns = null, vehPick = '';
+async function loadVehicles() {
+  try { vehSpawns = await ipc.invoke('lootmap:vehicleSpawns'); } catch (e) { vehSpawns = []; toast(e.message, true); }
+  await loadLiveLoot(true);
+}
+function vehColor(event) { const i = (vehSpawns || []).findIndex(e => e.event === event); return VEH_COLORS[(i < 0 ? 0 : i) % VEH_COLORS.length]; }
+function vehEventOf(cls) { const lc = String(cls).toLowerCase(); const e = (vehSpawns || []).find(ev => ev.types.some(t => t.toLowerCase() === lc)); return e ? e.event : null; }
+function liveVehicles() { return liveLoot && liveLoot.available && liveLoot.vehiclesKnown ? (liveLoot.vehicles || []) : null; }
+function renderVehList() {
+  const box = $('vehList'); const live = liveVehicles();
+  $('vehWhen').textContent = live ? 'as of ' + new Date(liveLoot.at).toLocaleTimeString() : '';
+  const counts = new Map(); for (const v of (live || [])) { const ev = vehEventOf(v.cls) || 'Other'; counts.set(ev, (counts.get(ev) || 0) + 1); }
+  const rows = (vehSpawns || []).map(e => `<div class="ip-item ${vehPick === e.event ? 'on' : ''}" data-name="${esc(e.event)}" title="${esc(e.types.join(', '))}"><span><span class="veh-swatch" style="background:${vehColor(e.event)}"></span>${esc(e.event.replace(/^Vehicle/, ''))}</span><span class="muted">${e.positions.length} spots · ${live ? (counts.get(e.event) || 0) + ' now / ' : ''}nominal ${e.nominal ?? '?'}${e.active ? '' : ' · off'}</span></div>`);
+  if (live && counts.get('Other')) rows.push(`<div class="ip-item ${vehPick === 'Other' ? 'on' : ''}" data-name="Other"><span><span class="veh-swatch" style="background:#ffffff"></span>Other vehicles</span><span class="muted">${counts.get('Other')} now</span></div>`);
+  box.innerHTML = `<div class="ip-item ${vehPick ? '' : 'on'}" data-name=""><span>All vehicle types</span><span class="muted">${(vehSpawns || []).reduce((a, e) => a + e.positions.length, 0)} spots${live ? ' · ' + live.length + ' now' : ''}</span></div>` + rows.join('') + (live ? '' : `<div class="muted" style="padding:6px">${esc(liveLoot && liveLoot.available && !liveLoot.vehiclesKnown ? 'Vehicle positions need the anti-dupe mod v3, which installs itself at the next server start.' : (liveLoot && liveLoot.reason) || 'Where vehicles are now needs the anti-dupe server mod (Statistics → Dupe detection).')}</div>`);
+}
+function drawVehicles(ctx, c) {
+  if ($('mapOverlay').value !== 'vehicles' || !vehSpawns) return;
+  const alpha = Number($('mapOverlayAlpha').value) / 100; const zoomed = mapState.view.scale >= 2.5;
+  let spots = 0, shown = 0;
+  if ($('vehShowSpawns').checked) {
+    for (const e of vehSpawns) {
+      if (vehPick && vehPick !== e.event) continue;
+      ctx.strokeStyle = vehColor(e.event); ctx.globalAlpha = 0.45 + 0.55 * alpha; ctx.lineWidth = 2;
+      for (const p of e.positions) { const [x, y] = toScreen(c, p.x, p.z); ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke(); spots++; }
+      ctx.globalAlpha = 1;
+    }
+  }
+  const live = liveVehicles();
+  if (live && $('vehShowLive').checked) {
+    ctx.font = '11px Segoe UI';
+    for (const v of live) {
+      const ev = vehEventOf(v.cls) || 'Other'; if (vehPick && vehPick !== ev) continue;
+      const [x, y] = toScreen(c, v.x, v.z); const col = ev === 'Other' ? '#ffffff' : vehColor(ev);
+      ctx.fillStyle = col; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.rect(x - 5, y - 5, 10, 10); ctx.fill(); ctx.stroke();
+      if (zoomed) { const label = `${v.cls}${Number.isFinite(v.health) ? ' · ' + Math.round(v.health * 100) + '%' : ''}`; const tw = ctx.measureText(label).width; ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 8, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(label, x + 11, y + 4); }
+      shown++;
+    }
+  }
+  $('mapOverlayInfo').textContent = `${spots.toLocaleString()} spawn point(s) (circles)${live ? ` · ${shown} vehicle(s) on the map now (squares, as of ${new Date(liveLoot.at).toLocaleTimeString()})` : ' · live positions need the anti-dupe mod'} · colours match the list · zoom in for names and condition`;
+}
+
 // ----- loot spawn overlay -----
 let lootItems = null;
 async function loadLootItems() { if (lootItems) return lootItems; try { lootItems = await ipc.invoke('lootmap:items'); } catch (e) { toast(e.message, true); lootItems = []; } return lootItems; }
@@ -169,11 +214,13 @@ function mapInit() {
     if (mapState.measure) { mapState.measure = null; scheduleDraw(); }
   });
   c.addEventListener('dblclick', () => { mapState.view = { scale: 1, ox: 0, oy: 0 }; scheduleDraw(); });
-  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; const live = $('mapOverlay').value === 'liveloot'; $('lootPanel').hidden = !loot; $('liveLootPanel').hidden = !live; if (loot) { await loadLootItems(); renderLootList(); } if (live) { await loadLiveLoot(true); renderLiveLootList(); } scheduleDraw(); };
+  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; const live = $('mapOverlay').value === 'liveloot'; const veh = $('mapOverlay').value === 'vehicles'; $('lootPanel').hidden = !loot; $('liveLootPanel').hidden = !live; $('vehPanel').hidden = !veh; if (veh) { await loadVehicles(); renderVehList(); } if (loot) { await loadLootItems(); renderLootList(); } if (live) { await loadLiveLoot(true); renderLiveLootList(); } scheduleDraw(); };
   const liveRefresh = () => { renderLiveLootList(); scheduleDraw(); };
   $('liveLootSearch').addEventListener('input', () => { liveLootPick = ''; liveRefresh(); }); $('liveLootCat').onchange = () => { liveLootPick = ''; liveRefresh(); }; $('liveLootGround').onchange = liveRefresh;
   $('liveLootList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; liveLootPick = it.dataset.name || ''; liveRefresh(); });
-  setInterval(async () => { if ($('mapOverlay').value === 'liveloot' && document.querySelector('#page-map.active')) { await loadLiveLoot(true); liveRefresh(); } }, 60000);
+  setInterval(async () => { if ($('mapOverlay').value === 'liveloot' && document.querySelector('#page-map.active')) { await loadLiveLoot(true); liveRefresh(); } if ($('mapOverlay').value === 'vehicles' && document.querySelector('#page-map.active')) { await loadLiveLoot(true); renderVehList(); scheduleDraw(); } }, 60000);
+  $('vehList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; vehPick = it.dataset.name || ''; renderVehList(); scheduleDraw(); });
+  $('vehShowSpawns').onchange = $('vehShowLive').onchange = () => scheduleDraw();
   $('mapOverlayAlpha').oninput = scheduleDraw; $('mapRange').onchange = () => { heatCache.at = 0; scheduleDraw(); };
   $('lootSearch').addEventListener('input', renderLootList);
   $('lootList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; pickLootItem(it.dataset.name); renderLootList(); });

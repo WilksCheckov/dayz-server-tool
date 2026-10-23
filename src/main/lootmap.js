@@ -102,4 +102,25 @@ function spawns(itemName) {
   return { item, buildings, points, spots: result, top, tiers: !!c.area, totalBuildings: c.groups.length };
 }
 
-module.exports = { items, spawns };
+// Vehicle spawns: events named Vehicle* in db/events.xml (with the vehicle types they spawn and their counts) and
+// their positions in cfgeventspawns.xml.
+let vehCache = { key: '', data: null };
+function vehicleSpawns() {
+  const m = mission(); const ev = path.join(m, 'db', 'events.xml'), sp = path.join(m, 'cfgeventspawns.xml');
+  let key = ''; try { key = fs.statSync(ev).mtimeMs + '|' + fs.statSync(sp).mtimeMs; } catch { return []; }
+  if (vehCache.key === key) return vehCache.data;
+  const evText = fs.readFileSync(ev, 'utf8'), spText = fs.readFileSync(sp, 'utf8');
+  const num = (body, tag) => { const r = body.match(new RegExp('<' + tag + '>\\s*(-?\\d+)\\s*</' + tag + '>')); return r ? Number(r[1]) : null; };
+  const events = new Map();
+  for (const e of evText.matchAll(/<event\s+name="(Vehicle[^"]*)"\s*>([\s\S]*?)<\/event>/gi)) {
+    const body = e[2];
+    events.set(e[1], { event: e[1], nominal: num(body, 'nominal'), min: num(body, 'min'), max: num(body, 'max'), active: num(body, 'active') !== 0, types: [...body.matchAll(/<child\b[^>]*\btype="([^"]+)"/gi)].map(x => x[1]), positions: [] });
+  }
+  for (const e of spText.matchAll(/<event\s+name="([^"]+)"\s*>([\s\S]*?)<\/event>/gi)) {
+    const ev2 = events.get(e[1]); if (!ev2) continue;
+    for (const p of e[2].matchAll(/<pos\b[^>]*\bx="([-\d.]+)"[^>]*\bz="([-\d.]+)"/gi)) ev2.positions.push({ x: Number(p[1]), z: Number(p[2]) });
+  }
+  vehCache = { key, data: [...events.values()].filter(e => e.positions.length || e.types.length).sort((a, b) => a.event.localeCompare(b.event)) };
+  return vehCache.data;
+}
+module.exports = { items, spawns, vehicleSpawns };
