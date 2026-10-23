@@ -1,7 +1,7 @@
 {
   "name": "dayz-admin-tools",
   "productName": "DayZ Admin Tools",
-  "version": "0.1.59",
+  "version": "0.1.60",
   "description": "Desktop app to install, update, run and monitor a DayZ Standalone dedicated server with Steam Workshop mod management.",
   "main": "src/main/main.js",
   "author": "chris",
