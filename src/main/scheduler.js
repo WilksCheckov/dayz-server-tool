@@ -68,9 +68,10 @@ async function doRestart(reason) {
     if (wasRunning && rcon.status().connected) {
       try { await rcon.say('Server is restarting now.'); await new Promise(r => setTimeout(r, 1500)); } catch { /* ignore */ }
     }
+    server.setMaintenance('restart');
     if (wasRunning) await server.stop();
     if (c.backupBefore) { try { await backups.create('restart'); } catch (e) { log(`Backup before restart failed: ${e.message}`); } }
-    server.start();
+    try { server.start(); } finally { server.setMaintenance(null); }
   } catch (e) {
     log(`Scheduled restart failed: ${e.message}`);
   } finally {
@@ -81,11 +82,18 @@ async function doRestart(reason) {
 }
 
 // Announce an upcoming restart through RCon at the configured minute marks.
+let rconNudgedFor = 0;
 async function warnPlayers(now) {
   const c = restartCfg();
-  if (!c.enabled || !rcon.status().connected || !server.status().running) return;
+  if (!c.enabled || !server.status().running) return;
   const next = nextRestart(now);
   if (!next) return;
+  const firstWarn = Math.max(0, ...(c.warnMinutes || []).map(Number).filter(Number.isFinite));
+  if (!rcon.status().connected) {
+    // within the warning window (plus 3 minutes of lead time) without RCon: connect now so the warnings can go out
+    if ((next - now) / 60000 <= firstWarn + 3 && rconNudgedFor !== next) { rconNudgedFor = next; emitRef('console', { source: 'scheduler', line: 'Restart warnings are due soon and RCon is not connected; connecting now.' }); try { rcon.reconcile({ force: true }); } catch { /* ignore */ } }
+    return;
+  }
   if (!warned[next]) warned = { [next]: new Set() };
   const minsLeft = (next - now) / 60000;
   for (const m of (c.warnMinutes || [])) {

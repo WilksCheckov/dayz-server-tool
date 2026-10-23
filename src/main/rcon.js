@@ -40,7 +40,27 @@ function cfg() {
   return { host: '127.0.0.1', port: 2306, password: '', autoConnect: true, autoConfigure: true, ...(s.rcon || {}) };
 }
 
-function status() { return { ...state, config: { ...cfg(), password: cfg().password ? '••••' : '' } }; }
+function status() { return { ...state, expected: expected(), config: { ...cfg(), password: cfg().password ? '••••' : '' } }; }
+// Should RCon be connected right now? Derived from the server's lifecycle, not from timers: on once the local server
+// has finished loading, off while it is stopped, stopping, loading, restarting on schedule or updating.
+function expected() {
+  const c = cfg();
+  if (!/^(127\.|localhost$|::1$)/.test(String(c.host || '127.0.0.1'))) return { on: !!c.autoConnect, why: 'remote server' };
+  let st; try { st = require('./server').status(); } catch { return { on: false, why: 'server state unknown' }; }
+  if (st.maintenance) return { on: false, why: st.maintenance.kind === 'update' ? 'server is updating' : 'server is restarting on schedule' };
+  if (!st.running) return { on: false, why: 'server is stopped' };
+  if (st.stopping) return { on: false, why: 'server is shutting down' };
+  if (st.stage && !st.stage.ready) return { on: false, why: `server is loading (${st.stage.label})` };
+  return { on: true, why: 'server is up' };
+}
+// Bring the connection in line with what is expected; runs on every lifecycle change and every 15 s.
+function reconcile({ force = false } = {}) {
+  const c = cfg(); if (!c.autoConnect || (userDisconnected && !force)) return;
+  if (force) userDisconnected = false;
+  const e = expected();
+  if (state.connected || !e.on || auto.timer || remoteTimer) return;
+  reconnect();
+}
 
 function connect(opts = {}) {
   const c = { ...sessionCreds(), ...opts };
@@ -49,23 +69,28 @@ function connect(opts = {}) {
   state = { connected: false, host: c.host, port: Number(c.port), error: null, lastSeen: null, diag: state.diag || null };
   sock = dgram.createSocket('udp4');
   sock.on('message', onMessage);
-  sock.on('error', e => { setError(e.message); disconnect(); });
+  sock.on('error', e => { const was = state.connected; setError(e.message); disconnect(); if (was) connectionLost('Network error: ' + e.message); });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { loginResolver = null; setError('Login timed out. Is the server running with BattlEye and the RCon port open?'); disconnect(); reject(new Error(state.error)); }, 5000);
     loginResolver = ok => {
       clearTimeout(timer); loginResolver = null;
       if (ok) {
         state.connected = true; state.error = null; state.lastSeen = Date.now();
-        keepalive = setInterval(() => { command('').catch(() => {}); }, 30000);
+        newSession();
+        keepalive = setInterval(keepaliveTick, 25000);
+        if (lost.at) { emitRef('console', { source: 'rcon', line: `RCon reconnected after ${Math.round((Date.now() - lost.at) / 1000)} s.` }); clearTimeout(lost.alertTimer); lost = { at: 0, alertTimer: null }; }
+        userDisconnected = false;
         emitRef('rcon:state', status());
         emitRef('console', { source: 'rcon', line: `Connected to ${state.host}:${state.port}` });
         resolve(status());
       } else { setError('Login failed: wrong RCon password.'); disconnect(); reject(new Error(state.error)); }
     };
+    liveCreds = { password: c.password };
     send(Buffer.concat([Buffer.from([0x00]), Buffer.from(c.password, 'utf8')]));
   });
 }
 
+function userDisconnect() { userDisconnected = true; stopAuto(); clearTimeout(remoteTimer); clearTimeout(lost.alertTimer); lost = { at: 0, alertTimer: null }; disconnect(); setDiag('stopped', 'Disconnected by you. Press Connect, or start the server, to connect again.'); return status(); }
 function disconnect(silent = false) {
   clearInterval(keepalive); keepalive = null;
   for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error('Disconnected')); }
@@ -76,12 +101,56 @@ function disconnect(silent = false) {
   if (!silent) { emitRef('rcon:state', status()); if (was) emitRef('console', { source: 'rcon', line: 'Disconnected' }); }
 }
 
+// ---------- staying connected ----------
+// A slow server can freeze for many seconds (autosave, loot respawn on a slow disk), so a late reply means nothing.
+// Only a socket error ends the connection, and then it reconnects by itself.
+// No silence timeout at all: a quiet server never ends the session. After a long silence the tool only re-sends its
+// login on the same connection (BattlEye answers it if it had forgotten the session), without changing the status.
+const QUIET_RELOGIN_MS = 90000;
+let liveCreds = null, lastRelogin = 0;
+let lost = { at: 0, alertTimer: null };
+let userDisconnected = false;
+function keepaliveTick() {
+  if (!state.connected) return;
+  command('', 10000).catch(() => { /* a missed reply is never treated as a lost connection */ });
+  const silent = Date.now() - (state.lastSeen || 0);
+  if (silent > QUIET_RELOGIN_MS && liveCreds && Date.now() - lastRelogin > 60000) {
+    lastRelogin = Date.now();
+    send(Buffer.concat([Buffer.from([0x00]), Buffer.from(liveCreds.password, 'utf8')]));
+    if (!state.diag || state.diag.step !== 'quiet') setDiag('quiet', `No reply from the server for ${Math.round(silent / 1000)} s (busy or saving). Still connected; logging in again quietly.`);
+  } else if (silent < 30000 && state.diag && state.diag.step === 'quiet') setDiag('connected', 'Connected; the server is answering again.');
+}
+function connectionLost(reason) {
+  if (!state.connected) return;
+  const e = expected();
+  if (!e.on) { disconnect(); setDiag('off', `RCon is off because the ${e.why.replace(/^server /, 'server ')}; it reconnects when the server is up again.`); return; }
+  setError(reason + '; reconnecting…');
+  disconnect();
+  emitRef('console', { source: 'rcon', line: `RCon connection lost (${reason.toLowerCase()}). Reconnecting…` });
+  lost.at = Date.now();
+  clearTimeout(lost.alertTimer);
+  // only alert when the reconnect does not succeed within two minutes
+  lost.alertTimer = setTimeout(() => { if (!state.connected) alerts.alert('rcon-lost', 'RCon connection lost', `${reason}, and reconnecting has not worked for 2 minutes. Is the server still running?`); }, 120000);
+  reconnect();
+}
+// Reconnect: the local server goes through the readiness loop; a remote one is retried with growing pauses.
+let remoteTimer = null;
+function reconnect() {
+  const c = cfg(); if (!c.autoConnect || userDisconnected) return;
+  const local = /^(127\.|localhost$|::1$)/.test(String(c.host || '127.0.0.1'));
+  if (local) { if (serverRunning()) autoConnectLoop('reconnect'); return; }
+  let wait = 10000;
+  const tryOnce = () => { if (state.connected || userDisconnected) return; connect().then(() => {}).catch(() => { wait = Math.min(wait * 2, 120000); remoteTimer = setTimeout(tryOnce, wait); }); };
+  clearTimeout(remoteTimer); remoteTimer = setTimeout(tryOnce, wait);
+}
+// A fresh BattlEye session: command numbering starts again at 0, and replies owed by the old session never come.
+function newSession() { seq = 0; for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error('RCon session restarted')); } pending.clear(); }
 function onMessage(msg) {
   if (msg.length < 8 || msg[0] !== 0x42 || msg[1] !== 0x45 || msg[6] !== 0xFF) return;
   if (crc32(msg.subarray(6)) !== msg.readUInt32LE(2)) return;
   state.lastSeen = Date.now();
   const type = msg[7];
-  if (type === 0x00) { if (loginResolver) loginResolver(msg[8] === 0x01); return; }
+  if (type === 0x00) { if (loginResolver) loginResolver(msg[8] === 0x01); else if (msg[8] === 0x01) { newSession(); if (state.diag && state.diag.step === 'quiet') setDiag('connected', 'Connected; the server answered the quiet re-login.'); } else if (state.connected) setError('BattlEye refused the stored password on re-login; restart the server so the tool can set it.'); return; }
   if (type === 0x02) {
     const s = msg[8];
     const text = msg.subarray(9).toString('utf8');
@@ -112,7 +181,7 @@ function command(cmd, timeoutMs = 4000) {
   if (!sock || (!state.connected && cmd !== '')) return Promise.reject(new Error('RCon is not connected.'));
   return new Promise((resolve, reject) => {
     const s = seq; seq = (seq + 1) & 0xFF;
-    const timer = setTimeout(() => { pending.delete(s); if (cmd === '') { setError('Keep-alive timed out; connection lost.'); disconnect(); alerts.alert('rcon-lost', 'RCon connection lost', 'Keep-alive timed out. Is the server still running?'); } reject(new Error('RCon command timed out.')); }, timeoutMs);
+    const timer = setTimeout(() => { pending.delete(s); reject(new Error('RCon command timed out.')); }, timeoutMs);
     pending.set(s, { resolve, reject, parts: {}, timer });
     send(Buffer.concat([Buffer.from([0x01, s]), Buffer.from(cmd, 'utf8')]));
   });
@@ -311,7 +380,7 @@ async function attempt() {
     try {
       await connect({ host: creds.host, port: creds.port, password: creds.password });
       const secs = Math.round((Date.now() - auto.startedAt) / 1000);
-      setDiag('connected', `Connected ${secs < 120 ? secs + ' s' : Math.round(secs / 60) + ' min'} after the server started.`); stopAuto();
+      setDiag('connected', `${auto.reason === 'reconnect' ? 'Reconnected' : 'Connected'} ${secs < 120 ? secs + ' s' : Math.round(secs / 60) + ' min'} after ${auto.reason === 'reconnect' ? 'the connection dropped' : 'the server started'}.`); stopAuto();
     } catch (e) {
       if (/wrong RCon password/i.test(e.message)) {
         auto.wrongPw++;
@@ -326,19 +395,23 @@ async function attempt() {
   } finally { auto.busy = false; }
 }
 // Started when the server starts; checks every 10 s, no fixed time limit while the server is visibly still loading.
-function autoConnectLoop() {
+function autoConnectLoop(reason) {
   const c = cfg(); if (!c.autoConnect) return;
-  stopAuto(); auto = { timer: null, startedAt: Date.now(), timeouts: 0, wrongPw: 0, busy: false };
-  setDiag('loading', 'Server starting; RCon connects when BattlEye is ready.');
+  if (reason !== 'reconnect') userDisconnected = false;
+  stopAuto(); auto = { timer: null, startedAt: Date.now(), timeouts: 0, wrongPw: 0, busy: false, reason: reason || 'start' };
+  setDiag(reason === 'reconnect' ? 'reconnecting' : 'loading', reason === 'reconnect' ? 'Connection lost; reconnecting…' : 'Server starting; RCon connects when BattlEye is ready.');
+  if (reason === 'reconnect') setTimeout(() => attempt().catch(() => {}), 3000);
   auto.timer = setInterval(() => { if (Date.now() - auto.startedAt > 3 * 3600000) { setDiag('failed', 'Gave up after 3 hours.'); stopAuto(); return; } attempt().catch(() => {}); }, 10000);
 }
-function stopAuto() { clearInterval(auto.timer); auto.timer = null; }
-function onStage(stg) { if (stg && stg.ready && auto.timer && !state.connected) setTimeout(() => attempt().catch(() => {}), 1500); }
+function stopAuto() { clearInterval(auto.timer); auto.timer = null; clearTimeout(remoteTimer); remoteTimer = null; }
+function onStage(stg) { if (stg && stg.ready && !state.connected) setTimeout(() => { if (auto.timer) attempt().catch(() => {}); else reconcile(); }, 1500); emitRef('rcon:state', status()); }
+function onLifecycle() { reconcile(); emitRef('rcon:state', status()); }
 function init(emit) {
   emitRef = emit;
   try { if (!serverRunning()) ensureConfigured(); } catch { /* server not installed yet */ }
   // a server the tool did not start (still running from before) is only tried once
   if (cfg().autoConnect && cfg().password) setTimeout(() => connect(sessionCreds()).catch(() => {}), 3000);
+  setInterval(() => { try { reconcile(); } catch { /* ignore */ } }, 15000);
 }
 
-module.exports = { onStage, init, connect, disconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto, beArg, readActive, adoptFromFile, sessionCreds };
+module.exports = { onStage, onLifecycle, reconcile, expected, init, connect, disconnect, userDisconnect, command, status, players, bans, say, kick, ban, addBan, cfg, crc32, ensureConfigured, autoConnectLoop, stopAuto, beArg, readActive, adoptFromFile, sessionCreds };

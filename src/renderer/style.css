@@ -496,3 +496,6 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .checklist li.bad { color: var(--bad); }
 .checklist li.warn { color: var(--warn); }
 .checklist li.ok { color: var(--muted); }
+
+.pill-link { cursor: pointer; }
+.pill-link:hover { border-color: var(--border-strong); }

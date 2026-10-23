@@ -12,6 +12,10 @@ let crashLoop = false;
 let proc = null;
 let startedAt = null;
 let manualStop = false;
+let maintenance = null; // { kind: 'restart' | 'update', since }
+// Set by the restart scheduler and the updater around their stop/start, so RCon and the status bar know the
+// server is down on purpose. Cleared once the server has been started again.
+function setMaintenance(kind) { maintenance = kind ? { kind, since: Date.now() } : null; emitRef('server:maintenance', maintenance); }
 let restartTimer = null;
 let emitRef = () => {};
 let lastExit = null;
@@ -52,7 +56,9 @@ function status() {
     restartPending: !!restartTimer,
     crashLoop,
     modsChanged: !!proc && startedModParam !== currentModParam(),
-    stage: proc ? stage : null
+    stage: proc ? stage : null,
+    maintenance,
+    stopping: !!proc && manualStop
   };
 }
 
@@ -73,13 +79,17 @@ function buildArgs(s) {
 }
 
 // ---------- live RPT tail: the server's real console output, streamed line by line ----------
-let rptTimer = null, rptFile = null, rptOffset = 0, rptRest = '', rptStartedAt = 0;
+let rptTimer = null, rptFile = null, rptOffset = 0, rptRest = '', rptStartedAt = 0, rptGen = 0;
 function newestRpt() {
   const p = settings.paths();
   try { return fs.readdirSync(p.profilesDir).filter(f => /\.rpt$/i.test(f)).map(f => ({ f: path.join(p.profilesDir, f), m: fs.statSync(path.join(p.profilesDir, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0] || null; } catch { return null; }
 }
+// Each server start follows its own RPT. The previous file gets a last read first, and the delayed stop scheduled
+// when that server exited must not end the new follower (a restart starts the new server within seconds).
 function startRptTail() {
+  if (rptFile) { try { pollRpt(); } catch { /* ignore */ } }
   stopRptTail(false);
+  rptGen++;
   rptStartedAt = Date.now(); rptFile = null; rptOffset = 0; rptRest = '';
   rptTimer = setInterval(pollRpt, 1500);
 }
@@ -146,8 +156,8 @@ function start() {
   proc = spawn(p.serverExe, args, { cwd: p.serverDir, stdio: showWindow ? 'ignore' : ['ignore', 'pipe', 'pipe'], windowsHide: !showWindow, detached: false });
   if (proc.stdout) { const onOut = d => { for (const l of d.toString('utf8').split(/\r?\n/)) if (l.trim()) emitRef('console', { source: 'server', line: l.trim() }); }; proc.stdout.on('data', onOut); proc.stderr.on('data', onOut); }
   startedAt = Date.now();
-  stage = null; setStage(0);
   startRptTail();
+  stage = null; setStage(0);
   startedModParam = currentModParam(s);
   lastExit = null;
   proc.on('exit', (code, signal) => {
@@ -155,7 +165,7 @@ function start() {
     lastExit = { code, signal, at: Date.now(), ranFor };
     emitRef('console', { source: 'server', line: `Server exited (code ${code}) after ${ranFor}s` });
     proc = null; startedAt = null; stage = null; emitRef('server:stage', null);
-    setTimeout(() => { stopRptTail(true); }, 3000);
+    { const gen = rptGen; setTimeout(() => { if (gen === rptGen) stopRptTail(true); }, 3000); }
     const wasManual = manualStop;
     manualStop = false;
     emitRef('server:status', status());
@@ -220,4 +230,4 @@ async function restart() {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, start, stop, restart, status, _tail: { startRptTail, stopRptTail } };
+module.exports = { init, start, stop, restart, status, setMaintenance, _tail: { startRptTail, stopRptTail } };

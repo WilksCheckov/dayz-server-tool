@@ -139,6 +139,7 @@ async function ensureFirewall() {
 }
 function emit(channel, data) {
   if (channel === 'server:stage') { try { rcon.onStage(data); } catch { /* ignore */ } }
+  if (channel === 'server:maintenance') { try { rcon.onLifecycle(); } catch { /* ignore */ } }
   if (channel === 'console' && data) { try { servererrors.handleLine(data.source, data.line); } catch { /* ignore */ } if ((data.source === 'rpt' || data.source === 'server') && /BattlEye/i.test(data.line || '')) { try { const k = combat.beKick(data.line); if (k) audit.log('system', 'BattlEye', 'kick', `${k.name}: ${k.reason}`); } catch { /* ignore */ } } }
   if (channel === 'console' && data) toollog.write(/error|fail|invalid|exception|cannot/i.test(data.line || '') && !/(0 failed)|0 error|no error|failed: 0\b|fails?: ?0\b/i.test(data.line || '') ? 'error' : 'info', `[${data.source}] ${data.line}`);
   else if (channel === 'alerts:new' && data) toollog.warn(`alert ${data.kind}: ${data.title} ${data.details || ''}`);
@@ -504,7 +505,7 @@ handle('rcon:connect', (opts) => {
   return rcon.connect(opts || {});
 });
 handle('rcon:ensure', (o) => rcon.ensureConfigured(o || {}));
-handle('rcon:disconnect', () => rcon.disconnect());
+handle('rcon:disconnect', () => rcon.userDisconnect());
 handle('rcon:command', (cmd) => rcon.command(cmd));
 handle('rcon:players', () => rcon.players());
 handle('rcon:say', (msg, player) => rcon.say(msg, player ?? -1));

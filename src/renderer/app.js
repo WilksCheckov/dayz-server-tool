@@ -315,7 +315,7 @@ function renderServer(st) {
   $('dotServer').className = 'dot ' + (running ? 'ok' : st.restartPending ? 'warn' : '');
   $('statServer').textContent = running ? `On (pid ${st.pid})` : st.restartPending ? 'Restarting…' : 'Off';
   $('sideStatus').textContent = running ? 'Server on' : 'Server off';
-  const ps = $('pillServer'); ps.className = 'pill ' + (running ? 'ok' : st.restartPending ? 'warn' : ''); ps.innerHTML = `<span class="dot ${running ? 'ok' : st.restartPending ? 'warn' : ''}"></span>${running ? 'Server on' : st.restartPending ? 'Restarting' : 'Server off'}`;
+  const ps = $('pillServer'); ps.className = 'pill pill-link ' + (running ? 'ok' : st.restartPending ? 'warn' : ''); ps.innerHTML = `<span class="dot ${running ? 'ok' : st.restartPending ? 'warn' : ''}"></span>Server: ${st.maintenance ? (st.maintenance.kind === 'update' ? 'Updating' : 'Restarting') : running ? 'On' : st.restartPending ? 'Restarting' : 'Off'}`; ps.title = running ? `Running (pid ${st.pid})` : 'Server stopped';
   $('btnQuickStart').hidden = running; $('btnQuickStop').hidden = !running;
   $('btnStart').disabled = running; $('btnStop').disabled = !running && !st.restartPending; $('btnRestart').disabled = !running;
   updateUptime();
@@ -330,7 +330,9 @@ function updateUptime() {
 }
 setInterval(updateUptime, 1000);
 ipc.on('server:status', (st) => { renderServer(st); updateModsBanner(); });
-ipc.on('server:stage', (stg) => { if (state.server) { state.server.stage = stg; updateUptime(); } });
+ipc.on('server:stage', (stg) => { if (state.server) { state.server.stage = stg; updateUptime(); } ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
+ipc.on('server:maintenance', (m) => { if (state.server) { state.server.maintenance = m; renderServer(state.server); } ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
+ipc.on('server:status', () => { ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
 const startServer = (e) => run(async () => renderServer(await ipc.invoke('server:start')), e.target);
 const stopServer = (e) => run(async () => renderServer(await ipc.invoke('server:stop')), e.target);
 $('btnStart').onclick = startServer; $('btnQuickStart').onclick = startServer;
@@ -939,7 +941,8 @@ function renderRcon(st) {
   $('rconStatusText').textContent = st.connected ? `RCon connected to ${st.host}:${st.port}` : (st.error ? `RCon: ${st.error}` : 'RCon disconnected');
   $('btnRconConnect').hidden = st.connected; $('btnRconDisconnect').hidden = !st.connected;
   const dg = $('rconDiag'); if (dg) { dg.textContent = !st.connected && st.diag ? st.diag.text : ''; dg.style.color = st.diag && st.diag.step === 'failed' ? 'var(--bad)' : ''; }
-  const pr = $('pillRcon'); pr.className = 'pill ' + (st.connected ? 'ok' : ''); pr.innerHTML = `<span class="dot ${st.connected ? 'ok' : ''}"></span>${st.connected ? 'RCon on' : 'RCon off'}`;
+  const shouldBeOn = !st.connected && st.expected && st.expected.on;
+  const pr = $('pillRcon'); pr.className = 'pill pill-link ' + (st.connected ? 'ok' : shouldBeOn ? 'warn' : ''); pr.innerHTML = `<span class="dot ${st.connected ? 'ok' : shouldBeOn ? 'warn' : ''}"></span>RCon: ${st.connected ? 'On' : 'Off'}`; pr.title = st.connected ? `Connected to ${st.host}:${st.port}` : shouldBeOn ? 'Should be on (the server is up): ' + (st.diag ? st.diag.text : 'connecting…') : `Off because the ${(st.expected && st.expected.why) || 'server is not running'}.`;
 }
 function loadRconForm() {
   const c = (state.settings && state.settings.rcon) || {};
@@ -1077,7 +1080,7 @@ function renderDiscord(st) {
   $('dotDiscord').className = 'dot ' + (st.running ? 'ok' : '');
   $('discordStatusText').textContent = st.running ? `Online as ${st.tag}` : (st.error ? `Offline: ${st.error}` : 'Bot offline');
   $('btnDiscordStart').hidden = st.running; $('btnDiscordStop').hidden = !st.running;
-  const pd = $('pillDiscord'); pd.className = 'pill ' + (st.running ? 'ok' : ''); pd.innerHTML = `<span class="dot ${st.running ? 'ok' : ''}"></span>${st.running ? (st.presence || 'Bot online') : 'Bot off'}`;
+  const pd = $('pillDiscord'); pd.className = 'pill pill-link ' + (st.running ? 'ok' : ''); pd.innerHTML = `<span class="dot ${st.running ? 'ok' : ''}"></span>Bot: ${st.running ? 'On' : 'Off'}`; pd.title = st.running ? (st.presence ? `Online as ${st.tag || 'the bot'}: ${st.presence}` : `Online as ${st.tag || 'the bot'}`) : (st.error ? 'Offline: ' + st.error : 'Bot offline');
   $('btnDiscordInvite').disabled = !st.inviteUrl;
   $('discordInfo').textContent = st.running
     ? `${st.commands} slash commands registered${st.guildName ? ' in ' + st.guildName : ''}${st.presence ? ' · status: ' + st.presence : ''}${st.liveLogPosted ? ' · ' + st.liveLogPosted + ' log batches posted' : ''}${st.error ? ' · ' + st.error : ''}`
@@ -1123,6 +1126,7 @@ let webPages = [];
 let webEditing = -1;
 function renderWeb(st) {
   webState = st;
+  { const pw = $('pillWeb'); pw.className = 'pill pill-link ' + (st.running ? 'ok' : ''); pw.innerHTML = `<span class="dot ${st.running ? 'ok' : ''}"></span>Web: ${st.running ? 'On' : 'Off'}`; pw.title = st.running ? `Website running on port ${st.port}` : (st.error ? 'Stopped: ' + st.error : 'Website stopped'); }
   if (st.site) renderSite(st.site);
   $('dotWeb').className = 'dot ' + (st.running ? 'ok' : '');
   $('webStatusText').textContent = st.running ? `Website running on port ${st.port} · ${st.requests} requests` : (st.error ? `Stopped: ${st.error}` : 'Website stopped');
@@ -2126,6 +2130,8 @@ try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch { /* ignore *
   refreshHealth(); refreshAlertList();
   renderRcon(await ipc.invoke('rcon:status'));
   renderDiscord(await ipc.invoke('discord:status'));
+  renderWeb(await ipc.invoke('website:status'));
+  document.querySelectorAll('.pill-link[data-go]').forEach(p => { p.onclick = () => showPage(p.dataset.go); });
   logLine({ source: 'app', line: 'DayZ Admin Tools ready.' });
 })().catch(e => toast(e.message, true));
 

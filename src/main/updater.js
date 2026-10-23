@@ -96,7 +96,7 @@ async function runNow({ force = false } = {}) {
     if (!force && !needMods.length && !wasRunning) {
       // Nothing is known to be outdated; still let SteamCMD check the server build.
     }
-    if (wasRunning) { log('Stopping server for update...'); await server.stop(); }
+    if (wasRunning) { server.setMaintenance('update'); log('Stopping server for update...'); await server.stop(); }
     if (cfg().backupBefore !== false) {
       try { log('Backing up before the update...'); await require('./backups').create('update'); }
       catch (e) { log(`Backup before update failed: ${e.message}`); result.failed.push({ what: 'backup', error: e.message }); }
@@ -111,7 +111,7 @@ async function runNow({ force = false } = {}) {
     } else if (needMods.length) {
       log(`${needMods.length} mod(s) need updating but no Steam login is set. Skipping mods.`);
     }
-    if (wasRunning) { log('Starting server again...'); server.start(); result.restarted = true; }
+    if (wasRunning) { log('Starting server again...'); try { server.start(); result.restarted = true; } finally { server.setMaintenance(null); } }
     log('Update run finished.');
     if (result.failed.length) alerts.alert('update-failed', 'Update run had failures', result.failed.map(f => `${f.what}: ${f.error}`).join('\n'));
     else alerts.alert('update-done', 'Update run finished', `Server ${result.server ? 'updated' : 'unchanged'}, ${result.mods.length} mod(s) updated${result.restarted ? ', server restarted' : ''}.`);
