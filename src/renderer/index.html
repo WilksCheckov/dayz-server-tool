@@ -157,6 +157,24 @@
               </div>
             </div>
           </div>
+          <div class="card" style="flex-shrink:0">
+            <div class="card-title">Map sharing <span class="muted">full-resolution maps from a PC with DayZ installed to your server</span></div>
+            <p class="muted">The detailed map is built from the DayZ game client, which a dedicated server usually does not have. Link the two tools once: the PC with DayZ builds the map the server runs and sends it to the server's tool through the server's website, and does so again by itself whenever the server switches maps or the map is rebuilt. Uploads are signed with the server's link key; the key itself is never sent.</p>
+            <div class="grid-2 tight">
+              <div>
+                <div class="card-title">On the server: this tool's link key</div>
+                <div class="row gap wrap"><code class="mono" id="mlOwnKey">…</code><button class="btn small" id="btnMlCopyKey">Copy</button><button class="btn small" id="btnMlNewKey" title="Make a new key; linked PCs then need the new one">New key</button></div>
+                <div class="muted" id="mlWebState"></div>
+              </div>
+              <div>
+                <div class="card-title">On the PC with DayZ: send maps to</div>
+                <label class="field">Server website address <input id="mlUrl" class="input" placeholder="http://203.0.113.10:8080"></label>
+                <label class="field">Server's link key <input id="mlKey" class="input mono" placeholder="paste the key shown on the server"></label>
+                <label class="check"><input type="checkbox" id="mlAuto" checked> Send automatically (checks every 30 minutes)</label>
+                <div class="row gap wrap mt"><button class="btn" id="btnMlSave">Save</button><button class="btn primary" id="btnMlSend">Send map now</button><span class="muted" id="mlState"></span></div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- INSTALLATION -->

@@ -25,7 +25,7 @@ let cache = null;
 
 // ---------- secrets at rest ----------
 // These fields are stored encrypted with Electron's safeStorage (DPAPI, bound to the Windows user). In memory they stay plain.
-const SECRET_PATHS = ['discord.token', 'discord.steamApiKey', 'rcon.password', 'offsite.ftp.password', 'alerts.webhookUrl', 'website.domain.ddns.token', 'website.domain.keyPem'];
+const SECRET_PATHS = ['discord.token', 'discord.steamApiKey', 'rcon.password', 'offsite.ftp.password', 'alerts.webhookUrl', 'website.domain.ddns.token', 'website.domain.keyPem', 'mapLink.ownKey', 'mapLink.target.key'];
 const ENC = 'enc:v1:';
 function safeStore() { try { const { safeStorage } = require('electron'); return safeStorage && typeof safeStorage.isEncryptionAvailable === 'function' && safeStorage.isEncryptionAvailable() ? safeStorage : null; } catch { return null; } }
 function atPath(obj, p, fn) { const parts = p.split('.'); let o = obj; for (let i = 0; i < parts.length - 1; i++) { if (!o || typeof o !== 'object') return; o = o[parts[i]]; } if (o && typeof o === 'object' && typeof o[parts[parts.length - 1]] === 'string') o[parts[parts.length - 1]] = fn(o[parts[parts.length - 1]]); }

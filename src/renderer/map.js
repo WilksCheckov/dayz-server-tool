@@ -11,7 +11,8 @@ async function loadMapInfo() {
   mapState.info = await ipc.invoke('mission:mapInfo');
   const i = mapState.info;
   $('mapDetected').textContent = !i.map ? 'No active mission: install the server and set the template in serverDZ.cfg.'
-    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.image ? ' · map image from the game files' : i.building ? ' · building the map image from the game files…' : ' · no map image yet'}`;
+    : `${i.label} (${i.mission}) · ${i.size ? i.size + ' m' : 'unknown size, assuming 15360 m'}${i.tiles ? ` · full-resolution map (${i.tiles.width.toLocaleString()} px, ${i.tiles.maxZ + 1} zoom levels)` : i.image ? ' · overview image only: rebuild for full resolution' : i.building ? ' · building the map from the game files…' : ' · no map image yet'}`;
+  tileCache.clear();
   mapState.img = null;
   if (i.image) { await new Promise(res => { const im = new Image(); im.onload = () => { mapState.img = im; res(); }; im.onerror = () => res(); im.src = 'file:///' + i.image.replace(/\\/g, '/') + '?t=' + Date.now(); }); }
 }
@@ -21,6 +22,35 @@ function baseSize(c) { return Math.max(100, Math.min(c.width, c.height)); }
 function toScreen(c, x, z) { const sz = baseSize(c); const v = mapState.view; const ox = (c.width - sz) / 2, oy = (c.height - sz) / 2; return [ox + (x / worldSize()) * sz * v.scale + v.ox, oy + (sz - (z / worldSize()) * sz) * v.scale + v.oy]; }
 function toWorld(c, px, py) { const sz = baseSize(c); const v = mapState.view; const ox = (c.width - sz) / 2, oy = (c.height - sz) / 2; const bx = (px - ox - v.ox) / v.scale, by = (py - oy - v.oy) / v.scale; return [bx / sz * worldSize(), (sz - by) / sz * worldSize()]; }
 function sizeCanvas() { const c = $('mapCanvas'); const card = c.parentElement; const W = Math.max(300, card.clientWidth - 30), H = Math.max(260, card.clientHeight - 54); if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } return c; }
+// ----- full-resolution tiles: the level that matches the zoom, only the visible tiles, kept in a small cache -----
+const tileCache = new Map();
+function tileImg(dir, z, x, y) {
+  const k = z + '/' + x + '_' + y; let t = tileCache.get(k);
+  if (!t) {
+    t = { img: new Image(), ok: false, used: 0 }; t.img.onload = () => { t.ok = true; scheduleDraw(); }; t.img.onerror = () => { t.failed = true; };
+    t.img.src = 'file:///' + dir.replace(/\\/g, '/') + '/' + z + '/' + x + '_' + y + '.jpg';
+    tileCache.set(k, t);
+    if (tileCache.size > 700) { const old = [...tileCache.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, 150); for (const [ok] of old) tileCache.delete(ok); }
+  }
+  t.used = Date.now(); return t;
+}
+function drawTiles(ctx, c, sz) {
+  const T = mapState.info && mapState.info.tiles; if (!T) return;
+  const v = mapState.view; const onScreen = sz * v.scale;
+  const z = Math.max(0, Math.min(T.maxZ, T.maxZ + Math.ceil(Math.log2(Math.max(1, onScreen) / T.width))));
+  const levelW = T.width / Math.pow(2, T.maxZ - z), levelH = T.height / Math.pow(2, T.maxZ - z), k = sz / levelW, step = T.tile * k;
+  const ox = (c.width - sz) / 2 + v.ox, oy = (c.height - sz) / 2 + v.oy;
+  const vx0 = -ox / v.scale, vy0 = -oy / v.scale, vx1 = (c.width - ox) / v.scale, vy1 = (c.height - oy) / v.scale;
+  const nx = Math.ceil(levelW / T.tile), ny = Math.ceil(levelH / T.tile);
+  const tx0 = Math.max(0, Math.floor(vx0 / step)), tx1 = Math.min(nx - 1, Math.floor(vx1 / step)), ty0 = Math.max(0, Math.floor(vy0 / step)), ty1 = Math.min(ny - 1, Math.floor(vy1 / step));
+  ctx.imageSmoothingQuality = 'high';
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    const t = tileImg(T.dir, z, tx, ty);
+    // overlap by a fraction of a pixel so no hairline shows between tiles
+    if (t.ok) ctx.drawImage(t.img, tx * step, ty * step, t.img.naturalWidth * k + 0.5 / v.scale, t.img.naturalHeight * k + 0.5 / v.scale);
+  }
+  mapState.tileLevel = { z, maxZ: T.maxZ };
+}
 function scheduleDraw() { if (mapState.raf) return; mapState.raf = requestAnimationFrame(() => { mapState.raf = null; drawMap(); }); }
 
 async function drawMap() {
@@ -30,6 +60,7 @@ async function drawMap() {
   ctx.save(); ctx.translate((c.width - sz) / 2 + v.ox, (c.height - sz) / 2 + v.oy); ctx.scale(v.scale, v.scale);
   if (mapState.img) ctx.drawImage(mapState.img, 0, 0, sz, sz);
   else { ctx.fillStyle = '#1a1d22'; ctx.fillRect(0, 0, sz, sz); ctx.strokeStyle = '#2b3036'; ctx.lineWidth = 1 / v.scale; for (let i = 0; i <= 10; i++) { ctx.beginPath(); ctx.moveTo(i * sz / 10, 0); ctx.lineTo(i * sz / 10, sz); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * sz / 10); ctx.lineTo(sz, i * sz / 10); ctx.stroke(); } }
+  drawTiles(ctx, c, sz);
   ctx.restore();
   await drawOverlay(ctx, c);
   drawLoot(ctx, c);
@@ -239,12 +270,12 @@ function showMapNotice(text) { const n = $('mapNotice'); if (!n) return; n.hidde
 async function ensureMapImage(force) {
   const i = mapState.info; if (!i || !i.map) return;
   showMapNotice(i.image ? '' : (i.canBuild === false ? i.noClientText : ''));
-  if (i.image && !force) return;
+  if (i.image && !force && (i.tiles || i.canBuild === false)) return;
   // without the DayZ client there is nothing to build from: the notice says what to do instead of an error
   if (!force && i.canBuild === false) return;
   if (!force && mapBuildTried === i.map) return;
   mapBuildTried = i.map;
-  try { toast('Building the ' + (i.label || i.map) + ' map from the game files…'); await ipc.invoke('mission:buildMap', { force: !!force }); await loadMapInfo(); scheduleDraw(); toast('Map image ready'); }
+  try { toast('Building the full-resolution ' + (i.label || i.map) + ' map from the game files (about a minute)…'); await ipc.invoke('mission:buildMap', { force: !!force }); await loadMapInfo(); scheduleDraw(); toast('Map image ready'); }
   catch (e) { if (/placeholder tiles|no map to build from/i.test(e.message)) { showMapNotice(mapState.info && mapState.info.noClientText || e.message); if (force) toast('This PC has no DayZ client to build the map from; see the note on the map.', true); } else toast(e.message, true); }
   if (mapState.info && mapState.info.image) showMapNotice('');
 }

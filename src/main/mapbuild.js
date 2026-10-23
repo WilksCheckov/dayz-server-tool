@@ -170,10 +170,90 @@ function build({ pboPath, outPath, scale = 4, onProgress = () => {} }) {
   return { width: W, height: H, tiles: tiles.length, overlap, outPath };
 }
 
+// ---------- full-resolution tile pyramid ----------
+// Writes <outDir>/<z>/<x>_<y>.jpg, 512 px tiles. The top level is the game's native resolution (one source pixel per
+// map pixel, 15360 px for Chernarus); each lower level halves it, down to the whole map in one tile. The map is
+// processed in 512 px strips and every level is built by streaming halved strips downwards, so memory stays small
+// (a few strips) instead of holding a 15360 x 15360 image. Also writes a 3840 px PNG overview for older views.
+const TILE = 512;
+function downscale2(buf, w, h) { // RGBA, w x h -> ceil(w/2) x ceil(h/2), box filter
+  const W = Math.ceil(w / 2), H = Math.ceil(h / 2), out = Buffer.alloc(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let dy = 0; dy < 2; dy++) { const sy = 2 * y + dy; if (sy >= h) continue; for (let dx = 0; dx < 2; dx++) { const sx = 2 * x + dx; if (sx >= w) continue; const p = (sy * w + sx) * 4; r += buf[p]; g += buf[p + 1]; b += buf[p + 2]; n++; } }
+    const o = (y * W + x) * 4; out[o] = r / n; out[o + 1] = g / n; out[o + 2] = b / n; out[o + 3] = 255;
+  }
+  return { buf: out, w: W, h: H };
+}
+function buildTiles({ pboPath, outDir, pngOut, quality = 82, onProgress = () => {} }) {
+  const jpeg = require('jpeg-js');
+  const pbo = readPbo(pboPath);
+  const re = /^layers[\\/]s_(\d+)_(\d+)_lco\.paa$/i;
+  const src = new Map(); for (const e of pbo.entries) { const m = e.name.match(re); if (m) src.set(Number(m[1]) + '_' + Number(m[2]), e); }
+  if (!src.size) throw new Error('No satellite tiles in ' + path.basename(pboPath));
+  const keys = [...src.keys()].map(k => k.split('_').map(Number));
+  const nx = Math.max(...keys.map(k => k[0])) + 1, ny = Math.max(...keys.map(k => k[1])) + 1;
+  const first = decodePaa(readEntry(pbo, src.get('0_0')));
+  if (first.w < 64) throw new Error('This copy only has placeholder tiles (' + first.w + 'px). Install the DayZ client, or point the tool at a map mod, for the real satellite image.');
+  const overlap = src.has('1_0') ? detectOverlap(first, decodePaa(readEntry(pbo, src.get('1_0')))) : 0;
+  const stride = first.w - overlap, half = Math.floor(overlap / 2);
+  const W = nx * stride, H = ny * stride;
+  let maxZ = 0; while (TILE * Math.pow(2, maxZ) < Math.max(W, H)) maxZ++;
+  fs.rmSync(outDir, { recursive: true, force: true });
+  for (let z = 0; z <= maxZ; z++) fs.mkdirSync(path.join(outDir, String(z)), { recursive: true });
+  // decoded source tiles of the current and previous source row (each strip touches at most two rows)
+  const cache = new Map();
+  const srcTile = (x, y) => { const k = x + '_' + y; if (!cache.has(k)) { const e = src.get(k); cache.set(k, e ? decodePaa(readEntry(pbo, e)) : null); } return cache.get(k); };
+  const dropRowsBefore = (y) => { for (const k of [...cache.keys()]) if (Number(k.split('_')[1]) < y) cache.delete(k); };
+  // overview PNG at 1/4 resolution, filled from level maxZ-2
+  const ovZ = Math.max(0, maxZ - 2), ovW = Math.ceil(W / Math.pow(2, maxZ - ovZ)), ovH = Math.ceil(H / Math.pow(2, maxZ - ovZ));
+  const overview = pngOut ? Buffer.alloc(ovW * ovH * 3) : null;
+  const pending = {}; const rowAt = {}; let written = 0;
+  const totalTiles = (() => { let n = 0; for (let z = 0; z <= maxZ; z++) { const s = Math.pow(2, z - maxZ); n += Math.ceil(W * s / TILE) * Math.ceil(H * s / TILE); } return n; })();
+  function writeStrip(z, buf, w, h) {
+    const ty = rowAt[z] || 0; rowAt[z] = ty + 1;
+    for (let tx = 0; tx * TILE < w; tx++) {
+      const tw = Math.min(TILE, w - tx * TILE), tile = Buffer.alloc(tw * h * 4);
+      for (let y = 0; y < h; y++) buf.copy(tile, y * tw * 4, (y * w + tx * TILE) * 4, (y * w + tx * TILE + tw) * 4);
+      fs.writeFileSync(path.join(outDir, String(z), `${tx}_${ty}.jpg`), jpeg.encode({ data: tile, width: tw, height: h }, quality).data);
+      written++;
+    }
+    if (overview && z === ovZ) { for (let y = 0; y < h; y++) { const oy = ty * TILE + y; if (oy >= ovH) break; for (let x = 0; x < w && x < ovW; x++) { const s = (y * w + x) * 4, o = (oy * ovW + x) * 3; overview[o] = buf[s]; overview[o + 1] = buf[s + 1]; overview[o + 2] = buf[s + 2]; } } }
+    onProgress(written / totalTiles);
+    if (z === 0) return;
+    // halve the strip and stack it into the level below; a full 512 px strip there gets written in turn
+    const d = downscale2(buf, w, h); const p = pending[z - 1];
+    if (!p) pending[z - 1] = d; else { const merged = Buffer.concat([p.buf, d.buf]); pending[z - 1] = { buf: merged, w: d.w, h: p.h + d.h }; }
+    if (pending[z - 1].h >= TILE) { const q = pending[z - 1]; pending[z - 1] = null; writeStrip(z - 1, q.buf, q.w, q.h); }
+  }
+  for (let sy = 0; sy * TILE < H; sy++) {
+    const y0 = sy * TILE, h = Math.min(TILE, H - y0), strip = Buffer.alloc(W * h * 4);
+    for (let y = 0; y < h; y++) {
+      const wy = y0 + y, ty = Math.floor(wy / stride), py = half + (wy - ty * stride);
+      for (let tx = 0; tx < nx; tx++) {
+        const img = srcTile(tx, ty); const dst = (y * W + tx * stride) * 4;
+        if (!img) continue;
+        img.rgba.copy(strip, dst, (py * img.w + half) * 4, (py * img.w + half + stride) * 4);
+      }
+    }
+    for (let i = 3; i < strip.length; i += 4) strip[i] = 255;
+    dropRowsBefore(Math.floor(y0 / stride));
+    writeStrip(maxZ, strip, W, h);
+  }
+  // flush partial strips left in the lower levels
+  for (let z = maxZ - 1; z >= 0; z--) { const q = pending[z]; if (q && q.h) { pending[z] = null; writeStrip(z, q.buf, q.w, q.h); } }
+  fs.closeSync(pbo.fd);
+  const meta = { version: 1, tile: TILE, width: W, height: H, maxZ, minZ: 0, tiles: written, overlap, builtAt: Date.now(), source: path.basename(pboPath) };
+  fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  if (overview) { fs.mkdirSync(path.dirname(pngOut), { recursive: true }); fs.writeFileSync(pngOut, pngEncode(ovW, ovH, overview)); }
+  return { ...meta, outDir, pngOut };
+}
+
 // ---------- worker entry ----------
 if (require('worker_threads') && !require('worker_threads').isMainThread && require('worker_threads').workerData && require('worker_threads').workerData.mapbuild) {
   const { parentPort, workerData } = require('worker_threads');
-  try { const r = build({ ...workerData.mapbuild, onProgress: p => parentPort.postMessage({ progress: p }) }); parentPort.postMessage({ done: r }); }
+  const job = workerData.mapbuild;
+  try { const r = (job.tiles ? buildTiles : build)({ ...job, onProgress: p => parentPort.postMessage({ progress: p }) }); parentPort.postMessage({ done: r }); }
   catch (e) { parentPort.postMessage({ error: e.message }); }
 }
 function buildAsync(opts, onProgress) {
@@ -185,4 +265,4 @@ function buildAsync(opts, onProgress) {
   });
 }
 
-module.exports = { findWorldData, build, buildAsync };
+module.exports = { findWorldData, build, buildTiles, buildAsync };

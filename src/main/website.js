@@ -284,13 +284,14 @@ async function handle(req, res) {
       } }
     if (p === '/dayz-status.js') return send(200, 'text/javascript', STATUS_JS);
     if (p === '/admin' || p.startsWith('/admin/')) return handleAdmin(req, res, p, c, send);
+    if (p === '/api/maptiles') return require('./maplink').handleUpload(req, res, url, send);
     // A dropped website wins over everything except the API.
     if (!p.startsWith('/api/')) {
       const f = customSiteFile(p);
       if (f) { res.writeHead(200, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); return fs.createReadStream(f).pipe(res); }
     }
     if (p === '/assets/site.css') return send(200, 'text/css', customFile('site.css') || css(c));
-    if (p === '/api/status.json') return send(200, 'application/json', JSON.stringify({ ...(await serverStatus()), address: (await joinAddress()).address }));
+    if (p === '/api/status.json') return send(200, 'application/json', JSON.stringify({ ...(await serverStatus()), address: (await joinAddress()).address, map: require('./maplink').publicMapInfo() }));
     if (p === '/api/mods.json') return send(200, 'application/json', JSON.stringify((await serverStatus()).mods));
     // Files dropped in <installDir>\website\ are served first (images for the banner, favicon, extra pages).
     const pub = publicDir();

@@ -1905,7 +1905,25 @@ $('btnEcoOpenEditor').onclick = () => { const st = ecoState(); if (!st) return; 
 
 
 // ---------- settings page: prefs, updates, data ----------
+async function loadMapLink() {
+  let st; try { st = await ipc.invoke('maplink:status'); } catch { return; }
+  $('mlOwnKey').textContent = st.ownKey;
+  $('mlWebState').textContent = st.websiteRunning ? `The website is running on port ${st.websitePort}; linked PCs send to this address.` : 'The website is off: start it on the Website page so linked PCs can send maps here.';
+  $('mlUrl').value = st.target.url || ''; $('mlAuto').checked = st.target.auto !== false; $('mlKey').placeholder = st.target.hasKey ? 'saved (paste a new one to change it)' : 'paste the key shown on the server';
+  renderMapLinkState(st);
+}
+function renderMapLinkState(st) {
+  const el = $('mlState'); if (!el) return;
+  el.textContent = st.sending ? 'Sending…' : st.error ? 'Last attempt: ' + st.error : st.last ? (st.last.action === 'sent' ? `Sent the ${st.last.map} map ${new Date(st.last.at).toLocaleTimeString()}` : `Server already has the current ${st.last.map} map (${new Date(st.last.at).toLocaleTimeString()})`) : '';
+}
+$('btnMlCopyKey').onclick = () => { navigator.clipboard.writeText($('mlOwnKey').textContent); toast('Link key copied'); };
+$('btnMlNewKey').onclick = (e) => run(async () => { if (!await showModal('New link key', '<p>Make a new link key? PCs linked with the old key can no longer send maps until you paste the new key there.</p>', [{ label: 'New key', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('maplink:newOwnKey'); loadMapLink(); }, e.target);
+$('btnMlSave').onclick = (e) => run(async () => { const key = $('mlKey').value.trim(); if (key && !/^[0-9a-fA-F]{64}$/.test(key)) return toast('That is not a link key: copy the 64-character key from the server tool.', true); const cur = await ipc.invoke('maplink:status'); await ipc.invoke('maplink:setTarget', { url: $('mlUrl').value, key: key || (cur.target.hasKey ? undefined : ''), auto: $('mlAuto').checked }); $('mlKey').value = ''; toast('Map sharing saved'); loadMapLink(); }, e.target);
+$('btnMlSend').onclick = (e) => run(async () => { const r = await ipc.invoke('maplink:send'); toast(r.action === 'sent' ? `Sent the ${r.map} map (${r.tiles} tiles)` : r.action === 'up-to-date' ? 'The server already has this map' : 'Sending…'); loadMapLink(); }, e.target);
+ipc.on('maplink:state', st => renderMapLinkState(st));
+ipc.on('maps:changed', () => { if (document.querySelector('#page-map.active') && typeof loadMapInfo === 'function') loadMapInfo().then(() => scheduleDraw()); });
 async function loadSettingsPage() {
+  loadMapLink();
   const p = await ipc.invoke('app:prefs');
   $('prefCloseToTray').checked = !!p.closeToTray; $('prefStartMinimized').checked = !!p.startMinimized; $('prefLaunchAtLogin').checked = !!p.launchAtLogin;   $('prefAutoUpdate').checked = p.autoUpdate !== false;
   $('prefAutoStartServer').checked = !!p.autoStartServer; $('prefShowServerWindow').checked = !!p.showServerWindow; $('prefAutoFirewall').checked = p.autoFirewall !== false; $('prefAutoStartDelay').value = p.autoStartDelaySec || 10; $('prefTheme').value = p.theme || 'dark';

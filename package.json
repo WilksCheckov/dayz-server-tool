@@ -57,7 +57,8 @@
     "codemirror": "^5.65.21",
     "discord.js": "^14.27.0",
     "electron-updater": "^6.8.9",
-    "fast-xml-parser": "^5.11.2"
+    "fast-xml-parser": "^5.11.2",
+    "jpeg-js": "^0.4.4"
   },
   "repository": {
     "type": "git",

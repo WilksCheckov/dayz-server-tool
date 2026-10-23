@@ -101,28 +101,31 @@ function mapInfo() {
   const { name, key } = mapKey();
   let image = null;
   try { fs.mkdirSync(mapsDir(), { recursive: true }); for (const ext of ['png', 'jpg', 'jpeg', 'webp']) { const f = path.join(mapsDir(), key + '.' + ext); if (key && fs.existsSync(f)) { image = f; break; } } } catch { /* ignore */ }
-  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, mapsDir: mapsDir(), building: !!building, canBuild: key && !image ? canBuild() : undefined, noClientText: NO_CLIENT };
+  let tiles = null; try { if (key) { const meta = JSON.parse(fs.readFileSync(path.join(mapsDir(), key, 'tiles', 'meta.json'), 'utf8')); tiles = { ...meta, dir: path.join(mapsDir(), key, 'tiles') }; } } catch { tiles = null; }
+  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, tiles, mapsDir: mapsDir(), building: !!building, canBuild: key && !tiles ? canBuild() : undefined, noClientText: NO_CLIENT };
 }
 // Build the map image from the game's satellite tiles (DayZ client install or a map mod). Runs in a worker.
 let building = null;
-function mapSources() { const { key } = mapKey(); if (!key) return []; return require('./mapbuild').findWorldData(key, settings.paths().serverDir); }
-function canBuild() {
-  try { const stub = path.join(settings.paths().serverDir, 'addons').toLowerCase(); return mapSources().some(x => !path.dirname(x.path).toLowerCase().startsWith(stub) || x.size > 100 * 1024 * 1024); } catch { return false; }
+function mapSources(k) { const key = k || mapKey().key; if (!key) return []; return require('./mapbuild').findWorldData(key, settings.paths().serverDir); }
+function realSources(k) { const stub = path.join(settings.paths().serverDir, 'addons').toLowerCase(); return mapSources(k).filter(x => !path.dirname(x.path).toLowerCase().startsWith(stub) || x.size > 100 * 1024 * 1024); }
+function canBuild(k) {
+  try { const stub = path.join(settings.paths().serverDir, 'addons').toLowerCase(); return mapSources(k).some(x => !path.dirname(x.path).toLowerCase().startsWith(stub) || x.size > 100 * 1024 * 1024); } catch { return false; }
 }
-const NO_CLIENT = 'This PC has no map to build from: the DayZ server files only contain placeholder map tiles, and the real satellite map comes with the DayZ game client. On a PC that has DayZ installed, open this tool\'s Map page and press "Save map image…", copy the file here, then press "Set map image…". It is a one-time step per map.';
-async function buildMapImage({ force = false } = {}) {
-  const info = mapInfo();
-  if (!info.map) throw new Error('No active mission, so the map is unknown.');
-  if (info.image && !force) return info;
+const NO_CLIENT = 'This PC has no map to build from: the DayZ server files only contain placeholder map tiles, and the real satellite map comes with the DayZ game client. Link a PC that has DayZ installed (Settings → Map sharing, on both tools): it builds the full-resolution map and sends it here by itself. Or, on that PC, press "Save map image…" and use "Set map image…" here.';
+// key: build a map other than the active one (when this PC builds for a linked server)
+async function buildMapImage({ force = false, key: forKey = null } = {}) {
+  const active = mapInfo(); const key = forKey || active.map;
+  if (!key) throw new Error('No active mission, so the map is unknown.');
+  if (!forKey && active.tiles && !force) return active;
   if (building) return building;
-  const src = mapSources()[0];
-  if (!src || !canBuild()) { const e = new Error(NO_CLIENT); e.code = 'NO_CLIENT'; throw e; }
-  const out = path.join(mapsDir(), info.map + '.png');
-  emitRef('console', { source: 'map', line: `Building the ${info.label || info.map} map from ${src.path}...` });
-  emitRef('map:progress', { map: info.map, progress: 0 });
-  building = require('./mapbuild').buildAsync({ pboPath: src.path, outPath: out, scale: 4 }, p => emitRef('map:progress', { map: info.map, progress: p }))
-    .then(r => { emitRef('console', { source: 'map', line: `Map image ready: ${r.width}x${r.height} from ${r.tiles} tiles.` }); emitRef('map:progress', { map: info.map, progress: 1, done: true }); return mapInfo(); })
-    .catch(e => { emitRef('console', { source: 'map', line: (/placeholder tiles/i.test(e.message) ? 'Map image not built: ' + NO_CLIENT : 'Map build failed: ' + e.message) }); emitRef('map:progress', { map: info.map, error: e.message }); throw e; })
+  const src = realSources(key)[0];
+  if (!src) { const e = new Error(NO_CLIENT); e.code = 'NO_CLIENT'; throw e; }
+  const out = path.join(mapsDir(), key + '.png'); const label = MAP_LABELS[key] || key;
+  emitRef('console', { source: 'map', line: `Building the full-resolution ${label} map from ${src.path}...` });
+  emitRef('map:progress', { map: key, progress: 0 });
+  building = require('./mapbuild').buildAsync({ tiles: true, pboPath: src.path, outDir: path.join(mapsDir(), key, 'tiles'), pngOut: out }, p => emitRef('map:progress', { map: key, progress: p }))
+    .then(r => { emitRef('console', { source: 'map', line: `Map ready: ${r.width}x${r.height} px in ${r.tiles} tiles over ${r.maxZ + 1} zoom levels.` }); emitRef('map:progress', { map: key, progress: 1, done: true }); emitRef('maps:changed', { map: key }); return mapInfo(); })
+    .catch(e => { emitRef('console', { source: 'map', line: (/placeholder tiles/i.test(e.message) ? 'Map image not built: ' + NO_CLIENT : 'Map build failed: ' + e.message) }); emitRef('map:progress', { map: key, error: e.message }); throw e; })
     .finally(() => { building = null; });
   return building;
 }

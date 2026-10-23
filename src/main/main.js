@@ -331,6 +331,7 @@ function scrubbedSettings() {
   if (s.rcon) s.rcon.password = '';
   if (s.offsite) { for (const k of Object.keys(s.offsite)) if (/pass/i.test(k)) s.offsite[k] = ''; if (s.offsite.ftp) s.offsite.ftp.password = ''; }
   if (s.alerts) s.alerts.webhookUrl = '';
+  if (s.mapLink) { s.mapLink.ownKey = ''; if (s.mapLink.target) s.mapLink.target.key = ''; }
   if (s.website) { delete s.website.admin; if (s.website.domain) { s.website.domain.certPem = ''; s.website.domain.keyPem = ''; if (s.website.domain.ddns) s.website.domain.ddns.token = ''; } }
   delete s.steamPassEnc; delete s.steamUser;
   return s;
@@ -369,6 +370,10 @@ handle('mission:mapInfo', () => mission.mapInfo());
 handle('mission:setMapImage', (src) => mission.setMapImage(src));
 handle('mission:exportMapImage', async () => { const info = mission.mapInfo(); if (!info.image) throw new Error('There is no map image on this PC yet.'); const r = await dialog.showSaveDialog(win, { defaultPath: path.basename(info.image), filters: [{ name: 'Images', extensions: [path.extname(info.image).slice(1) || 'png'] }] }); if (r.canceled) return null; mission.exportMapImage(r.filePath); shell.showItemInFolder(r.filePath); return r.filePath; });
 handle('mission:buildMap', (opts) => mission.buildMapImage(opts || {}));
+handle('maplink:status', () => ({ ...require('./maplink').status(), ownKey: require('./maplink').ownKey(), websiteRunning: !!website.status().running, websitePort: website.status().port }));
+handle('maplink:newOwnKey', () => require('./maplink').newOwnKey());
+handle('maplink:setTarget', (t) => require('./maplink').setTarget(t || {}));
+handle('maplink:send', () => require('./maplink').send({ force: true, by: 'app' }));
 handle('heat:summary', (since) => heat.summary(null, Number(since) || 0));
 handle('lootmap:items', () => lootmap.items());
 handle('lootmap:spawns', (name) => lootmap.spawns(name));
@@ -587,6 +592,7 @@ app.whenReady().then(() => {
   timed('combat', () => combat.init(emit));
   timed('deathlog', () => deathlog.init(emit));
   timed('anticheat', () => anticheat.init(emit));
+  timed('maplink', () => require('./maplink').init(emit));
   setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); }, 15000);
   if (app.isPackaged && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {
     require('./preflight').ensureRuntimes(emit).then(r => {
