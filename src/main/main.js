@@ -243,6 +243,7 @@ handle('server:stop', () => server.stop());
 handle('server:restart', () => server.restart());
 handle('server:preflight', () => require('./preflight').checks());
 handle('server:installVcRedist', () => require('./preflight').installVcRedist(emit));
+handle('server:installDirectX', () => require('./preflight').installDirectX(emit));
 handle('server:readConfig', () => {
   const p = settings.paths();
   return fs.existsSync(p.configPath) ? fs.readFileSync(p.configPath, 'utf8') : null;

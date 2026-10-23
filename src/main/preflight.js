@@ -27,6 +27,14 @@ function checks() {
     for (const dll of ['steam_api64.dll', 'steamclient64.dll', 'tier0_s64.dll', 'vstdlib_s64.dll']) if (!fs.existsSync(path.join(p.serverDir, dll))) err(`${dll} is missing next to the server exe: validate the server files.`);
     if (!fs.existsSync(path.join(p.serverDir, 'dta')) || !fs.existsSync(path.join(p.serverDir, 'addons'))) err('The server\'s dta or addons folder is missing: the install is incomplete, validate the server files.');
   }
+  // every DLL the exe imports must exist next to it or in Windows; this names the exact missing one
+  if (fs.existsSync(p.serverExe)) {
+    try {
+      const pe = require('./peimports'); const miss = pe.missing(p.serverExe);
+      for (const dll of miss) err(`${dll} is missing on this PC; the server exits at once without it (exit code 0xC0000135). It comes from ${pe.provider(dll)}.`);
+      if (!miss.length) ok('Every DLL the server imports is present');
+    } catch { /* unreadable exe: the size check above covers it */ }
+  }
   // runtime the server needs (DayZ links the 2015-2022 x64 C++ runtime)
   if (process.platform === 'win32') {
     if (regInstalled('HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64') || regInstalled('HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64')) ok('Visual C++ 2015-2022 x64 runtime installed');
@@ -78,8 +86,8 @@ function checks() {
 
 // What an exit code means when the server stopped before writing an RPT.
 const CODES = {
-  '-1073741515': ['A required DLL is missing (STATUS_DLL_NOT_FOUND, 0xC0000135). Almost always the Microsoft Visual C++ 2015-2022 x64 runtime: install vc_redist.x64.exe and start again.'],
-  '3221225781': ['A required DLL is missing (STATUS_DLL_NOT_FOUND, 0xC0000135). Almost always the Microsoft Visual C++ 2015-2022 x64 runtime: install vc_redist.x64.exe and start again.'],
+  '-1073741515': ['A required DLL is missing (STATUS_DLL_NOT_FOUND, 0xC0000135). On a fresh Windows that is the Visual C++ 2015-2022 x64 runtime or the DirectX June 2010 runtime (XAPOFX1_5.dll); both install with one click from Launch → Check before start.'],
+  '3221225781': ['A required DLL is missing (STATUS_DLL_NOT_FOUND, 0xC0000135). On a fresh Windows that is the Visual C++ 2015-2022 x64 runtime or the DirectX June 2010 runtime (XAPOFX1_5.dll); both install with one click from Launch → Check before start.'],
   '-1073741502': ['A DLL failed to initialise (0xC0000142). Usually a broken or blocked install: validate the server files and check antivirus quarantine.'],
   '3221225794': ['A DLL failed to initialise (0xC0000142). Usually a broken or blocked install: validate the server files and check antivirus quarantine.'],
   '-1073741701': ['Bad image (0xC000007B): a DLL is corrupt or the wrong architecture. Validate the server files.'],
@@ -98,6 +106,7 @@ function exitVerdict(code, ranForSec, hadRpt) {
   const early = ranForSec !== null && ranForSec !== undefined && ranForSec < 25;
   let text = known ? known[0] : `The server exited with code ${code} after ${ranForSec}s.`;
   if (!hadRpt) text += early ? ' It did not get as far as writing an RPT, so the problem is in launching the exe, not in the mission.' : ' No RPT was written during this run.';
+  try { const pe = require('./peimports'); const miss = pe.missing(settings.paths().serverExe); if (miss.length) text += ' Missing: ' + miss.map(d => `${d} (from ${pe.provider(d)})`).join(', ') + '.'; } catch { /* ignore */ }
   const c = checks();
   const hints = [...c.error.map(t => 'Problem: ' + t), ...c.warn.map(t => 'Check: ' + t)];
   return { level: c.error.length || known ? 'error' : 'warn', text, hints };
@@ -127,4 +136,35 @@ async function installVcRedist(emit = () => {}) {
   emit('console', { source: 'preflight', line: okNow ? 'Visual C++ runtime installed. Start the server again.' : 'The installer finished but the runtime still does not show as installed; a reboot may be needed.' });
   return { installed: okNow, action: 'installed' };
 }
-module.exports = { checks, exitVerdict, installVcRedist, vcInstalled };
+const DX_URL = 'https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe';
+function dxInstalled() { const sys = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32'); return fs.existsSync(path.join(sys, 'XAPOFX1_5.dll')) && fs.existsSync(path.join(sys, 'X3DAudio1_7.dll')); }
+function runElevated(file, args) {
+  return new Promise((resolve, reject) => {
+    const list = args.map(a => "'" + a.replace(/'/g, "''") + "'").join(',');
+    const ps = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Start-Process -FilePath '${file.replace(/'/g, "''")}' -ArgumentList ${list} -Verb RunAs -Wait -PassThru; exit $p.ExitCode`], { windowsHide: true });
+    let err = ''; ps.stderr.on('data', d => err += d);
+    ps.on('exit', code => (code === 0 || code === 3010 || code === 1638) ? resolve(code) : reject(new Error(/canceled|cancelled|denied/i.test(err) ? 'Windows permission was declined.' : `Installer exit code ${code}${err ? ': ' + err.trim().slice(0, 200) : ''}`)));
+    ps.on('error', reject);
+  });
+}
+async function installDirectX(emit = () => {}) {
+  if (dxInstalled()) return { installed: true, action: 'already' };
+  const dir = path.join(require('os').tmpdir(), 'dzat-directx'); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'directx_Jun2010_redist.exe');
+  emit('console', { source: 'preflight', line: 'Downloading the DirectX June 2010 runtime from Microsoft (about 95 MB)…' });
+  const res = await fetch(DX_URL, { redirect: 'follow' });
+  if (!res.ok) throw new Error('Download failed: HTTP ' + res.status);
+  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  if (fs.statSync(file).size < 50 * 1024 * 1024) throw new Error('The downloaded package is too small to be real; try again later.');
+  const ext = path.join(dir, 'x');
+  emit('console', { source: 'preflight', line: 'Unpacking the runtime…' });
+  await new Promise((resolve, reject) => { const c = require('child_process').spawn(file, ['/Q', '/T:' + ext], { windowsHide: true }); c.on('exit', code => code === 0 ? resolve() : reject(new Error('Unpack failed with code ' + code))); c.on('error', reject); });
+  const setup = path.join(ext, 'DXSETUP.exe'); if (!fs.existsSync(setup)) throw new Error('DXSETUP.exe not found after unpacking.');
+  emit('console', { source: 'preflight', line: 'Running the DirectX installer (Windows asks for permission)…' });
+  await runElevated(setup, ['/silent']);
+  const okNow = dxInstalled();
+  emit('console', { source: 'preflight', line: okNow ? 'DirectX runtime installed. Start the server again.' : 'The installer finished but XAPOFX1_5.dll is still missing; a reboot may be needed.' });
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  return { installed: okNow, action: 'installed' };
+}
+module.exports = { checks, exitVerdict, installVcRedist, vcInstalled, installDirectX, dxInstalled };

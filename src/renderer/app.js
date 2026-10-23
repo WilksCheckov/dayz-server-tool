@@ -715,13 +715,26 @@ $('btnImportMods').onclick = (e) => run(async () => {
   toast('Imported');
 }, e.target);
 document.querySelectorAll('.ll-copy').forEach(b => b.onclick = () => { const t = $(b.dataset.for).textContent; if (t.startsWith('-')) { navigator.clipboard.writeText(t); toast('Copied'); } else toast('Nothing to copy'); });
-ipc.on('console', (m) => { if (m && m.source === 'preflight' && /Visual C\+\+ 2015-2022 x64 runtime is not installed/.test(m.line || '') && !window._vcOffered) { window._vcOffered = true; setTimeout(async () => { const ok = await showModal('Runtime missing', '<p>The server cannot start because the Microsoft Visual C++ 2015-2022 x64 runtime is not installed on this PC.</p><p class="muted">The tool can download it from Microsoft and run the installer (Windows asks for permission).</p>', [{ label: 'Install it now', value: true, primary: true }, { label: 'Not now', value: false }]); if (ok) { toast('Downloading and installing the Visual C++ runtime…'); try { const res = await ipc.invoke('server:installVcRedist'); toast(res.installed ? 'Visual C++ runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); } catch (e) { toast(e.message, true); } } window._vcOffered = false; }, 300); } });
+ipc.on('console', (m) => {
+  if (!m || m.source !== 'preflight' || window._rtOffered) return;
+  const line = m.line || '';
+  const kind = /Visual C\+\+ 2015-2022 x64 runtime is not installed|from the Microsoft Visual C\+\+/.test(line) ? 'vc' : /DirectX End-User Runtime/.test(line) ? 'dx' : null;
+  if (!kind) return;
+  window._rtOffered = true;
+  setTimeout(async () => {
+    const name = kind === 'vc' ? 'Microsoft Visual C++ 2015-2022 x64 runtime' : 'DirectX June 2010 runtime (XAPOFX1_5.dll)';
+    const ok = await showModal('Runtime missing', `<p>The server cannot start because the ${name} is not installed on this PC.</p><p class="muted">The tool can download it from Microsoft and run the installer (Windows asks for permission).</p>`, [{ label: 'Install it now', value: true, primary: true }, { label: 'Not now', value: false }]);
+    if (ok) { toast(`Downloading and installing the ${kind === 'vc' ? 'Visual C++' : 'DirectX'} runtime…`); try { const res = await ipc.invoke(kind === 'vc' ? 'server:installVcRedist' : 'server:installDirectX'); toast(res.installed ? 'Runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); } catch (e) { toast(e.message, true); } }
+    window._rtOffered = false;
+  }, 300);
+});
 $('btnPreflight').onclick = (e) => run(async () => {
   const r = await ipc.invoke('server:preflight');
   const li = (items, cls) => items.map(t => `<li class="${cls}">${esc(t)}</li>`).join('');
-  const needsVc = r.error.some(t => /Visual C\+\+/.test(t));
-  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, needsVc ? [{ label: 'Install the runtime now', value: 'vc', primary: true }, { label: 'Close', value: true }] : [{ label: 'Close', value: true, primary: true }]);
+  const needsVc = r.error.some(t => /Visual C\+\+/.test(t)); const needsDx = r.error.some(t => /DirectX/.test(t));
+  const choice = await showModal('Check before start', `<p class="muted">${r.error.length ? 'The server would not start:' : r.warn.length ? 'The server can start, with things to look at:' : 'Everything the tool checks looks fine.'}</p><ul class="checklist">${li(r.error, 'bad')}${li(r.warn, 'warn')}${li(r.ok, 'ok')}</ul>`, [...(needsVc ? [{ label: 'Install Visual C++ runtime', value: 'vc', primary: true }] : []), ...(needsDx ? [{ label: 'Install DirectX runtime', value: 'dx', primary: !needsVc }] : []), { label: 'Close', value: true, primary: !needsVc && !needsDx }]);
   if (choice === 'vc') { toast('Downloading and installing the Visual C++ runtime…'); const res = await ipc.invoke('server:installVcRedist'); toast(res.installed ? 'Visual C++ runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); }
+  if (choice === 'dx') { toast('Downloading and installing the DirectX runtime (about 95 MB)…'); const res = await ipc.invoke('server:installDirectX'); toast(res.installed ? 'DirectX runtime installed. Start the server.' : 'Installer finished; if the check still fails, reboot once.', !res.installed); }
 }, e.target);
 $('btnCopyFullLine').onclick = () => { navigator.clipboard.writeText($('cmdline').textContent.replace(/^DayZServer_x64\.exe /, '')); toast('Launch line copied'); };
 $('btnEditServerMod').onclick = () => run(async () => {
