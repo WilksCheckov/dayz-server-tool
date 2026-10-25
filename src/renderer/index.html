@@ -922,6 +922,21 @@
         </section>
 
         <!-- PRIORITY -->
+        <!-- TICKETS -->
+        <section class="page" id="page-tickets">
+          <div class="page-toolbar">
+            <input id="tkQuery" class="input" placeholder="Search tickets, players, #death" style="width:260px">
+            <select id="tkStatus" class="input" style="width:130px"><option value="open">Open</option><option value="closed">Closed</option><option value="">All</option></select>
+            <span class="muted" id="tkStats"></span>
+            <span class="grow"></span>
+            <button class="btn primary" id="btnTkNew">New ticket</button>
+          </div>
+          <div class="tk-layout">
+            <div class="card"><div class="table-wrap grow"><table class="table" id="tkTable"><thead><tr><th>#</th><th>Subject</th><th>Player</th><th>Assignee</th><th>Deaths</th><th>Actions</th><th>Last activity</th></tr></thead><tbody></tbody></table></div></div>
+            <div class="card tk-detail" id="tkDetail"><div class="empty">Select a ticket. Tickets come from the Discord bot (each with its private channel) or from New ticket here; a reason like <code>#0041</code> on any admin action logs that action on the ticket.</div></div>
+          </div>
+        </section>
+
         <section class="page" id="page-priority">
           <div class="page-toolbar">
             <input id="prId" class="input" placeholder="Steam64 ID" style="width:220px">

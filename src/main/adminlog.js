@@ -26,6 +26,7 @@ function record({ action, by = 'app', source = 'app', target = null, details = '
   const c = cfg();
   const who = by === 'app' || by === 'map' ? c.adminName : by;
   const res = resultText(result);
+  let ticket = null; try { const tk = require('./tickets'); const id = tk.refFromText(reason); if (id) ticket = tk.tagAction(id, { action, by, target, details, reason, result }); } catch (e) { emitRef('console', { source: 'tickets', line: 'Could not tag the ticket: ' + e.message }); }
   const text = `${LABEL[action] || action}${target ? ` · ${target.name}` : ''}${details ? ` · ${details}` : ''}${reason ? ` · reason: ${reason}` : ''}${res ? ` · ${res}` : ''}`;
   emitRef('console', { source: 'admin', line: `${who}: ${text}` });
   try { require('./audit').log(source, who, 'admin:' + action, `${target ? `${target.name} (${target.steam || '?'}) ` : ''}${details}${reason ? ` — reason: ${reason}` : ''}${res ? ` — ${res}` : ''}`); } catch { /* ignore */ }
@@ -37,7 +38,8 @@ function record({ action, by = 'app', source = 'app', target = null, details = '
         ...(target ? [{ name: 'Player', value: `${target.name}${target.steam ? `\n${target.steam}` : ''}`.slice(0, 200), inline: true }] : []),
         ...(res ? [{ name: 'Result', value: res.slice(0, 200), inline: true }] : []),
         ...(details ? [{ name: 'Details', value: String(details).slice(0, 1000) }] : []),
-        { name: 'Reason / ticket', value: reason ? String(reason).slice(0, 1000) : '—' }
+        { name: 'Reason / ticket', value: reason ? String(reason).slice(0, 1000) : '—' },
+        ...(ticket ? [{ name: 'Ticket', value: `#${ticket}`, inline: true }] : [])
       ] }).catch(e => emitRef('console', { source: 'admin', line: `Admin action not posted to Discord: ${e.message}` }));
   } catch { /* bot not loaded */ }
 }

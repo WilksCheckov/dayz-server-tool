@@ -218,7 +218,11 @@ function buildCommands() {
     new SlashCommandBuilder().setName('ticket').setDescription('Support tickets')
       .addSubcommand(s => s.setName('close').setDescription('Close the ticket this channel belongs to').addStringOption(reasonOpt))
       .addSubcommand(s => s.setName('add').setDescription('Add a member to this ticket').addUserOption(o => o.setName('discord_user').setDescription('Member').setRequired(true)))
-      .addSubcommand(s => s.setName('list').setDescription('Show open tickets')),
+      .addSubcommand(s => s.setName('list').setDescription('Show open tickets'))
+      .addSubcommand(s => s.setName('link').setDescription('Link a death record to a ticket').addIntegerOption(o => o.setName('death_id').setDescription('Death record number (see /deaths)').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: the ticket this channel belongs to)')))
+      .addSubcommand(s => s.setName('assign').setDescription('Assign a ticket to a staff member').addUserOption(o => o.setName('discord_user').setDescription('Staff member').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)')))
+      .addSubcommand(s => s.setName('note').setDescription('Add a staff note to a ticket').addStringOption(o => o.setName('text').setDescription('The note').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)')))
+      .addSubcommand(s => s.setName('info').setDescription('Show a ticket: assignee, linked deaths, notes and admin actions').addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)'))),
     new SlashCommandBuilder().setName('maintenance').setDescription('Re-check everyone against Steam for VAC / game / trade bans and refresh the application embeds'),
     new SlashCommandBuilder().setName('backup').setDescription('Take a backup now'),
     new SlashCommandBuilder().setName('deaths').setDescription('Recent deaths from the death log').addStringOption(o => o.setName('player').setDescription('Player name, or part of it')).addIntegerOption(o => o.setName('count').setDescription('How many (default 10, max 25)')),
@@ -416,6 +420,7 @@ function deathEmbed(r) {
   if (r.gear && r.gear.length) { const counts = {}; for (const g of r.gear) counts[g.c] = (counts[g.c] || 0) + 1; e.addFields({ name: `Gear (${r.gear.length} items, ${r.gearFromCorpse ? 'from the body' : 'last snapshot before death'})`, value: Object.entries(counts).map(([c, n]) => n > 1 ? `${c} ×${n}` : c).join(', ').slice(0, 1000) }); }
   else e.addFields({ name: 'Gear', value: 'No snapshot (bridge script not running when they died)' });
   if (r.refunds && r.refunds.length) e.addFields({ name: 'Refunds', value: r.refunds.map(f => `<t:${Math.floor(f.ts / 1000)}:R> by ${f.by}: ${f.ok}/${f.items} items${f.status !== 'done' ? ' (' + f.status + ', nothing spawned)' : ''}`).join('\n').slice(0, 1000) });
+  try { const tk = require('./tickets').forDeath(r.id); if (tk.length) e.addFields({ name: 'Tickets', value: tk.map(t => `#${t.id} ${t.subject} (${t.status})`).join('\n').slice(0, 500) }); } catch { /* ignore */ }
   e.setFooter({ text: `/refund id:${r.id} spawns this gear at the player's feet while they are online` });
   return e;
 }
@@ -603,7 +608,7 @@ async function execute(name, sub, opt, user) {
   if (name === 'help') {
     const lines = [
       '**/application** — Post the whitelist application button here. *(Admin)*',
-      '**/ticketpanel**, **/ticket close|add|list** — Support tickets: members open one with a button, each gets a private channel; closing posts a transcript to the ticket log. *(Admin, except using the button)*',
+      '**/ticketpanel**, **/ticket close|add|list|link|assign|note|info** — Support tickets: members open one with a button, each gets a private channel; link death records, assign staff, add notes; a reason like #0041 on any admin action logs it on that ticket; closing posts a transcript. *(Admin, except using the button)*',
       '**/maintenance** — Re-check everyone against Steam for new VAC / game / trade bans and refresh the application embeds. *(Admin)*',
       '**/whitelist add|remove|list**, **/priority …** — Manage the server lists by Steam64 or Discord user; roles follow. *(Admin)*',
       '**/mute add|remove|list** — Give a member the muted role for a duration (30m, 2h, 3d); it is removed when time is up. *(Admin)*',
@@ -791,6 +796,21 @@ async function execute(name, sub, opt, user) {
   }
   if (name === 'ticket') {
     if (sub === 'list') { const open = (store().tickets || []).filter(t => t.status === 'open'); return { embeds: [fmtList('Open tickets', open, t => `#${t.id} <#${t.channelId}> — ${t.subject} (<@${t.discordId}>)`)] }; }
+    const tickets = require('./tickets');
+    if (['link', 'assign', 'note', 'info'].includes(sub)) {
+      const tk = opt.id ? (store().tickets || []).find(x => x.id === tickets.pad(opt.id)) : (store().tickets || []).find(x => x.channelId === opt._channelId);
+      if (!tk) return { content: opt.id ? `❌ No ticket #${tickets.pad(opt.id)}.` : '❌ Use this inside a ticket channel, or give the ticket number.' };
+      if (sub === 'link') { const t2 = tickets.link(tk.id, opt.death_id, who); const d = t2.deaths.find(x => x.id === Number(opt.death_id)); return { content: `✅ Death #${opt.death_id}${d ? ' (' + d.name + ': ' + d.cause + ')' : ''} linked to ticket #${tk.id}.`, log: `${who}: linked death #${opt.death_id} to ticket #${tk.id}` }; }
+      if (sub === 'assign') { let nm = opt.discord_user; try { const mm = await member(opt.discord_user); if (mm) nm = mm.displayName; } catch { /* keep the id */ } tickets.assign(tk.id, nm, who); const ch = await channel(tk.channelId); if (ch) ch.send(`🎫 Ticket #${tk.id} assigned to <@${opt.discord_user}>.`).catch(() => {}); return { content: `✅ Ticket #${tk.id} assigned to ${nm}.`, log: `${who}: assigned ticket #${tk.id} to ${nm}` }; }
+      if (sub === 'note') { tickets.note(tk.id, opt.text, who); return { content: `✅ Note added to ticket #${tk.id}.` }; }
+      const t3 = tickets.get(tk.id);
+      const e = new EmbedBuilder().setColor(t3.status === 'open' ? 0x4f8cff : 0x6b7280).setTitle(`Ticket #${t3.id}: ${t3.subject}`).setDescription((t3.description || '-').slice(0, 1000))
+        .addFields({ name: 'Status', value: t3.status, inline: true }, { name: 'Assignee', value: t3.assignee || 'nobody', inline: true }, { name: 'Player', value: t3.player || (t3.discordId ? `<@${t3.discordId}>` : '-'), inline: true });
+      if (t3.deaths.length) e.addFields({ name: 'Linked deaths', value: t3.deaths.map(d => `#${d.id} ${d.missing ? '(record gone)' : `${d.name}: ${d.cause}${d.killer ? ' by ' + d.killer : ''}${d.refunded ? ' · refunded' : ''}`}`).join('\n').slice(0, 1000) });
+      if (t3.notes.length) e.addFields({ name: 'Notes', value: t3.notes.slice(-8).map(n => `<t:${Math.floor(Date.parse(n.ts) / 1000)}:d> ${n.by}: ${n.text}`).join('\n').slice(0, 1000) });
+      if (t3.actions.length) e.addFields({ name: 'Admin actions', value: t3.actions.slice(0, 8).map(a => `<t:${Math.floor(Date.parse(a.ts) / 1000)}:d> ${a.by}: ${a.action}${a.target ? ' · ' + a.target : ''}${a.details ? ' · ' + a.details : ''}${a.result ? ' · ' + a.result : ''}`).join('\n').slice(0, 1000) });
+      return { embeds: [e] };
+    }
     const t = ticketByChannel(opt._channelId);
     if (!t) return { content: '❌ Use this inside a ticket channel.' };
     if (sub === 'close') { await closeTicket(t.id, { by, reason: opt.reason }); return { content: `✅ Ticket #${t.id} closed.`, log: `${who}: closed ticket #${t.id}` }; }
@@ -1156,4 +1176,4 @@ function init(emit) {
   else if (mode() !== 'off' && cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000);
 }
 
-module.exports = { postAdminAction, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { saveStore, closeTicket, postAdminAction, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };

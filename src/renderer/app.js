@@ -135,6 +135,7 @@ const NAV = [
     { page: 'deathlog', label: 'Death log', sub: 'Every death: cause, killer, weapon, range, damage per body part, gear carried, refunds', icon: 'database' },
     { page: 'bans', label: 'Bans', sub: 'Game bans and BattlEye bans', icon: 'bans' },
     { page: 'whitelist', label: 'Whitelist', sub: 'Who may join when enableWhitelist is on (whitelist.txt)', icon: 'lists' },
+    { page: 'tickets', label: 'Tickets', sub: 'Support tickets with assignees, notes, linked deaths and the admin actions done for them', icon: 'lists' },
     { page: 'priority', label: 'Priority queue', sub: 'Who skips the login queue (priority.txt)', icon: 'priority' },
     { page: 'map', label: 'Map', sub: 'Live players with admin actions (right-click), loot, vehicles and heat', icon: 'map' }
   ] },
@@ -189,6 +190,7 @@ function showPage(name) {
   if (name === 'economy') refreshEconomy();
   if (name === 'database') refreshPdb();
   if (name === 'deathlog') refreshDeathLog();
+  if (name === 'tickets') refreshTickets();
   if (name === 'dashboard') { refreshHealth(); refreshAlertList(); refreshUpdater(); requestAnimationFrame(() => { if ($('consoleAutoscroll').checked) $('console').scrollTop = $('console').scrollHeight; }); }
   if (name === 'discord') requestAnimationFrame(() => { const p = $('discordLog'); p.scrollTop = p.scrollHeight; });
   if (name === 'players') requestAnimationFrame(() => { const p = $('rconMessages'); p.scrollTop = p.scrollHeight; });
@@ -1611,7 +1613,7 @@ async function refreshDeathLog() {
   const rows = await ipc.invoke('deathlog:list', { q: $('dlQuery').value.trim(), cause: $('dlCause').value, since: range ? Date.now() - range : 0, limit: 400 });
   const st = await ipc.invoke('deathlog:stats'); $('dlStats').textContent = `${st.deaths} deaths recorded · ${st.snapshots} gear snapshots for ${st.players} players`;
   const tb = $('dlTable').querySelector('tbody');
-  tb.innerHTML = rows.length ? rows.map(r => `<tr data-id="${r.id}" class="${r.id === dlSelected ? 'selected' : ''}"><td class="mono" title="${esc(fmtDate(r.ts))}">${esc(fmtShort(r.ts))}</td><td><b>${esc(r.name)}</b>${r.online ? ' <span class="badge ok">online</span>' : ''}</td><td>${esc(r.cause)}</td><td>${r.killer ? esc(r.killer.name) : r.source ? `${esc(r.source.name)}${r.source.name.toLowerCase() === r.source.kind ? '' : ' <span class="muted">' + esc(r.source.kind) + '</span>'}` : '<span class="muted">—</span>'}</td><td class="dl-src" title="${r.sources && r.sources.length ? esc(r.sources.map(x => srcText(x)).join(', ')) : ''}">${r.sources && r.sources.length ? esc(r.sources.map(x => srcText(x)).join(', ')) : '<span class="muted">—</span>'}</td><td>${esc(r.weapon || '—')}</td><td>${fmtRange(r.distance)}</td><td>${r.hitCount ? `${Math.round(r.totalDamage)} (${r.hitCount} hit${r.hitCount === 1 ? '' : 's'})` : '—'}</td><td>${r.gearCount === null ? '<span class="muted">none</span>' : `${r.gearCount} items${r.refunds ? ` · refunded ×${r.refunds}` : ''}`}</td></tr>`).join('') : '<tr><td colspan="9" class="muted">No deaths match.</td></tr>';
+  tb.innerHTML = rows.length ? rows.map(r => `<tr data-id="${r.id}" class="${r.id === dlSelected ? 'selected' : ''}"><td class="mono" title="${esc(fmtDate(r.ts))}">${esc(fmtShort(r.ts))}${(r.tickets || []).length ? ` <span class="badge" title="${esc(r.tickets.map(t => '#' + t.id + ' ' + t.subject).join(', '))}">🎫 ${r.tickets.length}</span>` : ''}</td><td><b>${esc(r.name)}</b>${r.online ? ' <span class="badge ok">online</span>' : ''}</td><td>${esc(r.cause)}</td><td>${r.killer ? esc(r.killer.name) : r.source ? `${esc(r.source.name)}${r.source.name.toLowerCase() === r.source.kind ? '' : ' <span class="muted">' + esc(r.source.kind) + '</span>'}` : '<span class="muted">—</span>'}</td><td class="dl-src" title="${r.sources && r.sources.length ? esc(r.sources.map(x => srcText(x)).join(', ')) : ''}">${r.sources && r.sources.length ? esc(r.sources.map(x => srcText(x)).join(', ')) : '<span class="muted">—</span>'}</td><td>${esc(r.weapon || '—')}</td><td>${fmtRange(r.distance)}</td><td>${r.hitCount ? `${Math.round(r.totalDamage)} (${r.hitCount} hit${r.hitCount === 1 ? '' : 's'})` : '—'}</td><td>${r.gearCount === null ? '<span class="muted">none</span>' : `${r.gearCount} items${r.refunds ? ` · refunded ×${r.refunds}` : ''}`}</td></tr>`).join('') : '<tr><td colspan="9" class="muted">No deaths match.</td></tr>';
   tb.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => { dlSelected = Number(tr.dataset.id); tb.querySelectorAll('tr').forEach(x => x.classList.toggle('selected', x === tr)); showDeath(dlSelected); });
   refreshBridgeState();
 }
@@ -1640,12 +1642,21 @@ async function showDeath(id) {
     <div class="row between" style="margin-top:8px"><b>Gear${r.gear ? ` (${r.gear.length} items, ${r.gearFromCorpse ? 'from the body' : 'last snapshot ' + Math.round((r.ts - r.gearTs) / 1000) + ' s before death'})` : ''}</b>
       <span class="row gap"><button class="btn small" id="btnDlTp" ${r.online && r.deathPos ? '' : 'disabled'} title="${!r.deathPos ? 'No position recorded' : r.online ? 'Teleport the player back to where they died' : 'The player must be online'}">Teleport back here</button><button class="btn small" id="btnDlRefund" ${r.gear && r.gear.length && r.online ? '' : 'disabled'} title="${!r.gear || !r.gear.length ? 'No gear recorded' : r.online ? 'Spawn every item in pristine condition at the player\'s feet' : 'The player must be online'}">Refund gear</button></span></div>
     <div style="max-height:260px;overflow:auto">${gearHtml}</div>
+    <div class="row between" style="margin-top:8px"><b>Tickets</b><span class="row gap"><button class="btn small" id="btnDlLinkTicket" title="Link this death to an open ticket">Link to ticket…</button><button class="btn small" id="btnDlNewTicket" title="Open a ticket for this death">New ticket</button></span></div>
+    ${(r.tickets || []).length ? r.tickets.map(t => `<div class="row between"><span>#${esc(t.id)} ${esc(t.subject)} <span class="muted">${esc(t.status)}</span></span><button class="btn small dl-open-ticket" data-id="${esc(t.id)}">Open</button></div>`).join('') : '<div class="muted">Not linked to a ticket.</div>'}
     ${r.refunds && r.refunds.length ? '<div class="muted" style="margin-top:6px">Refunds</div>' + r.refunds.map(f => `<div class="row between"><span>${esc(fmtDate(f.ts))} by ${esc(f.by)}</span><span class="muted">${f.ok}/${f.items} spawned${f.fail ? `, ${f.fail} failed` : ''}${f.status !== 'done' ? ' (' + esc(f.status) + ')' : ''}</span></div>`).join('') : ''}`;
+  box.querySelectorAll('.dl-open-ticket').forEach(b => b.onclick = () => { tkSelected = b.dataset.id; showPage('tickets'); });
+  $('btnDlNewTicket').onclick = (e) => run(async () => { const t = await newTicketDialog(r.id, r.name); if (t) showDeath(r.id); }, e.target);
+  $('btnDlLinkTicket').onclick = (e) => run(async () => {
+    const open = await ipc.invoke('tickets:list', { status: 'open' });
+    const ok = await showModal(`Link death #${r.id} to a ticket`, open.length ? `<label class="field">Ticket <select id="dlTicketPick" class="input">${open.map(t => `<option value="${esc(t.id)}">#${esc(t.id)} ${esc(t.subject)}${t.player ? ' · ' + esc(t.player) : ''}</option>`).join('')}</select></label>` : '<p class="muted">No open tickets. Use New ticket instead.</p>', [{ label: 'Link', value: true, primary: true }, { label: 'Cancel', value: false }]);
+    if (!ok || !open.length) return; await ipc.invoke('tickets:link', $('dlTicketPick').value, r.id); toast('Linked'); showDeath(r.id);
+  }, e.target);
   const tp = $('btnDlTp');
   if (tp) tp.onclick = (e) => run(async () => { const res = await ipc.invoke('deathlog:teleportToDeath', r.id); toast(res.status === 'done' ? `${r.name} teleported to ${Math.round(res.pos[0])}, ${Math.round(res.pos[1])}` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed and the server running?', res.status !== 'done'); }, e.target);
   const btn = $('btnDlRefund');
   if (btn) btn.onclick = (e) => run(async () => {
-    const ok = await showModal('Refund gear', `<p>Spawn the ${r.gear.length} items ${esc(r.name)} had when they died, in pristine condition, at their feet now?</p><p class="muted">Weapons come without their attachments fitted; attachments, magazines and cargo are spawned as separate items.</p><label class="field">Reason / ticket <input id="dlWhy" class="input" placeholder="Reason or ticket number (posted to the admin action channel)"></label>`, [{ label: 'Refund', value: true, primary: true }, { label: 'Cancel', value: false }]);
+    const ok = await showModal('Refund gear', `<p>Spawn the ${r.gear.length} items ${esc(r.name)} had when they died, in pristine condition, at their feet now?</p><p class="muted">Weapons come without their attachments fitted; attachments, magazines and cargo are spawned as separate items.</p><label class="field">Reason / ticket <input id="dlWhy" class="input" value="${(r.tickets || []).length ? '#' + esc(r.tickets[0].id) + ' ' : ''}" placeholder="Reason or ticket number (posted to the admin action channel)"></label>`, [{ label: 'Refund', value: true, primary: true }, { label: 'Cancel', value: false }]);
     if (!ok) return;
     const res = await ipc.invoke('deathlog:refund', r.id, null, $('dlWhy').value.trim());
     toast(res.status === 'done' && res.ok > 0 ? `Spawned ${res.ok} of ${res.items} items at ${r.name}'s feet${res.fail ? ` (${res.fail} failed)` : ''}` : res.status === 'done' ? `Nothing could be spawned for ${r.name} (${res.fail} item(s) failed: classes from a removed mod?)` : res.status === 'offline' ? `${r.name} is not in game right now` : res.status === 'pending' ? 'The game picked the refund up but has not answered yet; the result shows in the death record when it does.' : res.withdrawn ? 'The game did not pick the refund up in time, so it was withdrawn and nothing was spawned. Is the server running with the bridge script loaded (it loads at server start)?' : 'The server did not answer. Is the bridge script installed and the server running?', !(res.status === 'done' && res.ok > 0) && res.status !== 'pending');
@@ -1660,6 +1671,52 @@ $('btnDlInstall').onclick = (e) => run(async () => { const st = await ipc.invoke
 $('btnDlRemove').onclick = (e) => run(async () => { if (!await showModal('Remove bridge script', '<p>Remove the bridge script from init.c? Gear snapshots and refunds stop at the next server start. Turn off "Keep it installed" as well, or it comes back on the next start.</p>', [{ label: 'Remove', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('deathlog:removeBridge'); refreshBridgeState(); }, e.target);
 $('btnDlOpenDir').onclick = () => ipc.invoke('deathlog:openBridgeDir');
 ipc.on('deathlog:changed', () => { if (document.querySelector('#page-deathlog.active')) refreshDeathLog(); });
+ipc.on('tickets:changed', () => { if (document.querySelector('#page-tickets.active')) refreshTickets(); if (document.querySelector('#page-deathlog.active') && dlSelected) showDeath(dlSelected); });
+
+// ---------- tickets ----------
+let tkSelected = null, tkRows = [];
+const tkFmt = (iso) => iso ? fmtDate(Date.parse(iso)) : '—';
+async function refreshTickets() {
+  tkRows = await ipc.invoke('tickets:list', { status: $('tkStatus').value, q: $('tkQuery').value.trim() });
+  const st = await ipc.invoke('tickets:stats'); $('tkStats').textContent = `${st.open} open (${st.unassigned} unassigned) · ${st.closed} closed`;
+  $('tkTable').querySelector('tbody').innerHTML = tkRows.map(t => `<tr data-id="${esc(t.id)}" class="${t.id === tkSelected ? 'selected' : ''}"><td class="mono">#${esc(t.id)}${t.status === 'open' ? '' : ' <span class="badge">closed</span>'}${t.source === 'discord' ? ' <span class="badge" title="Opened through the Discord bot">discord</span>' : ''}</td><td>${esc(t.subject)}</td><td>${esc(t.player || '')}</td><td>${t.assignee ? esc(t.assignee) : '<span class="muted">nobody</span>'}</td><td>${t.deaths.map(d => '#' + d).join(', ')}</td><td>${t.actions || ''}</td><td class="muted">${esc(tkFmt(t.lastActivity))}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">No tickets.</td></tr>';
+  if (tkSelected) showTicket(tkSelected);
+}
+async function showTicket(id) {
+  tkSelected = id; let t; try { t = await ipc.invoke('tickets:get', id); } catch (e) { $('tkDetail').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  document.querySelectorAll('#tkTable tbody tr').forEach(tr => tr.classList.toggle('selected', tr.dataset.id === id));
+  const deaths = t.deaths.map(d => `<div class="row between tk-line"><span>#${d.id} ${d.missing ? '<span class="muted">(record gone)</span>' : `${esc(d.name)} · ${esc(d.cause)}${d.killer ? ' by ' + esc(d.killer) : ''}${d.refunded ? ' <span class="badge ok">refunded</span>' : ''}`}</span><span class="row gap">${d.missing ? '' : `<button class="btn small tk-open-death" data-id="${d.id}">Open</button>`}<button class="btn small tk-unlink" data-id="${d.id}" title="Unlink">✕</button></span></div>`).join('') || '<div class="muted">No death records linked.</div>';
+  const notes = t.notes.slice().reverse().map(n => `<div class="tk-line ${n.system ? 'system' : ''}"><span class="muted">${esc(tkFmt(n.ts))} · ${esc(n.by)}</span><br>${esc(n.text)}</div>`).join('') || '<div class="muted">No notes yet.</div>';
+  const actions = t.actions.map(a => `<div class="tk-line"><span class="muted">${esc(tkFmt(a.ts))} · ${esc(a.by)}</span><br><b>${esc(a.action)}</b>${a.target ? ' · ' + esc(a.target) : ''}${a.details ? ' · ' + esc(a.details) : ''}${a.result ? ` <span class="muted">${esc(a.result)}</span>` : ''}${a.reason ? `<br><span class="muted">reason: ${esc(a.reason)}</span>` : ''}</div>`).join('') || '<div class="muted">No admin actions logged for this ticket yet. Put <code>#' + esc(t.id) + '</code> in the reason of a refund, spawn, heal or teleport to log it here.</div>';
+  $('tkDetail').innerHTML = `
+    <div class="row between"><b style="font-size:15px">#${esc(t.id)} ${esc(t.subject)}</b><span class="badge ${t.status === 'open' ? 'ok' : ''}">${esc(t.status)}</span></div>
+    <div class="muted">Opened ${esc(tkFmt(t.createdAt))}${t.createdBy ? ' by ' + esc(t.createdBy) : t.discordId ? ' by Discord user ' + esc(t.discordId) : ''}${t.closedAt ? ' · closed ' + esc(tkFmt(t.closedAt)) + (t.closedBy ? ' by ' + esc(t.closedBy) : '') + (t.closeReason ? ': ' + esc(t.closeReason) : '') : ''}${t.channelUrl ? ` · <a href="#" class="ext" data-url="${esc(t.channelUrl)}">Discord channel</a>` : ''}</div>
+    ${t.description ? `<div style="white-space:pre-wrap">${esc(t.description)}</div>` : ''}
+    <div class="row gap wrap" style="align-items:center"><span class="muted">Player</span><b>${esc(t.player || '—')}</b><span class="grow"></span><span class="muted">Assignee</span><input id="tkAssignee" class="input" style="width:140px" value="${esc(t.assignee || '')}" placeholder="nobody"><button class="btn small" id="btnTkAssign">Assign</button></div>
+    <div class="row gap wrap">${t.status === 'open' ? '<button class="btn small" id="btnTkClose">Close ticket</button>' : '<button class="btn small" id="btnTkReopen">Reopen</button>'}<button class="btn small" id="btnTkCopy" title="Copy #${esc(t.id)} to paste into a reason">Copy #${esc(t.id)}</button></div>
+    <div class="card-title mt row between"><span>Linked deaths</span><span class="row gap"><input id="tkDeathId" class="input short" type="number" min="1" placeholder="death #"><button class="btn small" id="btnTkLink">Link</button></span></div>${deaths}
+    <div class="card-title mt">Admin actions</div>${actions}
+    <div class="card-title mt">Notes</div><div class="row gap"><input id="tkNote" class="input" placeholder="Add a note"><button class="btn small" id="btnTkNote">Add</button></div>${notes}`;
+  const box = $('tkDetail');
+  const act = (fn) => run(async () => { await fn(); refreshTickets(); });
+  box.querySelector('#btnTkAssign').onclick = () => act(() => ipc.invoke('tickets:assign', t.id, $('tkAssignee').value));
+  box.querySelector('#btnTkLink').onclick = () => act(async () => { const n = Number($('tkDeathId').value); if (!n) throw new Error('Give a death record number (Death log page).'); await ipc.invoke('tickets:link', t.id, n); toast(`Death #${n} linked`); });
+  box.querySelector('#btnTkNote').onclick = () => act(async () => { await ipc.invoke('tickets:note', t.id, $('tkNote').value); });
+  box.querySelector('#btnTkCopy').onclick = () => { navigator.clipboard.writeText('#' + t.id); toast('#' + t.id + ' copied'); };
+  const c = box.querySelector('#btnTkClose'); if (c) c.onclick = () => act(async () => { const ok = await showModal(`Close ticket #${t.id}?`, `<label class="field">Reason (optional) <input id="tkWhy" class="input"></label>${t.channelUrl ? '<p class="muted">Its Discord channel is closed too, with the transcript posted to the ticket log.</p>' : ''}`, [{ label: 'Close ticket', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('tickets:setStatus', t.id, 'closed', $('tkWhy').value.trim()); });
+  const o = box.querySelector('#btnTkReopen'); if (o) o.onclick = () => act(() => ipc.invoke('tickets:setStatus', t.id, 'open'));
+  box.querySelectorAll('.tk-open-death').forEach(b => b.onclick = () => { dlSelected = Number(b.dataset.id); showPage('deathlog'); });
+  box.querySelectorAll('.tk-unlink').forEach(b => b.onclick = () => act(() => ipc.invoke('tickets:unlink', t.id, Number(b.dataset.id))));
+}
+$('tkTable').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) showTicket(tr.dataset.id); });
+let tkTimer = null; $('tkQuery').oninput = () => { clearTimeout(tkTimer); tkTimer = setTimeout(refreshTickets, 250); }; $('tkStatus').onchange = refreshTickets;
+async function newTicketDialog(deathId = null, player = '') {
+  const ok = await showModal('New ticket', `<label class="field">Subject <input id="tkSubject" class="input" placeholder="e.g. Lost gear to a glitch at the NWAF"></label><label class="field">Player <input id="tkPlayer" class="input" value="${esc(player)}" placeholder="name"></label><label class="field">Details <textarea id="tkDesc" class="input" rows="4"></textarea></label>${deathId ? `<p class="muted">Death record #${deathId} is linked to it.</p>` : ''}`, [{ label: 'Create', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  if (!ok) return null;
+  const t = await ipc.invoke('tickets:create', { subject: $('tkSubject').value, player: $('tkPlayer').value, description: $('tkDesc').value, deathId });
+  toast(`Ticket #${t.id} opened`); return t;
+}
+$('btnTkNew').onclick = (e) => run(async () => { const t = await newTicketDialog(); if (t) { tkSelected = t.id; refreshTickets(); } }, e.target);
 
 
 // ---------- economy editor ----------

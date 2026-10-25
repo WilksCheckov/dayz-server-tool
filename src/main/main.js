@@ -73,6 +73,7 @@ const control = require('./control');
 const cpu = require('./cpu');
 const live = require('./live');
 const adminlog = require('./adminlog');
+const tickets = require('./tickets');
 const scheduler = require('./scheduler');
 
 let win = null;
@@ -214,7 +215,7 @@ function createWindow() {
 }
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
-const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:(cleanup|saveCleanupCfg))$/;
+const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:(cleanup|saveCleanupCfg)|tickets:(create|setStatus|assign|link|unlink))$/;
 const handlerMap = new Map();
 function handle(channel, fn) {
   handlerMap.set(channel, fn);
@@ -402,6 +403,15 @@ handle('live:kits', () => live.kits());
 handle('live:saveKit', (k) => live.saveKit(k || {}));
 handle('live:deleteKit', (name) => live.deleteKit(name));
 handle('live:vehicles', () => live.vehicles());
+handle('tickets:list', (q) => tickets.list(q || {}));
+handle('tickets:get', (id) => tickets.get(id));
+handle('tickets:stats', () => tickets.stats());
+handle('tickets:create', (t) => tickets.create({ ...(t || {}), by: 'app' }));
+handle('tickets:note', (id, text) => tickets.note(id, text, 'app'));
+handle('tickets:assign', (id, who) => tickets.assign(id, who, 'app'));
+handle('tickets:link', (id, deathId) => tickets.link(id, deathId, 'app'));
+handle('tickets:unlink', (id, deathId) => tickets.unlink(id, deathId, 'app'));
+handle('tickets:setStatus', (id, status, reason) => tickets.setStatus(id, status, 'app', reason || ''));
 handle('adminlog:cfg', () => ({ ...adminlog.cfg(), channelId: (settings.load().discord || {}).adminLogChannelId || '', needsReason: adminlog.NEEDS_REASON }));
 handle('adminlog:save', (c) => { const cur = settings.load(); settings.save({ adminLog: { ...(cur.adminLog || {}), requireReason: !!c.requireReason, adminName: String(c.adminName || '').trim().slice(0, 40) || adminlog.cfg().adminName }, discord: { ...(cur.discord || {}), adminLogChannelId: String(c.channelId || '').trim() } }); return adminlog.cfg(); });
 handle('lootmap:spawns', (name) => lootmap.spawns(name));
@@ -412,14 +422,14 @@ handle('stats:summaryText', () => stats.summaryText());
 handle('stats:postSummary', () => stats.postSummaryNow());
 handle('audit:list', (o) => audit.list(o || {}));
 handle('combat:overview', () => combat.overview());
-handle('deathlog:list', (q) => deathlog.list(q || {}));
+handle('deathlog:list', (q) => deathlog.list(q || {}).map(r => ({ ...r, tickets: tickets.forDeath(r.id) })));
 handle('anticheat:status', () => anticheat.status());
 handle('anticheat:setEnabled', (on) => anticheat.setEnabled(!!on));
 handle('anticheat:install', () => anticheat.install());
 handle('anticheat:remove', () => anticheat.remove());
 handle('anticheat:list', (q) => anticheat.list(q || {}));
 handle('anticheat:liveLoot', () => anticheat.liveLoot());
-handle('deathlog:get', (id) => deathlog.get(id));
+handle('deathlog:get', (id) => { const r = deathlog.get(id); return r ? { ...r, tickets: tickets.forDeath(r.id) } : r; });
 handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
 handle('deathlog:stats', () => deathlog.stats());
 handle('deathlog:refund', async (id, items, reason) => {
@@ -646,6 +656,7 @@ app.whenReady().then(() => {
   cpu.init(emit);
   live.init(emit);
   adminlog.init(emit);
+  tickets.init(emit);
   instances.init(emit);
   instances.setLocalStatus(localStatus);
   instances.setLocal({ open: () => showWindow(), call: (ch, ...args) => handlerMap.get(ch)(...args) });
