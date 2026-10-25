@@ -66,6 +66,7 @@ async function drawMap() {
   drawLoot(ctx, c);
   drawLiveLoot(ctx, c);
   drawVehicles(ctx, c);
+  drawWorld(ctx, c);
   // players: live positions (bridge script) for those online, the last logged position for everyone else
   if (!mapState.players.at || Date.now() - mapState.players.at > 15000) { try { const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 }); mapState.players = Object.assign(rows.filter(r => r.lastPos), { at: Date.now() }); } catch { mapState.players = Object.assign([], { at: Date.now() }); } }
   const L = adm.live; const liveOn = !!(L && L.available);
@@ -247,7 +248,9 @@ function mapInit() {
     const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const w = toWorld(c, px, py);
     if (e.shiftKey) { const m = mapState.measure; if (!m || m.b) mapState.measure = { a: w, b: null, cursor: w }; else m.b = w; scheduleDraw(); return; }
     if (adm.pickTp) { const p = livePlayer(adm.pickTp); adm.pickTp = null; c.style.cursor = ''; if (p) withReason(`Teleport ${p.name} to ${Math.round(w[0])}, ${Math.round(w[1])}`, '', 'Teleport', (why) => admAct('tp', p, { x: w[0], z: w[1], reason: why })); return; }
+    if (adm.pickVtp) { const v = liveVeh(adm.pickVtp); adm.pickVtp = null; c.style.cursor = ''; if (v) withReason(`Move ${v.cls} to ${Math.round(w[0])}, ${Math.round(w[1])}`, '', 'Move', (why) => admVact('vtp', v, { x: w[0], z: w[1], reason: why })); return; }
     { const hit = liveAt(c, px, py); if (hit) { admSelect(hit.id); return; } }
+    { const wh = worldAt(c, px, py); if (wh && wh.kind === 'vehicle') { adm.selVeh = wh.obj.id; renderVehPanel(); scheduleDraw(); return; } }
     // click a player dot
     for (const r of mapState.players) { const [x, y] = toScreen(c, r.lastPos.x, r.lastPos.z); if (Math.hypot(px - x, py - y) <= 7) { showPlayerPopup(r); return; } }
     // click a loot spot
@@ -298,7 +301,8 @@ function showPlayerPopup(r) {
   showModal(r.name, body, [{ label: 'Open in Database', value: 'db', primary: true }, { label: 'Close', value: false }]).then(v => { if (v === 'db') { pdbSelected = r.key; showPage('database'); } });
 }
 // ----- live admin: players online now, their actions -----
-const adm = { live: null, sel: null, pickTp: null, follow: false, timer: null, kits: [], vehicles: [] };
+const adm = { live: null, world: null, sel: null, selVeh: null, pickTp: null, pickVtp: null, follow: false, timer: null, kits: [], vehicles: [] };
+const BREAK_KINDS = [['tyres', 'Flat tyres'], ['fuel', 'Drain the fuel'], ['engine', 'Ruin the engine'], ['battery', 'Ruin the battery'], ['all', 'Everything']];
 async function loadKits() { try { [adm.kits, adm.vehicles] = await Promise.all([ipc.invoke('live:kits'), ipc.invoke('live:vehicles')]); } catch { /* no mission yet */ } }
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
 const livePlayer = (id) => adm.live && adm.live.available ? adm.live.players.find(p => p.id === id) : null;
@@ -322,8 +326,9 @@ function admSelect(id) { adm.sel = id; renderAdmin(); scheduleDraw(); }
 async function pollLive() {
   if (!document.querySelector('#page-map.active')) return;
   try { adm.live = await ipc.invoke('live:players'); } catch (e) { adm.live = { available: false, reason: e.message, players: [] }; }
+  try { adm.world = await ipc.invoke('live:world'); } catch (e) { adm.world = { available: false, reason: e.message, vehicles: [], flags: [] }; }
   const p = livePlayer(adm.sel); if (adm.follow && p) centreOn(p);
-  renderAdmin(); scheduleDraw();
+  renderAdmin(); renderVehPanel(); scheduleDraw();
 }
 function renderAdmin() {
   const L = adm.live; const box = $('admList'); const q = $('admSearch').value.trim().toLowerCase();
@@ -471,6 +476,82 @@ async function kitManager(edit = null) {
   try { const r = await ipc.invoke('live:saveKit', { name: $('kitName').value, lines: $('kitLines').value, oldName: k ? k.name : null }); adm.kits = r.kits; toast(r.unknown.length ? `Saved. Not in your economy files (fine for mod items, otherwise check the spelling): ${r.unknown.join(', ')}` : 'Kit saved', !!r.unknown.length); }
   catch (e) { toast(e.message, true); }
 }
+// ----- world layer: vehicles and territory flags from the bridge (every 3 s) -----
+const liveVeh = (id) => adm.world && adm.world.available ? adm.world.vehicles.find(v => v.id === id) : null;
+const vehColorOf = (v) => v.ruined ? '#8a8f98' : v.health > 0.66 ? '#46d36a' : v.health > 0.33 ? '#f5b942' : '#ff5f5f';
+function worldAt(c, px, py) {
+  const W = adm.world; if (!W || !W.available) return null; let best = null, bd = 11;
+  if ($('lyrVeh').checked) for (const v of W.vehicles) { const [x, y] = toScreen(c, v.x, v.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = { kind: 'vehicle', obj: v }; } }
+  if ($('lyrFlags').checked) for (const f of W.flags) { const [x, y] = toScreen(c, f.x, f.z); const d = Math.hypot(px - x, py - y + 7); if (d < bd) { bd = d; best = { kind: 'flag', obj: f }; } }
+  return best;
+}
+function drawWorld(ctx, c) {
+  const W = adm.world; const info = $('lyrInfo');
+  if (!W || !W.available) { info.textContent = (adm.live && adm.live.available && W) ? W.reason : ''; return; }
+  const zoomed = mapState.view.scale >= 2.5; ctx.font = '11px Segoe UI'; const pxPerM = baseSize(c) * mapState.view.scale / worldSize();
+  if ($('lyrFlags').checked) for (const f of W.flags) {
+    const [x, y] = toScreen(c, f.x, f.z); const col = f.refresher < 0.25 ? '#ff5f5f' : '#ff9f3b'; const r = 60 * pxPerM;
+    if (r >= 3) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,159,59,.08)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,159,59,.6)'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 14); ctx.stroke();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - 14); ctx.lineTo(x + 9, y - 10); ctx.lineTo(x, y - 6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 0.8; ctx.stroke();
+    if (zoomed) { const label = `Flag · ${Math.round(f.refresher * 100)}%`; const tw = ctx.measureText(label).width; ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 11, y - 13, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(label, x + 14, y - 2); }
+  }
+  if ($('lyrVeh').checked) for (const v of W.vehicles) {
+    const [x, y] = toScreen(c, v.x, v.z); const col = vehColorOf(v); const sel = v.id === adm.selVeh;
+    ctx.save(); ctx.translate(x, y); ctx.rotate((v.heading || 0) * Math.PI / 180);
+    ctx.fillStyle = col; ctx.strokeStyle = v.driver ? '#6fa8ff' : '#000'; ctx.lineWidth = v.driver ? 2 : 1.2; ctx.beginPath(); ctx.rect(-5, -8, 10, 16); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(-4, -6, 8, 4); ctx.restore();
+    if (sel) { ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2); ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2; ctx.stroke(); }
+    if (zoomed || sel) { const label = `${v.cls} · ${v.ruined ? 'ruined' : Math.round(v.health * 100) + '%'}${v.fuel != null ? ' · ⛽ ' + Math.round(v.fuel * 100) + '%' : ''}${v.driver ? ' · ' + v.driver : v.crew ? ' · ' + v.crew + ' inside' : ''}`; const tw = ctx.measureText(label).width; ctx.fillStyle = sel ? 'rgba(60,50,0,.8)' : 'rgba(0,0,0,.6)'; ctx.fillRect(x + 10, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(label, x + 13, y + 4); }
+  }
+  info.textContent = `${W.vehicles.length} vehicle(s) · ${W.flags.length} flag(s) · green / amber / red = condition, blue outline = someone driving, zoom in for names`;
+}
+function renderVehPanel() {
+  const W = adm.world; const box = $('admVehList'); const q = $('admVehSearch').value.trim().toLowerCase();
+  if (!W || !W.available) { $('admVehCount').textContent = ''; box.innerHTML = `<div class="muted" style="padding:6px">${esc((W && W.reason) || 'Loading…')}</div>`; return; }
+  $('admVehCount').textContent = `(${W.vehicles.length}${W.flags.length ? ' · ' + W.flags.length + ' flags' : ''})`;
+  const rows = W.vehicles.filter(v => !q || v.cls.toLowerCase().includes(q) || (v.driver || '').toLowerCase().includes(q)).sort((a, b) => a.cls.localeCompare(b.cls));
+  box.innerHTML = rows.map(v => `<div class="ip-item ${v.id === adm.selVeh ? 'on' : ''}" data-vid="${esc(v.id)}"><span><span class="veh-swatch" style="background:${vehColorOf(v)}"></span>${esc(v.cls)}${v.driver ? ' <span class="badge">' + esc(v.driver) + '</span>' : ''}</span><span class="muted">${v.ruined ? 'ruined' : Math.round(v.health * 100) + '%'}${v.fuel != null ? ' · ⛽ ' + Math.round(v.fuel * 100) + '%' : ''}</span></div>`).join('') || '<div class="muted" style="padding:6px">No vehicles found yet (the bridge sweeps the whole map within 24 s of the server loading).</div>';
+}
+async function admVact(action, v, args = {}) {
+  try {
+    const r = await ipc.invoke('live:vact', action, v.id, args);
+    if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet; it finishes in a moment.');
+    toast(`${v.cls}: ${{ vrepair: 'repaired', vrefuel: 'refuelled', vflip: 'flipped upright', vbreak: 'broken (' + (BREAK_KINDS.find(k => k[0] === args.what) || ['', args.what])[1].toLowerCase() + ')', vtp: 'moved', vbring: 'brought over', vdestroy: 'destroyed', vdelete: 'deleted' }[action] || action}`);
+    pollLive();
+  } catch (e) { toast(e.message, true); }
+}
+function vehicleMenu(v) {
+  const all = adm.live && adm.live.available ? adm.live.players : [];
+  const name = `${v.cls} at ${Math.round(v.x)}, ${Math.round(v.z)}`;
+  const act = (a, title, label, args = {}, body = '') => withReason(title, body, label, (why) => admVact(a, v, { ...args, reason: why }));
+  return [
+    { header: `${v.cls}${v.ruined ? ' (ruined)' : ''} · ${Math.round(v.health * 100)}%${v.fuel != null ? ' · fuel ' + Math.round(v.fuel * 100) + '%' : ''}${v.engine ? ' · engine on' : ''}${v.driver ? ' · driven by ' + v.driver : v.crew ? ' · ' + v.crew + ' inside' : ''}` },
+    { label: 'Repair everything', run: () => act('vrepair', `Repair ${name}`, 'Repair', {}, '<p class="muted">Every part pristine, every fluid full.</p>') },
+    { label: 'Refuel', run: () => act('vrefuel', `Refuel ${name}`, 'Refuel') },
+    { label: 'Flip upright', run: () => act('vflip', `Flip ${name} upright`, 'Flip') },
+    { label: 'Break', sub: BREAK_KINDS.map(([k, l]) => ({ label: l, run: () => act('vbreak', `${l}: ${name}`, 'Break', { what: k }) })) },
+    { sep: true },
+    { label: 'Move by clicking the map', run: () => { adm.selVeh = v.id; adm.pickVtp = v.id; $('mapCanvas').style.cursor = 'crosshair'; renderVehPanel(); toast(`Click the map where the ${v.cls} should go (Esc cancels)`); } },
+    { label: 'Bring it to a player', sub: all.map(o => ({ label: o.name, run: () => act('vbring', `Bring ${name} to ${o.name}`, 'Bring', { to: o.id }) })) },
+    { label: 'Teleport a player to it', sub: all.map(o => ({ label: o.name, run: () => withReason(`Teleport ${o.name} to the ${v.cls}`, '', 'Teleport', (why) => admAct('tp', o, { x: v.x + 3, z: v.z, reason: why })) })) },
+    { sep: true },
+    { label: 'Destroy…', danger: true, run: () => act('vdestroy', `Destroy ${name}?`, 'Destroy', {}, '<p>It is wrecked where it stands; anyone inside gets hurt.</p>') },
+    { label: 'Delete…', danger: true, run: () => act('vdelete', `Delete ${name}?`, 'Delete', {}, '<p>Removed from the world with everything in it. Refused while someone is inside.</p>') },
+    { sep: true },
+    { label: 'Centre the map on it', run: () => centreOn(v) },
+    { label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(v.x)} ${Math.round(v.z)}`); toast('Position copied'); } }
+  ];
+}
+function flagMenu(f) {
+  const all = adm.live && adm.live.available ? adm.live.players : [];
+  return [
+    { header: `Territory flag · refresher ${Math.round(f.refresher * 100)}% · ${Math.round(f.x)}, ${Math.round(f.z)}` },
+    { label: 'Teleport a player here', sub: all.map(o => ({ label: o.name, run: () => withReason(`Teleport ${o.name} to the flag at ${Math.round(f.x)}, ${Math.round(f.z)}`, '', 'Teleport', (why) => admAct('tp', o, { x: f.x + 2, z: f.z, reason: why })) })) },
+    { label: 'Centre the map on it', run: () => centreOn(f) },
+    { label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(f.x)} ${Math.round(f.z)}`); toast('Position copied'); } }
+  ];
+}
 function pointMenu(w) {
   const s = livePlayer(adm.sel); const all = adm.live && adm.live.available ? adm.live.players : [];
   return [
@@ -504,10 +585,17 @@ $('admSel').addEventListener('change', e => { if (e.target.id === 'admFollow') {
 $('mapCanvas').addEventListener('contextmenu', e => {
   e.preventDefault(); const c = $('mapCanvas'); const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top;
   const hit = liveAt(c, px, py);
+  const wh = hit ? null : worldAt(c, px, py);
   if (hit) { admSelect(hit.id); showCtx(playerMenu(hit), e.clientX, e.clientY); }
+  else if (wh && wh.kind === 'vehicle') { adm.selVeh = wh.obj.id; renderVehPanel(); scheduleDraw(); showCtx(vehicleMenu(wh.obj), e.clientX, e.clientY); }
+  else if (wh && wh.kind === 'flag') showCtx(flagMenu(wh.obj), e.clientX, e.clientY);
   else showCtx(pointMenu(toWorld(c, px, py)), e.clientX, e.clientY);
 });
 document.addEventListener('click', e => { if (!e.target.closest('#ctxMenu')) closeCtx(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCtx(); if (adm.pickTp) { adm.pickTp = null; $('mapCanvas').style.cursor = ''; toast('Teleport cancelled'); } } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCtx(); if (adm.pickTp) { adm.pickTp = null; $('mapCanvas').style.cursor = ''; toast('Teleport cancelled'); } if (adm.pickVtp) { adm.pickVtp = null; $('mapCanvas').style.cursor = ''; toast('Move cancelled'); } } });
+$('admVehSearch').addEventListener('input', renderVehPanel);
+$('admVehList').addEventListener('click', e => { const it = e.target.closest('[data-vid]'); if (!it) return; adm.selVeh = it.dataset.vid; const v = liveVeh(adm.selVeh); if (v) centreOn(v); renderVehPanel(); scheduleDraw(); });
+$('admVehList').addEventListener('contextmenu', e => { const it = e.target.closest('[data-vid]'); const v = it && liveVeh(it.dataset.vid); if (!v) return; e.preventDefault(); adm.selVeh = v.id; renderVehPanel(); showCtx(vehicleMenu(v), e.clientX, e.clientY); });
+$('lyrVeh').onchange = $('lyrFlags').onchange = () => scheduleDraw();
 
 mapInit();

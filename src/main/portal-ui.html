@@ -109,7 +109,8 @@ async function pageDashboard(main) {
   await draw(); timer = setInterval(() => draw().catch(() => {}), 5000);
 }
 // ---------- players ----------
-let live = null;
+let live = null, world = null;
+const BREAK_KINDS = [['tyres', 'Flat tyres'], ['fuel', 'Drain the fuel'], ['engine', 'Ruin the engine'], ['battery', 'Ruin the battery'], ['all', 'Everything']];
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
 async function act(action, p, args = {}) {
   try { const r = await api('act', { action, id: p.id, args }); if (r && r.status === 'approval') return toast(`Sent for approval as request #${r.request} — see the Requests page.`); if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(`${p.name}: ${action} done${r && r.ok !== undefined && (r.ok || r.fail) ? ` (${r.ok} ok${r.fail ? ', ' + r.fail + ' failed' : ''})` : ''}${r && r.body === 'body' ? ' · body removed' : ''}`); }
@@ -166,8 +167,10 @@ async function pagePlayers(main) {
 // ---------- map ----------
 async function pageMap(main) {
   const info = await api('map');
-  main.innerHTML = `<div class="card" style="padding:8px"><div class="row" style="margin-bottom:6px"><b>${esc(info.label || info.key || 'Map')}</b><span class="muted small" id="mapInfo">scroll to zoom, drag to pan, right-click a player or a point</span><span class="grow"></span><span class="muted small" id="mapWhen"></span></div><div id="mapWrap"><canvas id="map"></canvas></div></div>`;
-  const c = $('map'); const ctx = c.getContext('2d'); const size = info.size || 15360; const view = { scale: 1, ox: 0, oy: 0 }; const tiles = new Map(); let img = null; let sel = null;
+  main.innerHTML = `<div class="card" style="padding:8px"><div class="row" style="margin-bottom:6px"><b>${esc(info.label || info.key || 'Map')}</b><span class="muted small" id="mapInfo">scroll to zoom, drag to pan, right-click a player, a vehicle or a point</span><label class="small" style="margin-left:12px"><input type="checkbox" id="lyrVeh" checked> Vehicles</label><label class="small"><input type="checkbox" id="lyrFlags" checked> Flags</label><span class="muted small" id="lyrInfo"></span><span class="grow"></span><span class="muted small" id="mapWhen"></span></div><div id="mapWrap"><canvas id="map"></canvas></div></div>`;
+  const c = $('map'); const ctx = c.getContext('2d'); const size = info.size || 15360; const view = { scale: 1, ox: 0, oy: 0 }; const tiles = new Map(); let img = null; let sel = null; let selVeh = null; let pickVtp = null;
+  const vehColorOf = (v) => v.ruined ? '#8a8f98' : v.health > 0.66 ? '#46d36a' : v.health > 0.33 ? '#f5b942' : '#ff5f5f';
+  $('lyrVeh').onchange = $('lyrFlags').onchange = () => draw();
   if (!info.tiles && info.image) { img = new Image(); img.src = '/portal/map/image'; img.onload = draw; }
   const base = () => Math.max(100, Math.min(c.width, c.height));
   const toScreen = (x, z) => { const sz = base(); return [(c.width - sz) / 2 + (x / size) * sz * view.scale + view.ox, (c.height - sz) / 2 + (sz - (z / size) * sz) * view.scale + view.oy]; };
@@ -182,7 +185,20 @@ async function pageMap(main) {
       const n = Math.ceil(T.width / T.tile / Math.pow(2, T.maxZ - z)); const ts = shown / n;
       for (let x = 0; x < n; x++) for (let y = 0; y < n; y++) { const px = ox + x * ts, py = oy + y * ts; if (px + ts < 0 || py + ts < 0 || px > c.width || py > c.height) continue; const t = tile(z, x, y); if (t.ok) ctx.drawImage(t.img, px, py, ts + 0.5, ts + 0.5); }
     } else if (img && img.complete) ctx.drawImage(img, ox, oy, sz * view.scale, sz * view.scale);
-    ctx.font = '12px system-ui';
+    ctx.font = '12px system-ui'; const W = world; const zoomed = view.scale >= 2.5; const pxPerM = base() * view.scale / size;
+    if (W && W.available && $('lyrFlags').checked) for (const f of W.flags) {
+      const [x, y] = toScreen(f.x, f.z); const r = 60 * pxPerM;
+      if (r >= 3) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,159,59,.08)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,159,59,.6)'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]); }
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 14); ctx.stroke();
+      ctx.fillStyle = f.refresher < 0.25 ? '#ff5f5f' : '#ff9f3b'; ctx.beginPath(); ctx.moveTo(x, y - 14); ctx.lineTo(x + 9, y - 10); ctx.lineTo(x, y - 6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 0.8; ctx.stroke();
+      if (zoomed) { const label = `Flag · ${Math.round(f.refresher * 100)}%`; const w = ctx.measureText(label).width; ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 11, y - 13, w + 6, 15); ctx.fillStyle = '#fff'; ctx.fillText(label, x + 14, y - 2); }
+    }
+    if (W && W.available && $('lyrVeh').checked) for (const v of W.vehicles) {
+      const [x, y] = toScreen(v.x, v.z); const s2 = v.id === selVeh;
+      ctx.save(); ctx.translate(x, y); ctx.rotate((v.heading || 0) * Math.PI / 180); ctx.fillStyle = vehColorOf(v); ctx.strokeStyle = v.driver ? '#6fa8ff' : '#000'; ctx.lineWidth = v.driver ? 2 : 1.2; ctx.beginPath(); ctx.rect(-5, -8, 10, 16); ctx.fill(); ctx.stroke(); ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(-4, -6, 8, 4); ctx.restore();
+      if (s2) { ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2); ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
+      if (zoomed || s2) { const label = `${v.cls} · ${v.ruined ? 'ruined' : Math.round(v.health * 100) + '%'}${v.fuel != null ? ' · ⛽ ' + Math.round(v.fuel * 100) + '%' : ''}${v.driver ? ' · ' + v.driver : v.crew ? ' · ' + v.crew + ' inside' : ''}`; const w = ctx.measureText(label).width; ctx.fillStyle = s2 ? 'rgba(60,50,0,.8)' : 'rgba(0,0,0,.6)'; ctx.fillRect(x + 10, y - 8, w + 6, 15); ctx.fillStyle = '#fff'; ctx.fillText(label, x + 13, y + 3); }
+    }
     for (const p of (live && live.players) || []) {
       const [x, y] = toScreen(p.x, p.z); const col = !p.alive ? '#8a8f98' : p.god ? '#6fa8ff' : '#46d36a'; const h = (p.heading || 0) * Math.PI / 180;
       ctx.beginPath(); ctx.moveTo(x + Math.sin(h) * 13, y - Math.cos(h) * 13); ctx.lineTo(x + Math.sin(h + 2.5) * 6, y - Math.cos(h + 2.5) * 6); ctx.lineTo(x + Math.sin(h - 2.5) * 6, y - Math.cos(h - 2.5) * 6); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
@@ -192,18 +208,41 @@ async function pageMap(main) {
     }
   }
   const at = (px, py) => { let best = null, bd = 9; for (const p of (live && live.players) || []) { const [x, y] = toScreen(p.x, p.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = p; } } return best; };
+  const worldAt = (px, py) => { const W = world; if (!W || !W.available) return null; let best = null, bd = 11; if ($('lyrVeh').checked) for (const v of W.vehicles) { const [x, y] = toScreen(v.x, v.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = { kind: 'vehicle', obj: v }; } } if ($('lyrFlags').checked) for (const f of W.flags) { const [x, y] = toScreen(f.x, f.z); const d = Math.hypot(px - x, py - y + 7); if (d < bd) { bd = d; best = { kind: 'flag', obj: f }; } } return best; };
+  const vact = async (action, v, args) => { try { const r = await api('vact', { action, id: v.id, args }); if (r && r.status === 'approval') return toast(`Sent for approval as request #${r.request} — see the Requests page.`); if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(`${v.cls}: ${{ vrepair: 'repaired', vrefuel: 'refuelled', vflip: 'flipped upright', vbreak: 'broken', vtp: 'moved', vbring: 'brought over', vdestroy: 'destroyed', vdelete: 'deleted' }[action] || action}`); poll(); } catch (e) { toast(e.message, true); } };
+  const vehicleMenu = (v) => {
+    const all = (live && live.players) || []; const name = `${v.cls} at ${Math.round(v.x)}, ${Math.round(v.z)}`;
+    const withWhy = (title, run, extra = '') => async () => { const why = await askReason(title, extra); if (why !== null) run(why); };
+    const items = [{ h: `${v.cls}${v.ruined ? ' (ruined)' : ''} · ${Math.round(v.health * 100)}%${v.fuel != null ? ' · fuel ' + Math.round(v.fuel * 100) + '%' : ''}${v.driver ? ' · driven by ' + v.driver : v.crew ? ' · ' + v.crew + ' inside' : ''}` }];
+    if (can('admin.vehicles')) {
+      items.push({ label: 'Repair everything', run: withWhy(`Repair ${name}`, why => vact('vrepair', v, { reason: why }), '<p class="muted small">Every part pristine, every fluid full.</p>') });
+      items.push({ label: 'Refuel', run: withWhy(`Refuel ${name}`, why => vact('vrefuel', v, { reason: why })) });
+      items.push({ label: 'Flip upright', run: withWhy(`Flip ${name} upright`, why => vact('vflip', v, { reason: why })) });
+      for (const [k, l] of BREAK_KINDS) items.push({ label: `Break: ${l.toLowerCase()}`, run: withWhy(`${l}: ${name}`, why => vact('vbreak', v, { what: k, reason: why })) });
+      items.push({ label: 'Move by clicking the map', run: () => { selVeh = v.id; pickVtp = v.id; c.style.cursor = 'crosshair'; toast(`Click the map where the ${v.cls} should go (Esc cancels)`); } });
+      for (const o of all) items.push({ label: `Bring it to ${o.name}`, run: withWhy(`Bring ${name} to ${o.name}`, why => vact('vbring', v, { to: o.id, reason: why })) });
+    }
+    if (can('admin.teleport')) for (const o of all) items.push({ label: `Teleport ${o.name} to it`, run: withWhy(`Teleport ${o.name} to the ${v.cls}`, why => act('tp', o, { x: v.x + 3, z: v.z, reason: why })) });
+    if (can('admin.vehicles')) { items.push({ label: 'Destroy…', danger: true, run: withWhy(`Destroy ${name}?`, why => vact('vdestroy', v, { reason: why }), '<p class="muted small">Wrecked where it stands; anyone inside gets hurt.</p>') }); items.push({ label: 'Delete…', danger: true, run: withWhy(`Delete ${name}?`, why => vact('vdelete', v, { reason: why }), '<p class="muted small">Removed with everything in it; refused while someone is inside.</p>') }); }
+    items.push({ label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(v.x)} ${Math.round(v.z)}`); toast('Copied'); } });
+    return items;
+  };
+  const flagMenu = (f) => { const items = [{ h: `Territory flag · refresher ${Math.round(f.refresher * 100)}% · ${Math.round(f.x)}, ${Math.round(f.z)}` }]; if (can('admin.teleport')) for (const o of (live && live.players) || []) items.push({ label: `Teleport ${o.name} here`, run: async () => { const why = await askReason(`Teleport ${o.name} to the flag`); if (why !== null) act('tp', o, { x: f.x + 2, z: f.z, reason: why }); } }); items.push({ label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(f.x)} ${Math.round(f.z)}`); toast('Copied'); } }); return items; };
   let drag = null;
   c.addEventListener('wheel', e => { e.preventDefault(); const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; const f = e.deltaY < 0 ? 1.2 : 1 / 1.2; const ns = Math.min(40, Math.max(1, view.scale * f)); const k = ns / view.scale; const sz = base(); const cx = (c.width - sz) / 2, cy = (c.height - sz) / 2; view.ox = px - cx - (px - cx - view.ox) * k; view.oy = py - cy - (py - cy - view.oy) * k; view.scale = ns; draw(); }, { passive: false });
   c.addEventListener('mousedown', e => { if (e.button === 0) drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false }; });
   window.addEventListener('mousemove', e => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; view.ox = drag.ox + dx; view.oy = drag.oy + dy; draw(); });
-  window.addEventListener('mouseup', e => { const d = drag; drag = null; if (!d || d.moved) return; const r = c.getBoundingClientRect(); const p = at(e.clientX - r.left, e.clientY - r.top); sel = p ? p.id : null; draw(); });
-  c.addEventListener('contextmenu', e => { e.preventDefault(); const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; const p = at(px, py); if (p) { sel = p.id; draw(); return showMenu(playerMenu(p), e.clientX, e.clientY); } const w = toWorld(px, py); const items = [{ h: `${Math.round(w[0])}, ${Math.round(w[1])}` }];
+  window.addEventListener('mouseup', e => { const d = drag; drag = null; if (!d || d.moved) return; const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
+    if (pickVtp) { const v = world && world.available && world.vehicles.find(x => x.id === pickVtp); pickVtp = null; c.style.cursor = ''; const w = toWorld(px, py); if (v) askReason(`Move ${v.cls} to ${Math.round(w[0])}, ${Math.round(w[1])}`).then(why => { if (why !== null) vact('vtp', v, { x: w[0], z: w[1], reason: why }); }); return; }
+    const p = at(px, py); const wh = p ? null : worldAt(px, py); sel = p ? p.id : null; selVeh = wh && wh.kind === 'vehicle' ? wh.obj.id : null; draw(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && pickVtp) { pickVtp = null; c.style.cursor = ''; toast('Move cancelled'); } });
+  c.addEventListener('contextmenu', e => { e.preventDefault(); const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; const p = at(px, py); if (p) { sel = p.id; draw(); return showMenu(playerMenu(p), e.clientX, e.clientY); } const wh = worldAt(px, py); if (wh && wh.kind === 'vehicle') { selVeh = wh.obj.id; draw(); return showMenu(vehicleMenu(wh.obj), e.clientX, e.clientY); } if (wh && wh.kind === 'flag') return showMenu(flagMenu(wh.obj), e.clientX, e.clientY); const w = toWorld(px, py); const items = [{ h: `${Math.round(w[0])}, ${Math.round(w[1])}` }];
     const s = sel && live && live.players.find(x => x.id === sel);
     if (can('admin.teleport')) { if (s) items.push({ label: `Teleport ${s.name} here`, run: async () => { const why = await askReason(`Teleport ${s.name} here`); if (why !== null) act('tp', s, { x: w[0], z: w[1], reason: why }); } }); for (const o of (live && live.players) || []) if (!s || o.id !== s.id) items.push({ label: `Teleport ${o.name} here`, run: async () => { const why = await askReason(`Teleport ${o.name} here`); if (why !== null) act('tp', o, { x: w[0], z: w[1], reason: why }); } }); }
     if (can('admin.spawn')) items.push({ label: 'Spawn item here…', run: async () => { const ok = await modal(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, '<label>Class name</label><input id="gI" class="input"><label>How many</label><input id="gN" class="input" type="number" value="1" min="1" max="50"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); try { const r = await api('spawnAt', { x: w[0], z: w[1], item: $('gI').value.trim(), count: Number($('gN').value) || 1, reason: why }); toast(r.status === 'approval' ? `Sent for approval as request #${r.request}` : `Spawned ${r.ok} item(s)`); } catch (err) { toast(err.message, true); } } });
     items.push({ label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Copied'); } });
     showMenu(items, e.clientX, e.clientY); });
-  const poll = async () => { try { live = await api('players'); $('mapWhen').textContent = live.available ? `${live.players.length} online · ${ago(live.at)}` : live.reason; } catch { /* keep the last */ } draw(); };
+  const poll = async () => { try { live = await api('players'); $('mapWhen').textContent = live.available ? `${live.players.length} online · ${ago(live.at)}` : live.reason; } catch { /* keep the last */ } try { world = await api('world'); $('lyrInfo').textContent = world.available ? `${world.vehicles.length} vehicle(s) · ${world.flags.length} flag(s)` : (live && live.available ? world.reason : ''); } catch { /* keep the last */ } draw(); };
   window.addEventListener('resize', draw); draw(); await poll(); timer = setInterval(poll, 2000);
 }
 // ---------- deaths ----------

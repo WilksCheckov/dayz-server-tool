@@ -34,6 +34,54 @@ function players() {
   return data;
 }
 
+// Vehicles and territory flags the bridge found (vehicles.txt and flags.txt, rewritten every 3 s; bridge v5).
+// { available, reason, at, vehicles: [{ id, cls, x, y, z, heading, health, fuel, engine, driver, crew, ruined }], flags: [{ x, y, z, refresher }] }
+const worldFile = (n) => path.join(settings.paths().profilesDir, 'DayZAdminTools', n);
+let lastWorld = null;
+function framed(name) {
+  let st; try { st = fs.statSync(worldFile(name)); } catch { return null; }
+  const text = fs.readFileSync(worldFile(name), 'utf8');
+  if (!text.startsWith('#begin') || !/\n#end\s*$/.test(text)) return { mtime: st.mtimeMs, lines: null };
+  return { mtime: st.mtimeMs, lines: text.split(/\r?\n/).filter(l => l && l[0] !== '#') };
+}
+function world() {
+  const P = players(); const none = (reason) => ({ available: false, reason, vehicles: [], flags: [] });
+  if (!P.available) return none(P.reason);
+  const V = framed('vehicles.txt'); const F = framed('flags.txt');
+  if (!V) return none('Vehicles and flags need bridge script v5: Death log page → Install, then restart the server.');
+  if (Date.now() - V.mtime > 30000) return none('The bridge has not written vehicles for a while (server frozen or still loading).');
+  if (lastWorld && lastWorld.mtime === V.mtime) return lastWorld.data;
+  if (!V.lines) return lastWorld ? lastWorld.data : none('Reading…');
+  const vehicles = [];
+  for (const l of V.lines) {
+    const f = l.split('|'); if (f.length < 12) continue;
+    vehicles.push({ id: f[0], cls: f[1], x: +f[2], y: +f[3], z: +f[4], heading: +f[5], health: +f[6], fuel: f[7] === '-' ? null : +f[7], engine: f[8] === 'true', driver: f[9] === '-' ? null : f[9], crew: Number(f[10]) || 0, ruined: f[11] === 'true' });
+  }
+  const flags = [];
+  for (const l of (F && F.lines) || []) { const f = l.split('|'); if (f.length < 4) continue; flags.push({ x: +f[0], y: +f[1], z: +f[2], refresher: +f[3] }); }
+  const data = { available: true, at: V.mtime, vehicles, flags };
+  lastWorld = { mtime: V.mtime, data }; return data;
+}
+function findVehicle(id) { const W = world(); if (!W.available) throw new Error(W.reason); const v = W.vehicles.find(x => x.id === id); if (!v) throw new Error('That vehicle is not on the map any more.'); return v; }
+// vehicle actions: vrepair, vrefuel, vbreak (what: tyres | fuel | engine | battery | all), vflip, vtp (x, z), vbring (to: player id), vdestroy, vdelete
+async function vact(action, id, args = {}, by = 'app') {
+  const { VEHICLE_ACTIONS, BREAK_KINDS } = require('./admin-actions'); if (!VEHICLE_ACTIONS.includes(action)) throw new Error('Unknown vehicle action.');
+  const v = findVehicle(id); const reason = String(args.reason || '').trim();
+  const adminlog = require('./adminlog'); adminlog.check(action, reason);
+  const cmd = { type: action, id: v.id };
+  let what = '';
+  if (action === 'vbreak') { if (!BREAK_KINDS.some(([k]) => k === args.what)) throw new Error('Say what to break: tyres, fuel, engine, battery or all.'); cmd.what = args.what; what = BREAK_KINDS.find(([k]) => k === args.what)[1].toLowerCase(); }
+  if (action === 'vtp') { if (!isFinite(args.x) || !isFinite(args.z)) throw new Error('No position.'); cmd.pos = [Number(args.x), Number(args.z)]; what = `to ${Math.round(args.x)}, ${Math.round(args.z)}`; }
+  let to = null; if (action === 'vbring') { to = find(args.to); cmd.what = to.id; what = `to ${to.name}`; }
+  const res = await require('./deathlog').sendCommand(cmd, { by });
+  let r;
+  if (res.status === 'noveh') throw new Error('The game no longer has that vehicle.');
+  if (res.status === 'occupied') throw new Error('Someone is in that vehicle: get them out first.');
+  r = said(res, action === 'vbring' ? 'bring' : action.slice(1));
+  adminlog.record({ action, by, source: sourceOf(by), target: to ? { name: to.name, steam: to.steam } : null, details: `${v.cls} (${v.id}) at ${Math.round(v.x)}, ${Math.round(v.z)}${what ? ' ' + what : ''}`, reason, result: r });
+  return r;
+}
+
 // ---------- kits and vehicles ----------
 // A kit is a named list of lines: "Class", "Class x3", or "Parent; Attachment; Attachment" (fitted onto the parent).
 const CLASS_RE = /^[A-Za-z0-9_]+$/;
@@ -161,4 +209,4 @@ async function act(action, id, args = {}, by = 'app') {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, players, act, kits, saveKit, deleteKit, vehicles, spawnAt };
+module.exports = { init, players, world, act, vact, kits, saveKit, deleteKit, vehicles, spawnAt };

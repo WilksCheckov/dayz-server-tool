@@ -284,7 +284,7 @@ function forPlayer(key, limit = 20) { return load().deaths.filter(r => r.key ===
 function stats() { const d = load(); const causes = {}; for (const r of d.deaths) causes[r.cause] = (causes[r.cause] || 0) + 1; return { deaths: d.deaths.length, causes, snapshots: Object.values(d.gear).filter(Array.isArray).reduce((n, l) => n + l.length, 0), players: Object.keys(d.gear).filter(k => !k.startsWith('steam:')).length }; }
 
 // ---------- bridge script in the mission's init.c ----------
-const BRIDGE_VERSION = 4;
+const BRIDGE_VERSION = 5;
 const MARK_BEGIN = '// >>> DayZ Admin Tools bridge v' + BRIDGE_VERSION + ' (managed by the tool: do not edit between the markers)';
 const MARK_END = '// <<< DayZ Admin Tools bridge';
 const HOOK = 'DZAT_Bridge.Tick(timeslice); // DayZ Admin Tools hook';
@@ -312,7 +312,8 @@ function installBridge() {
   const cm = text.match(/class\s+CustomMission\s*:\s*MissionServer\s*\{/);
   if (!cm) throw new Error('init.c has no "class CustomMission: MissionServer" to hook into. Add one (the vanilla init.c has it) or add the DZAT_Bridge.Tick call to your mission class yourself.');
   // the bridge class goes right before the mission class
-  text = text.slice(0, cm.index) + BRIDGE_SCRIPT + text.slice(cm.index);
+  let size = 15360; try { size = require('./mission').mapInfo().size || 15360; } catch { /* unknown map: assume Chernarus */ }
+  text = text.slice(0, cm.index) + BRIDGE_SCRIPT.replace('__DZAT_WORLD__', String(size)) + text.slice(cm.index);
   const cm2 = text.match(/class\s+CustomMission\s*:\s*MissionServer\s*\{/);
   const classStart = cm2.index + cm2[0].length;
   // existing OnUpdate override inside CustomMission? then add one line to it, else add the method

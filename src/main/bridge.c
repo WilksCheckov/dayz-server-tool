@@ -10,6 +10,14 @@ class DZAT_Bridge
 	// the body of each player who died this session (by identity id), so a refund can remove it with its gear
 	static ref map<string, PlayerBase> s_Corpses = new map<string, PlayerBase>();
 	static const string DIR = "$profile:DayZAdminTools";
+	// vehicles and flags for the map: found by sweeping the world one cell per tick (4 x 4 cells, a full sweep every 24 s)
+	// plus whatever a player is driving; a deleted entity turns null and is dropped. Ids: the engine's persistent id, else t<n>.
+	static const float WORLD = __DZAT_WORLD__;
+	static ref array<EntityAI> s_Vehicles = new array<EntityAI>();
+	static ref array<string> s_VehIds = new array<string>();
+	static ref array<EntityAI> s_Flags = new array<EntityAI>();
+	static int s_Cell = 0;
+	static int s_VehSeq = 0;
 
 	static string Esc(string s)
 	{
@@ -66,7 +74,11 @@ class DZAT_Bridge
 			vector ori = p.GetOrientation();
 			string veh = "-";
 			HumanCommandVehicle hcv = p.GetCommand_Vehicle();
-			if (hcv && hcv.GetTransport()) veh = hcv.GetTransport().GetType();
+			if (hcv && hcv.GetTransport())
+			{
+				veh = hcv.GetTransport().GetType();
+				Track(hcv.GetTransport());
+			}
 			string line = pid + "|" + p.GetIdentity().GetPlainId() + "|" + Clean(p.GetIdentity().GetName());
 			line = line + "|" + pos[0].ToString() + "|" + pos[1].ToString() + "|" + pos[2].ToString();
 			line = line + "|" + ori[0].ToString() + "|" + p.GetHealth01("", "").ToString();
@@ -76,6 +88,232 @@ class DZAT_Bridge
 		}
 		FPrintln(fh, "#end");
 		CloseFile(fh);
+	}
+	static void Track(Object o)
+	{
+		EntityAI e = EntityAI.Cast(o);
+		if (!e) return;
+		if (Transport.Cast(e))
+		{
+			if (s_Vehicles.Find(e) >= 0) return;
+			string vid = EngineId(e);
+			if (vid == "")
+			{
+				s_VehSeq++;
+				vid = "t" + s_VehSeq.ToString();
+			}
+			s_Vehicles.Insert(e);
+			s_VehIds.Insert(vid);
+			return;
+		}
+		if (TerritoryFlag.Cast(e) && s_Flags.Find(e) < 0) s_Flags.Insert(e);
+	}
+	static void ScanCell()
+	{
+		float cs = WORLD / 4;
+		int cx = s_Cell % 4;
+		int cz = s_Cell / 4;
+		s_Cell = (s_Cell + 1) % 16;
+		vector centre = Vector((cx + 0.5) * cs, 0, (cz + 0.5) * cs);
+		array<Object> objs = new array<Object>();
+		array<CargoBase> proxies = new array<CargoBase>();
+		GetGame().GetObjectsAtPosition(centre, cs * 0.75, objs, proxies);
+		for (int i = 0; i < objs.Count(); i++) Track(objs[i]);
+	}
+	static void Compact()
+	{
+		for (int i = s_Vehicles.Count() - 1; i >= 0; i--)
+		{
+			if (!s_Vehicles[i])
+			{
+				s_Vehicles.RemoveOrdered(i);
+				s_VehIds.RemoveOrdered(i);
+			}
+		}
+		for (int j = s_Flags.Count() - 1; j >= 0; j--)
+		{
+			if (!s_Flags[j]) s_Flags.RemoveOrdered(j);
+		}
+	}
+	// vehicles.txt: id|class|x|y|z|heading|health01|fuel01|engine|driver|crew|ruined   flags.txt: x|y|z|refresher01
+	static void WriteWorld()
+	{
+		Compact();
+		FileHandle fh = OpenFile(DIR + "/vehicles.txt", FileMode.WRITE);
+		if (fh == 0) return;
+		FPrintln(fh, "#begin|" + Stamp());
+		for (int i = 0; i < s_Vehicles.Count(); i++)
+		{
+			EntityAI e = s_Vehicles[i];
+			vector pos = e.GetPosition();
+			vector ori = e.GetOrientation();
+			string fuel = "-";
+			string engine = "false";
+			CarScript car = CarScript.Cast(e);
+			if (car)
+			{
+				fuel = car.GetFluidFraction(CarFluid.FUEL).ToString();
+				engine = BoolStr(car.EngineIsOn());
+			}
+			string driver = "-";
+			int crew = 0;
+			Transport tr = Transport.Cast(e);
+			if (tr)
+			{
+				for (int s = 0; s < tr.CrewSize(); s++)
+				{
+					Human h = tr.CrewMember(s);
+					if (!h) continue;
+					crew++;
+					PlayerBase hp = PlayerBase.Cast(h);
+					if (s == 0 && hp && hp.GetIdentity()) driver = Clean(hp.GetIdentity().GetName());
+				}
+			}
+			string line = s_VehIds[i] + "|" + e.GetType() + "|" + pos[0].ToString() + "|" + pos[1].ToString() + "|" + pos[2].ToString();
+			line = line + "|" + ori[0].ToString() + "|" + e.GetHealth01("", "").ToString() + "|" + fuel + "|" + engine;
+			line = line + "|" + driver + "|" + crew.ToString() + "|" + BoolStr(e.IsRuined());
+			FPrintln(fh, line);
+		}
+		FPrintln(fh, "#end");
+		CloseFile(fh);
+		fh = OpenFile(DIR + "/flags.txt", FileMode.WRITE);
+		if (fh == 0) return;
+		FPrintln(fh, "#begin|" + Stamp());
+		for (int k = 0; k < s_Flags.Count(); k++)
+		{
+			TerritoryFlag flag = TerritoryFlag.Cast(s_Flags[k]);
+			if (!flag) continue;
+			vector fp = flag.GetPosition();
+			FPrintln(fh, fp[0].ToString() + "|" + fp[1].ToString() + "|" + fp[2].ToString() + "|" + flag.GetRefresherTime01().ToString());
+		}
+		FPrintln(fh, "#end");
+		CloseFile(fh);
+	}
+	static EntityAI FindVehicle(string id)
+	{
+		int at = s_VehIds.Find(id);
+		if (at < 0) return null;
+		return s_Vehicles[at];
+	}
+	// every damage zone and every part pristine, every fluid full
+	static void RepairAll(EntityAI e)
+	{
+		Fill(e);
+		array<string> zones = new array<string>();
+		e.GetDamageZones(zones);
+		for (int z = 0; z < zones.Count(); z++) e.SetHealth01(zones[z], "", 1.0);
+		array<EntityAI> parts = new array<EntityAI>();
+		e.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, parts);
+		for (int i = 0; i < parts.Count(); i++)
+		{
+			if (parts[i] && parts[i] != e) parts[i].SetHealth01("", "", 1.0);
+		}
+	}
+	// vehicle commands: f[2] = vehicle id, f[3] = what (vbreak) or a player id (vbring), f[4] f[5] = x z (vtp)
+	static void RunVehicle(array<Man> players, string nonce, string type, array<string> f)
+	{
+		EntityAI veh = FindVehicle(f[2]);
+		if (!veh)
+		{
+			Append(DIR + "/results.log", nonce + "|noveh|0|0");
+			return;
+		}
+		CarScript car = CarScript.Cast(veh);
+		Transport tr = Transport.Cast(veh);
+		int crew = 0;
+		if (tr)
+		{
+			for (int s = 0; s < tr.CrewSize(); s++)
+			{
+				if (tr.CrewMember(s)) crew++;
+			}
+		}
+		if (type == "vrepair")
+		{
+			RepairAll(veh);
+		}
+		else if (type == "vrefuel")
+		{
+			if (car) car.Fill(CarFluid.FUEL, car.GetFluidCapacity(CarFluid.FUEL));
+		}
+		else if (type == "vbreak")
+		{
+			// what: tyres | fuel | engine | battery | all
+			string what = f[3];
+			bool all = (what == "all");
+			if (car && (all || what == "fuel")) car.Leak(CarFluid.FUEL, car.GetFluidCapacity(CarFluid.FUEL));
+			if (car && (all || what == "engine")) veh.SetHealth01("Engine", "", 0.0);
+			if (all || what == "tyres" || what == "battery")
+			{
+				array<EntityAI> parts = new array<EntityAI>();
+				veh.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, parts);
+				for (int i = 0; i < parts.Count(); i++)
+				{
+					EntityAI part = parts[i];
+					if (!part || part == veh) continue;
+					string pt = part.GetType();
+					pt.ToLower();
+					bool wheel = pt.Contains("wheel");
+					bool batt = pt.Contains("battery");
+					if ((wheel && (all || what == "tyres")) || (batt && (all || what == "battery"))) part.SetHealth01("", "", 0.0);
+				}
+			}
+		}
+		else if (type == "vdestroy")
+		{
+			veh.SetHealth("", "", 0);
+		}
+		else if (type == "vdelete")
+		{
+			if (crew > 0)
+			{
+				Append(DIR + "/results.log", nonce + "|occupied|0|0");
+				return;
+			}
+			int at = s_VehIds.Find(f[2]);
+			if (at >= 0)
+			{
+				s_Vehicles.RemoveOrdered(at);
+				s_VehIds.RemoveOrdered(at);
+			}
+			GetGame().ObjectDelete(veh);
+		}
+		else if (type == "vtp" || type == "vbring" || type == "vflip")
+		{
+			vector dest = veh.GetPosition();
+			if (type == "vtp")
+			{
+				if (f[4] == "-" || f[5] == "-")
+				{
+					Append(DIR + "/results.log", nonce + "|badpos|0|0");
+					return;
+				}
+				dest = Vector(f[4].ToFloat(), 0, f[5].ToFloat());
+			}
+			if (type == "vbring")
+			{
+				PlayerBase near = FindPlayer(players, f[3]);
+				if (!near)
+				{
+					Append(DIR + "/results.log", nonce + "|nodest|0|0");
+					return;
+				}
+				dest = near.GetPosition();
+				dest[0] = dest[0] + 4.0;
+			}
+			dest[1] = GetGame().SurfaceY(dest[0], dest[2]) + 0.5;
+			vector ori = veh.GetOrientation();
+			ori[1] = 0;
+			ori[2] = 0;
+			veh.SetOrientation(ori);
+			veh.SetPosition(dest);
+		}
+		else
+		{
+			Append(DIR + "/results.log", nonce + "|unknown|0|0");
+			return;
+		}
+		Append(DIR + "/results.log", nonce + "|done|1|0");
 	}
 	// the engine's own persistent id of an entity ("" when it has none)
 	static string EngineId(EntityAI e)
@@ -308,6 +546,11 @@ class DZAT_Bridge
 			Append(DIR + "/results.log", nonce + "|done|" + sok.ToString() + "|" + sfail.ToString());
 			return;
 		}
+		if (type == "vrepair" || type == "vrefuel" || type == "vbreak" || type == "vdestroy" || type == "vdelete" || type == "vtp" || type == "vbring" || type == "vflip")
+		{
+			RunVehicle(players, nonce, type, f);
+			return;
+		}
 		PlayerBase target = FindPlayer(players, f[2]);
 		if (!target || !target.IsAlive())
 		{
@@ -467,8 +710,10 @@ class DZAT_Bridge
 		GetGame().GetPlayers(players);
 		WritePlayers(players);
 		ProcessCommands(players);
+		ScanCell();
 		if (s_Acc < 3) return;
 		s_Acc = 0;
+		WriteWorld();
 		for (int i = 0; i < players.Count(); i++)
 		{
 			PlayerBase p = PlayerBase.Cast(players[i]);

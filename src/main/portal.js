@@ -40,7 +40,7 @@ const PERMS = [
   ['portal.users', 'Manage portal users, groups and permissions', 'Portal']
 ];
 // what an action counts as for approval rules, blocked classes and daily limits
-const CATEGORY = { refund: 'refund', give: 'spawn', spawn: 'spawn', kit: 'kits', vehicle: 'vehicles', tp: 'teleport', tpto: 'teleport', bring: 'teleport', tpdeath: 'teleport', heal: 'heal', god: 'god', kill: 'kill' };
+const { CATEGORY, PERM: ACTION_PERM, VEHICLE_ACTIONS, LABEL: ACTION_LABEL } = require('./admin-actions');
 const CATEGORIES = [['refund', 'Refunds'], ['spawn', 'Items by class name'], ['kits', 'Kits'], ['vehicles', 'Vehicles'], ['teleport', 'Teleports'], ['heal', 'Heals'], ['god', 'God mode'], ['kill', 'Kills']];
 const ALL = PERMS.map(p => p[0]);
 const DEFAULT_GROUPS = {
@@ -51,7 +51,6 @@ const DEFAULT_GROUPS = {
   developer: { name: 'Developer', perms: ['server.view', 'server.control', 'server.backup', 'logs.view', 'audit.view', 'deaths.view'] }
 };
 // which permission each in-game action needs
-const ACTION_PERM = { heal: 'admin.heal', tp: 'admin.teleport', tpto: 'admin.teleport', bring: 'admin.teleport', tpdeath: 'admin.teleport', give: 'admin.spawn', kit: 'admin.kits', vehicle: 'admin.vehicles', god: 'admin.god', kill: 'admin.kill', refund: 'admin.refund', message: 'players.message', kick: 'players.kick', ban: 'players.ban' };
 
 // ---------- data ----------
 let db = null;
@@ -177,7 +176,7 @@ function newRequest(user, action, args, target) {
 }
 function describeRequest(r) {
   const a = r.args || {}; const t = r.target ? ` for ${r.target.name}` : '';
-  const what = r.action === 'give' ? `${a.count || 1} × ${a.item}` : r.action === 'kit' ? `kit ${a.kit}` : r.action === 'vehicle' ? `vehicle ${a.vehicle}` : r.action === 'spawn' ? `${a.vehicle || (a.kit ? 'kit ' + a.kit : `${a.count || 1} × ${a.item}`)} at ${Math.round(a.x)}, ${Math.round(a.z)}` : r.action === 'refund' ? `refund of death #${a.id}` : r.action;
+  const what = VEHICLE_ACTIONS.includes(r.action) ? `${(ACTION_LABEL[r.action] || r.action).replace(/^\S+\s/, '')}${a.what ? ' (' + a.what + ')' : ''}${a.to ? ' to ' + a.to : ''}` : r.action === 'give' ? `${a.count || 1} × ${a.item}` : r.action === 'kit' ? `kit ${a.kit}` : r.action === 'vehicle' ? `vehicle ${a.vehicle}` : r.action === 'spawn' ? `${a.vehicle || (a.kit ? 'kit ' + a.kit : `${a.count || 1} × ${a.item}`)} at ${Math.round(a.x)}, ${Math.round(a.z)}` : r.action === 'refund' ? `refund of death #${a.id}` : r.action;
   return `${what}${t}${r.reason ? ` — ${r.reason}` : ''}`;
 }
 function listRequests(user) {
@@ -204,6 +203,7 @@ async function decide(id, approve, approverName, approverId = null, note = '') {
 async function runAction(action, args, target, by) {
   const live = require('./live');
   if (action === 'spawn') return live.spawnAt(args, by);
+  if (VEHICLE_ACTIONS.includes(action)) return live.vact(action, target.id, args, by);
   if (action === 'refund') { const dl = require('./deathlog'); const al = require('./adminlog'); const dd = dl.get(Number(args.id)); if (!dd) throw new Error('No such death record.'); const res = await dl.refund(dd.id, { by }); al.record({ action: 'refund', by, source: 'web', target: { name: dd.name, steam: dd.key }, details: `death #${dd.id}: ${res.items} item(s)`, reason: String(args.reason || '').trim(), result: res }); return res; }
   return live.act(action, target.id, args, by);
 }
@@ -325,6 +325,13 @@ async function api(route, b, url, user, need, by) {
       need(b.vehicle ? 'admin.vehicles' : b.kit ? 'admin.kits' : 'admin.spawn');
       if (!allowedNow(user, 'spawn', b)) { const r = newRequest(user, 'spawn', b, null); return { status: 'approval', request: r.id }; }
       const r = await require('./live').spawnAt(b, by); recordUsage(user.id, itemCount('spawn', b)); return r;
+    }
+    case 'world': need('players.view'); return require('./live').world();
+    case 'vact': {
+      need(ACTION_PERM[b.action] || 'portal.none'); if (!VEHICLE_ACTIONS.includes(b.action)) throw new Error('Unknown vehicle action.');
+      const args = b.args || {}; const W = require('./live').world(); const v = W.available && W.vehicles.find(x => x.id === b.id); if (!v) throw new Error('That vehicle is not on the map any more.');
+      if (!allowedNow(user, b.action, args)) { const r = newRequest(user, b.action, args, { id: v.id, name: `${v.cls} at ${Math.round(v.x)}, ${Math.round(v.z)}` }); return { status: 'approval', request: r.id }; }
+      return require('./live').vact(b.action, b.id, args, by);
     }
     case 'policy': need('portal.users'); return { ...load().policy, categories: CATEGORIES };
     case 'setPolicy': need('portal.users'); return setPolicy(b, by);

@@ -469,7 +469,11 @@
             <button class="btn" id="btnMapRefresh">Refresh</button>
           </div>
           <div class="row gap wrap map-overlay-bar">
-            <b>Overlay</b>
+            <b>Layers</b>
+            <label class="check" title="Every vehicle the bridge script finds in the world: colour = condition, right-click for repair, break, move, destroy"><input type="checkbox" id="lyrVeh" checked> Vehicles</label>
+            <label class="check" title="Every raised territory flag (base) with its refresh state"><input type="checkbox" id="lyrFlags" checked> Flags</label>
+            <span class="muted" id="lyrInfo"></span>
+            <b style="margin-left:10px">Overlay</b>
             <select id="mapOverlay" class="input" style="width:230px"><option value="none">None</option><option value="travel">Travel heat (where players go)</option><option value="hits">Combat heat (hits)</option><option value="building">Base building heat</option><option value="logouts">Logout spots</option><option value="logins">Login / spawn spots</option><option value="deaths">Death heat (where players die)</option><option value="causes">Deaths by cause (who killed them)</option><option value="loot">Loot spawn locations (pick an item)</option><option value="liveloot">Actual loot now (live from the server)</option><option value="vehicles">Vehicles (spawn points and where they are now)</option></select>
             <select id="mapRange" class="input" style="width:120px" title="Time range for the heat overlays"><option value="24">Last 24 h</option><option value="168">Last 7 days</option><option value="720" selected>Last 30 days</option><option value="all">All time</option></select>
             <label class="field inline">Opacity <input id="mapOverlayAlpha" type="range" min="20" max="100" value="70" style="width:110px"></label>
@@ -484,6 +488,7 @@
               <input id="admSearch" class="input" placeholder="Search players…">
               <div id="admList" class="ip-list"></div>
               <div id="admSel" class="adm-sel" hidden></div>
+              <details id="admVehBox"><summary class="muted">Vehicles <span id="admVehCount"></span></summary><input id="admVehSearch" class="input" placeholder="Search vehicles…"><div id="admVehList" class="ip-list"></div></details>
               <button class="btn small" id="btnKits" title="Saved lists of items to give or spawn in one go">Kits…</button>
               <p class="muted small">Click to select, double-click to centre on them, right-click a player (here or on the map) or the map for actions.</p>
             </div>
