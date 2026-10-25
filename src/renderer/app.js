@@ -321,7 +321,10 @@ function renderServer(st) {
   $('sideStatus').textContent = running ? 'Server on' : 'Server off';
   const ps = $('pillServer'); ps.className = 'pill pill-link ' + (running ? 'ok' : st.restartPending ? 'warn' : ''); ps.innerHTML = `<span class="dot ${running ? 'ok' : st.restartPending ? 'warn' : ''}"></span>Server: ${st.maintenance ? (st.maintenance.kind === 'update' ? 'Updating' : 'Restarting') : running ? 'On' : st.restartPending ? 'Restarting' : 'Off'}`; ps.title = running ? `Running (pid ${st.pid})` : 'Server stopped';
   $('btnQuickStart').hidden = running; $('btnQuickStop').hidden = !running;
-  $('btnStart').disabled = running; $('btnStop').disabled = !running && !st.restartPending; $('btnRestart').disabled = !running;
+  $('btnStart').disabled = running; $('btnStop').disabled = !running && !st.restartPending; $('btnRestart').disabled = !running || !!st.stopping;
+  // while a stop waits for the server to save and close, Stop becomes Force stop
+  $('btnStop').textContent = st.stopping ? 'Force stop' : 'Stop'; $('btnQuickStop').textContent = st.stopping ? 'Force stop' : 'Stop server';
+  $('btnStop').title = $('btnQuickStop').title = st.stopping ? 'The server has not closed yet (frozen, or still saving): end its process now' : 'Ask the server to save and shut down';
   updateUptime();
 }
 // Progress of a start: where the current step begins and ends in this machine's last start, filled by time spent in it.
@@ -357,7 +360,13 @@ ipc.on('server:stage', (stg) => { if (state.server) { state.server.stage = stg; 
 ipc.on('server:maintenance', (m) => { if (state.server) { state.server.maintenance = m; renderServer(state.server); } ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
 ipc.on('server:status', () => { ipc.invoke('rcon:status').then(renderRcon).catch(() => {}); });
 const startServer = (e) => run(async () => renderServer(await ipc.invoke('server:start')), e.target);
-const stopServer = (e) => run(async () => renderServer(await ipc.invoke('server:stop')), e.target);
+const stopServer = (e) => run(async () => {
+  if (state.server && state.server.stopping) {
+    if (!(await showModal('Force stop?', '<p>End the server process now, without waiting for it to save and close. Use it when the server is frozen.</p><p class="muted">Progress since the last autosave (every few minutes) is lost.</p>', [{ label: 'Force stop', value: true, primary: true }, { label: 'Keep waiting', value: false }]))) return;
+    return renderServer(await ipc.invoke('server:stop', { force: true, wait: false }));
+  }
+  renderServer(await ipc.invoke('server:stop', { wait: false }));
+}, e.target);
 $('btnStart').onclick = startServer; $('btnQuickStart').onclick = startServer;
 $('btnStop').onclick = stopServer; $('btnQuickStop').onclick = stopServer;
 $('btnRestart').onclick = (e) => run(async () => renderServer(await ipc.invoke('server:restart')), e.target);
@@ -2167,7 +2176,7 @@ function instCard(x) {
   return `<div class="card inst" data-name="${esc(x.name)}">
     <div class="row gap wrap"><b class="inst-name">${esc(x.name)}</b>${x.main ? '<span class="badge">main · this window</span>' : ''}${serverBadge}${players}${conflict}${!x.serverInstalled ? '<span class="badge warn">server not installed</span>' : ''}${!x.exists ? '<span class="badge bad">folder missing</span>' : ''}<span class="grow"></span>
       <button class="btn small i-open">Open</button>
-      ${running ? '<button class="btn small i-restart">Restart</button><button class="btn small danger i-stop">Stop server</button>' : '<button class="btn small primary i-start">Start server</button>'}
+      ${running && sv.stopping ? '<button class="btn small danger i-kill" title="The server has not closed yet: end its process now">Force stop</button>' : running ? '<button class="btn small i-restart">Restart</button><button class="btn small danger i-stop">Stop server</button>' : '<button class="btn small primary i-start">Start server</button>'}
       <button class="btn small i-more" title="More">⋯</button></div>
     <div class="inst-grid">
       <span class="muted">Folder</span><code class="i-dir" title="Open the folder">${esc(x.dir)}</code>
@@ -2195,6 +2204,7 @@ $('instList').addEventListener('click', (e) => {
   if (t.classList.contains('i-open')) return act('open');
   if (t.classList.contains('i-start')) return act('start', `Starting ${name}`);
   if (t.classList.contains('i-restart')) return act('restart', `Restarting ${name}`);
+  if (t.classList.contains('i-kill')) return run(async () => { if (!(await showModal(`Force stop ${name}?`, '<p>End its server process now. Progress since the last autosave is lost.</p>', [{ label: 'Force stop', value: true, primary: true }, { label: 'Keep waiting', value: false }]))) return; await ipc.invoke('instances:action', name, 'kill'); refreshInstances(); }, t);
   if (t.classList.contains('i-stop')) return run(async () => { if (!(await showModal(`Stop ${name}?`, '<p>Players are disconnected; the world is saved first.</p>', [{ label: 'Stop server', value: true, primary: true }, { label: 'Cancel', value: false }]))) return; await ipc.invoke('instances:action', name, 'stop'); refreshInstances(); }, t);
   if (t.classList.contains('i-more')) return run(async () => {
     const opts = [{ label: 'Update server and mods', value: 'update' }, { label: 'Backup now', value: 'backup' }];

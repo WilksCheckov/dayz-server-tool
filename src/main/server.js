@@ -22,9 +22,20 @@ function watchPid(pid) {
   const t = setInterval(() => { if (!alive(pid)) { clearInterval(t); ee.emit('exit', null, null); } }, 2000);
   return ee;
 }
+// This instance's server by its exe path among the running DayZ servers (no admin rights needed for own processes).
+function findOwnServer() {
+  return new Promise(res => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    "Get-CimInstance Win32_Process -Filter \"Name='DayZServer_x64.exe'\" | ForEach-Object { \"$($_.ProcessId)|$($_.ExecutablePath)|$(if ($_.CreationDate) { $_.CreationDate.ToString('o') })\" }"],
+  { windowsHide: true, timeout: 30000 }, (e, out) => {
+    const mine = path.resolve(settings.paths().serverExe).toLowerCase();
+    for (const l of String(out || '').split(/\r?\n/)) { const [pid, exe, created] = l.trim().split('|'); if (pid && exe && path.resolve(exe).toLowerCase() === mine) return res({ pid: Number(pid), startedAt: Date.parse(created) || Date.now(), found: true }); }
+    res(null);
+  }));
+}
 async function adopt() {
-  let rec = null; try { rec = JSON.parse(fs.readFileSync(procFile(), 'utf8')); } catch { return false; }
-  if (!rec || !rec.pid || proc || !alive(rec.pid)) { forgetProc(); return false; }
+  if (proc) return false;
+  let rec = null; try { rec = JSON.parse(fs.readFileSync(procFile(), 'utf8')); } catch { rec = null; }
+  if (!rec || !rec.pid || !alive(rec.pid)) { if (rec) forgetProc(); rec = await findOwnServer(); if (!rec || proc) return false; rememberProc(rec.pid, rec.startedAt); }
   // the pid may have been reused by another program: check it is this server's exe (by its path; when Windows is
   // too busy to answer that, by its image name, so a slow start of the tool does not lose the server)
   const run = (file, args) => new Promise(res => require('child_process').execFile(file, args, { windowsHide: true, timeout: 30000 }, (e, out) => res(String(out || '').trim())));
@@ -37,7 +48,7 @@ async function adopt() {
   proc = watchPid(rec.pid);
   startedAt = rec.startedAt || Date.now();
   startedModParam = currentModParam();
-  emitRef('console', { source: 'server', line: `Found the server still running (pid ${rec.pid}, started ${new Date(startedAt).toLocaleString()}); managing it again.` });
+  emitRef('console', { source: 'server', line: `Found the server ${rec.found ? 'running' : 'still running'} (pid ${rec.pid}, started ${new Date(startedAt).toLocaleString()}); managing it${rec.found ? '' : ' again'}.` });
   startRptTail(); rptStartedAt = startedAt;
   stage = null; setStage(0);
   attachExit(proc);
@@ -247,7 +258,9 @@ function attachExit(p) {
       }).catch(e => { emitRef('console', { source: 'crash', line: 'Crash report failed: ' + e.message }); alerts.alert('crash', `Server exited unexpectedly (code ${code})`, ''); });
       if (loop) {
         crashLoop = true;
-        alerts.alert('crash-loop', 'Crash loop: auto-restart paused', `The server exited ${alerts.cfg().thresholds.crashLoopCount} times within ${alerts.cfg().thresholds.crashLoopMinutes} minutes. Check the crash reports, then start it manually.`);
+        const suspect = crashSuspects();
+        alerts.alert('crash-loop', 'Crash loop: auto-restart paused', `The server exited ${alerts.cfg().thresholds.crashLoopCount} times within ${alerts.cfg().thresholds.crashLoopMinutes} minutes. Check the crash reports, then start it manually.${suspect ? '\n' + suspect : ''}`);
+        if (suspect) emitRef('console', { source: 'server', line: suspect });
         emitRef('console', { source: 'server', line: 'Crash loop detected: auto-restart paused until you start the server manually.' });
       }
     }
@@ -259,14 +272,44 @@ function attachExit(p) {
   });
 }
 
-function stop() {
+// Force: end the process now (taskkill /F), for a frozen server or one that ignores the shutdown request.
+function forceKill(pid, why) {
+  emitRef('console', { source: 'server', line: `${why}: ending the server process (pid ${pid}) now; progress since the last autosave is lost.` });
+  spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+  setTimeout(() => { if (proc && proc.pid === pid) { try { proc.kill(); } catch { /* ignore */ } } }, 8000);
+}
+let stopping = null;
+// Likely cause of a crash loop: mods added or updated in the last 24 hours, and mod scripts the server could not
+// compile in its last log ("Can't find variable/class" in a mod's script path means a missing dependency or a mod built
+// for another game version).
+function crashSuspects() {
+  const out = [];
+  try {
+    const since = Date.now() - 24 * 3600000; const cache = settings.load().modCache || {};
+    const ids = [...new Set(require('./audit').list({ limit: 300 }).filter(e => e.ts > since && /^mods:(add|update|addMany)$/.test(e.action)).flatMap(e => String(e.details || '').match(/\d{6,}/g) || []))];
+    const enabled = new Set(settings.load().mods.filter(m => m.enabled !== false).map(m => m.id));
+    const names = ids.filter(id => enabled.has(id)).map(id => (cache[id] || {}).title || id);
+    if (names.length) out.push(`Changed in the last 24 h: ${names.join(', ')}. Disable ${names.length > 1 ? 'them' : 'it'} on the Installed mods page and start the server again to confirm.`);
+  } catch { /* no audit yet */ }
+  try {
+    const r = newestRpt(); const txt = r ? fs.readFileSync(r.f, 'utf8') : '';
+    const bad = [...new Set([...txt.matchAll(/SCRIPT\s+\(E\): @"([^/"]+)\/[^"]*": Can't find (variable|class|type) '([^']+)'/g)].filter(m => !/^scripts$/i.test(m[1])).map(m => `${m[1]} needs '${m[3]}'`))].slice(0, 3);
+    if (bad.length) out.push(`Mod scripts that did not compile: ${bad.join('; ')}. That usually means a required mod is missing (check the mod's Workshop page for what it needs) or the mod does not match this game version.`);
+  } catch { /* no log */ }
+  return out.join(' ');
+}
+function stop({ force = false } = {}) {
   clearTimeout(restartTimer); restartTimer = null;
   if (!proc) { emitRef('server:status', status()); return Promise.resolve(status()); }
+  // already stopping: a second Stop forces it
+  if (stopping) { if (force) forceKill(proc.pid, 'Force stop'); return stopping; }
   manualStop = true;
-  return new Promise(resolve => {
+  stopping = new Promise(resolve => {
     const pid = proc.pid;
-    const done = () => resolve(status());
+    const done = () => { stopping = null; resolve(status()); };
     proc.once('exit', done);
+    emitRef('server:status', status());
+    if (force) { forceKill(pid, 'Force stop'); return; }
     emitRef('console', { source: 'server', line: `Stopping server (pid ${pid}): asking it to save and shut down...` });
     // 1. RCon #shutdown when connected (the cleanest: the server saves the world and BattlEye restores its config)
     let viaRcon = false;
@@ -277,12 +320,11 @@ function stop() {
     const graceMs = (Number(settings.load().stopGraceSec) || 120) * 1000;
     setTimeout(() => {
       if (proc && proc.pid === pid) {
-        emitRef('console', { source: 'server', line: `Server did not stop within ${graceMs / 1000}s; forcing it closed (unsaved progress since the last autosave is lost).` });
-        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
-        setTimeout(() => { if (proc && proc.pid === pid) { try { proc.kill(); } catch { /* ignore */ } } done(); }, 8000);
+        forceKill(pid, `Server did not stop within ${graceMs / 1000}s`);
       }
     }, graceMs);
   });
+  return stopping;
 }
 
 async function restart() {
@@ -290,6 +332,6 @@ async function restart() {
   return start();
 }
 
-function init(emit) { emitRef = emit; adopt().catch(() => {}); }
+function init(emit) { emitRef = emit; adopt().catch(() => {}); setInterval(() => { if (!proc) adopt().catch(() => {}); }, 60000); }
 
 module.exports = { init, start, stop, restart, status, setMaintenance, _tail: { startRptTail, stopRptTail } };

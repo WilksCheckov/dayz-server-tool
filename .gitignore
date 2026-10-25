@@ -5,3 +5,4 @@ dist/
 *.blockmap
 latest.yml
 build/icon.png
+build-maps/

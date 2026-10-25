@@ -95,6 +95,9 @@ function saveGameplay(changes) {
 const WORLDS = { chernarusplus: 15360, enoch: 12800, sakhal: 10240, namalsk: 12800, deerisle: 16384, esseker: 12800, takistanplus: 12800, banov: 10240, chiemsee: 10240, iztek: 12800, melkart: 15360, valning: 10240 };
 const MAP_LABELS = { chernarusplus: 'Chernarus', enoch: 'Livonia', sakhal: 'Sakhal', namalsk: 'Namalsk', deerisle: 'Deer Isle', esseker: 'Esseker', takistanplus: 'Takistan', banov: 'Banov', chiemsee: 'Chiemsee', iztek: 'Iztek', melkart: 'Melkart', valning: 'Valning' };
 // Background instances share the main instance's maps (sharedMapsDir), so tiles are built once per PC.
+// Maps that ship with the app (resources\\maps in an install, build-maps when run from source): Chernarus works out of
+// the box on a server with no DayZ client.
+function bundledMapsDir() { try { const { app } = require('electron'); const d = app.isPackaged ? path.join(process.resourcesPath, 'maps') : path.join(__dirname, '..', '..', 'build-maps'); return fs.existsSync(d) ? d : null; } catch { return null; } }
 function mapsDir() { const s = settings.load(); return s.sharedMapsDir && require('fs').existsSync(require('path').dirname(s.sharedMapsDir)) ? s.sharedMapsDir : path.join(s.installDir, 'maps'); }
 // Which map the active mission uses, its size, and the image for it if one has been added to <installDir>\maps\<map>.(png|jpg).
 // The active mission's map key (chernarusplus, enoch, …) on its own, so helpers can use it without calling mapInfo().
@@ -106,10 +109,15 @@ function mapKey() {
 }
 function mapInfo() {
   const { name, key } = mapKey();
-  let image = null;
-  try { fs.mkdirSync(mapsDir(), { recursive: true }); for (const ext of ['png', 'jpg', 'jpeg', 'webp']) { const f = path.join(mapsDir(), key + '.' + ext); if (key && fs.existsSync(f)) { image = f; break; } } } catch { /* ignore */ }
-  let tiles = null; try { if (key) { const meta = JSON.parse(fs.readFileSync(path.join(mapsDir(), key, 'tiles', 'meta.json'), 'utf8')); tiles = { ...meta, dir: path.join(mapsDir(), key, 'tiles') }; } } catch { tiles = null; }
-  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, tiles, mapsDir: mapsDir(), building: !!building, canBuild: key && !tiles ? canBuild() : undefined, noClientText: NO_CLIENT };
+  let image = null, tiles = null, bundled = false;
+  try { fs.mkdirSync(mapsDir(), { recursive: true }); } catch { /* ignore */ }
+  // this instance's own map first (built here or received through map sharing), then the one shipped with the app
+  for (const dir of [mapsDir(), bundledMapsDir()]) {
+    if (!key || !dir) continue;
+    if (!image) for (const ext of ['png', 'jpg', 'jpeg', 'webp']) { const f = path.join(dir, key + '.' + ext); if (fs.existsSync(f)) { image = f; break; } }
+    if (!tiles) { try { const meta = JSON.parse(fs.readFileSync(path.join(dir, key, 'tiles', 'meta.json'), 'utf8')); tiles = { ...meta, dir: path.join(dir, key, 'tiles') }; bundled = dir === bundledMapsDir(); } catch { /* not in this folder */ } }
+  }
+  return { mission: name, map: key, label: key ? (MAP_LABELS[key] || key) : null, size: key ? (WORLDS[key] || null) : null, known: !!(key && WORLDS[key]), image, tiles, bundled, mapsDir: mapsDir(), building: !!building, canBuild: key && !tiles ? canBuild() : undefined, noClientText: NO_CLIENT };
 }
 // Build the map image from the game's satellite tiles (DayZ client install or a map mod). Runs in a worker.
 let building = null;

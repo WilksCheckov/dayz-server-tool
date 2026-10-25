@@ -156,11 +156,11 @@ async function action(name, what) {
     if (!e.main && !control.info(e.data)) { startTool(name); await waitFor(async () => !!control.info(e.data), 30000); }
     return control.request(e.data, 'window', { show: true });
   }
-  const ch = { start: 'server:start', stop: 'server:stop', restart: 'server:restart', update: 'updater:runNow', backup: 'backups:create' }[what];
+  const [ch, ...args] = { start: ['server:start'], stop: ['server:stop', { wait: false }], kill: ['server:stop', { force: true, wait: false }], restart: ['server:restart'], update: ['updater:runNow'], backup: ['backups:create'] }[what] || [];
   if (!ch) throw new Error('Unknown action.');
-  if (local) return localCall(ch);
+  if (local) return localCall(ch, ...args);
   if (!control.info(e.data)) { if (e.main) throw new Error('The main window is not running.'); startTool(name); await waitFor(async () => !!control.info(e.data), 30000); }
-  return control.call(e.data, ch);
+  return control.call(e.data, ch, ...args);
 }
 let localOpen = () => {}, localCall = () => {};
 function setLocal({ open, call }) { localOpen = open; localCall = call; }

@@ -98,7 +98,7 @@ function refreshTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open DayZ Admin Tools', click: () => showWindow() },
     { type: 'separator' },
-    { label: st.running ? 'Stop server' : 'Start server', click: () => { try { st.running ? server.stop() : server.start(); } catch (e) { emit('console', { source: 'server', line: e.message }); } } },
+    { label: st.stopping ? 'Force stop server' : st.running ? 'Stop server' : 'Start server', click: () => { try { st.running ? server.stop({ force: !!st.stopping }) : server.start(); } catch (e) { emit('console', { source: 'server', line: e.message }); } } },
     { label: 'Restart server', enabled: st.running, click: () => server.restart().catch(e => { emit('console', { source: 'server', line: 'Restart failed: ' + e.message }); alerts.alert('server-critical', 'Restart failed: the server may be down', e.message); }) },
     { label: 'Backup now', click: () => backups.create('tray').catch(() => {}) },
     ...(instances.registry().list.length ? [{ type: 'separator' }, ...instances.registry().list.map(x => ({ label: x.name, submenu: [
@@ -256,7 +256,8 @@ handle('steam:cancel', () => steamcmd.cancel());
 // Server
 handle('server:status', () => server.status());
 handle('server:start', () => server.start());
-handle('server:stop', () => server.stop());
+// wait: false returns at once (the window follows the status events); force ends the process now
+handle('server:stop', (opts = {}) => { const p = server.stop(opts || {}); if (opts && opts.wait === false) { p.catch(() => {}); return server.status(); } return p; });
 handle('server:restart', () => server.restart());
 handle('server:preflight', async () => { try { await Promise.all([require('./sysinfo').defenderStatus({ refresh: true }), require('./sysinfo').cachedDisk() ? null : require('./sysinfo').checkDisk()]); } catch { /* ignore */ } return require('./preflight').checks(); });
 handle('server:addDefenderExclusion', () => require('./sysinfo').addDefenderExclusion(emit));
@@ -629,7 +630,7 @@ app.whenReady().then(() => {
   cpu.init(emit);
   instances.init(emit);
   instances.setLocalStatus(localStatus);
-  instances.setLocal({ open: () => showWindow(), call: (ch) => handlerMap.get(ch)() });
+  instances.setLocal({ open: () => showWindow(), call: (ch, ...args) => handlerMap.get(ch)(...args) });
   control.start(handlerMap);
   control.route('status', async () => localStatus());
   control.route('window', async () => { showWindow(); if (win) { win.setAlwaysOnTop(true); win.focus(); win.setAlwaysOnTop(false); } return true; });

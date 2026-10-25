@@ -11,7 +11,8 @@
     "start": "electron .",
     "dist": "electron-builder --win",
     "release": "electron-builder --win --publish always",
-    "icon": "electron build/gen-icon.js"
+    "icon": "electron build/gen-icon.js",
+    "maps": "electron scripts/prepare-maps.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -49,7 +50,16 @@
       "provider": "github",
       "owner": "WilksCheckov",
       "repo": "dayz-server-tool"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build-maps",
+        "to": "maps",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   },
   "dependencies": {
     "acme-client": "^5.4.0",

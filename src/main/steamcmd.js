@@ -100,7 +100,10 @@ function runScript(lines, emit, opts = {}) {
         if (!line) continue;
         output.push(line);
         emit('console', { source: 'steamcmd', line });
-        if (/Steam Guard|Two-factor code|two-factor code/i.test(line)) {
+        // A Guard code used once is spent; Steam remembers this PC (SteamCMD's config folder) after it, so drop it
+        if (/^Logging in user .* to Steam Public...OK/i.test(line)) creds.guard = '';
+        // only a real request for a code: not 'Steam Guard code provided.' or other mentions
+        if (/not been authenticated for your account using Steam Guard|enter the current code|Two-factor code mismatch|Invalid Login Auth Code|Steam Guard code (required|needed)|check your email for the message from Steam/i.test(line)) {
           emit('steam:guardNeeded', {});
           try { require('./alerts').alert('steam-guard', 'Steam Guard code needed', 'SteamCMD is asking for a Steam Guard code, so workshop downloads are paused. Enter the code on the Installation page and retry.'); } catch { /* ignore */ }
         }
