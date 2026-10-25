@@ -192,6 +192,7 @@ function buildCommands() {
   return [
     new SlashCommandBuilder().setName('help').setDescription('Show the available commands').setDefaultMemberPermissions(null),
     new SlashCommandBuilder().setName('bantime').setDescription('Check the time remaining on your own ban').setDefaultMemberPermissions(null),
+    new SlashCommandBuilder().setName('mydeath').setDescription('In your ticket: link one of your own deaths to it').addStringOption(o => o.setName('death').setDescription('Pick one of your deaths').setAutocomplete(true).setRequired(true)).setDefaultMemberPermissions(null),
     new SlashCommandBuilder().setName('application').setDescription('Post the whitelist application button in this channel'),
     listGroup('whitelist', 'Manage whitelist.txt', 'Steam64 ID'),
     listGroup('priority', 'Manage priority.txt (login queue skip)', 'Steam64 ID'),
@@ -219,24 +220,32 @@ function buildCommands() {
       .addSubcommand(s => s.setName('close').setDescription('Close the ticket this channel belongs to').addStringOption(reasonOpt))
       .addSubcommand(s => s.setName('add').setDescription('Add a member to this ticket').addUserOption(o => o.setName('discord_user').setDescription('Member').setRequired(true)))
       .addSubcommand(s => s.setName('list').setDescription('Show open tickets'))
-      .addSubcommand(s => s.setName('link').setDescription('Link a death record to a ticket').addStringOption(o => o.setName('death_id').setDescription('Type a player, killer or weapon and pick the death').setAutocomplete(true).setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: the ticket this channel belongs to)')))
-      .addSubcommand(s => s.setName('assign').setDescription('Assign a ticket to a staff member').addUserOption(o => o.setName('discord_user').setDescription('Staff member').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)')))
-      .addSubcommand(s => s.setName('note').setDescription('Add a staff note to a ticket').addStringOption(o => o.setName('text').setDescription('The note').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)')))
-      .addSubcommand(s => s.setName('info').setDescription('Show a ticket: assignee, linked deaths, notes and admin actions').addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)'))),
+      .addSubcommand(s => s.setName('link').setDescription('Link a death record to a ticket').addStringOption(o => o.setName('death_id').setDescription('Type a player, killer or weapon and pick the death').setAutocomplete(true).setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: the ticket this channel belongs to)').setAutocomplete(true)))
+      .addSubcommand(s => s.setName('assign').setDescription('Assign a ticket to a staff member').addUserOption(o => o.setName('discord_user').setDescription('Staff member').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)').setAutocomplete(true)))
+      .addSubcommand(s => s.setName('note').setDescription('Add a staff note to a ticket').addStringOption(o => o.setName('text').setDescription('The note').setRequired(true)).addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)').setAutocomplete(true)))
+      .addSubcommand(s => s.setName('info').setDescription('Show a ticket: assignee, linked deaths, notes and admin actions').addStringOption(o => o.setName('id').setDescription('Ticket number (default: this channel\'s ticket)').setAutocomplete(true))),
     new SlashCommandBuilder().setName('maintenance').setDescription('Re-check everyone against Steam for VAC / game / trade bans and refresh the application embeds'),
     new SlashCommandBuilder().setName('backup').setDescription('Take a backup now'),
-    new SlashCommandBuilder().setName('deaths').setDescription('Recent deaths from the death log').addStringOption(o => o.setName('player').setDescription('Player name, or part of it')).addIntegerOption(o => o.setName('count').setDescription('How many (default 10, max 25)')),
+    new SlashCommandBuilder().setName('deaths').setDescription('Recent deaths from the death log').addStringOption(o => o.setName('player').setDescription('Player name, or part of it').setAutocomplete(true)).addIntegerOption(o => o.setName('count').setDescription('How many (default 10, max 25)')),
     new SlashCommandBuilder().setName('death').setDescription('Full detail of one death: hits, body parts, gear').addStringOption(o => o.setName('id').setDescription('Type a player, killer or weapon and pick the death').setAutocomplete(true).setRequired(true)),
     new SlashCommandBuilder().setName('heal').setDescription('Heal an online player: health, bleeding, broken bones, diseases, food and water').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('what').setDescription('What to fix (default: everything)').addChoices({ name: 'everything', value: 'all' }, { name: 'health, blood and shock', value: 'health' }, { name: 'bleeding and cuts', value: 'bleeding' }, { name: 'broken bones', value: 'bones' }, { name: 'diseases and infections', value: 'cure' }, { name: 'food and water', value: 'food' })).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
     new SlashCommandBuilder().setName('teleport').setDescription('Teleport an online player back to where they died, or to coordinates').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('death_id').setDescription('Pick the death to go back to (default: their latest)').setAutocomplete(true)).addNumberOption(o => o.setName('x').setDescription('X coordinate (with z: go there instead of the death position)')).addNumberOption(o => o.setName('z').setDescription('Z coordinate')).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
-    new SlashCommandBuilder().setName('refund').setDescription('Spawn the gear a player had when they died at their feet (they must be online); their body is removed').addStringOption(o => o.setName('id').setDescription('Type a player, killer or weapon and pick the death (default: the player\'s latest)').setAutocomplete(true)).addStringOption(o => o.setName('player').setDescription('Player name, used when no id is given')).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
+    new SlashCommandBuilder().setName('refund').setDescription('Spawn the gear a player had when they died at their feet (they must be online); their body is removed').addStringOption(o => o.setName('id').setDescription('Type a player, killer or weapon and pick the death (default: the player\'s latest)').setAutocomplete(true)).addStringOption(o => o.setName('player').setDescription('Player name, used when no id is given')).addStringOption(o => o.setName('ticket').setDescription('Open ticket to log the refund on (search by player or subject); its linked death is used when none is picked').setAutocomplete(true)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
     new SlashCommandBuilder().setName('give').setDescription('Give an online player an item (pristine, full); "Parent; Attachment" fits attachments').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('item').setDescription('Class name, e.g. AKM or AKM; AK_WoodBttstck; Mag_AKM_30Rnd').setRequired(true)).addIntegerOption(o => o.setName('count').setDescription('How many (default 1, max 50)').setMinValue(1).setMaxValue(50)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
     new SlashCommandBuilder().setName('kit').setDescription('Give an online player a saved kit (Map page → Kits)').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('kit').setDescription('Kit name').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
     new SlashCommandBuilder().setName('vehicle').setDescription('Spawn a vehicle next to an online player, every part fitted and every fluid full').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('vehicle').setDescription('Vehicle class').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)'))
   ].map(c => { const j = c.setDMPermission(false).toJSON(); if (j.default_member_permissions === undefined) j.default_member_permissions = String(PermissionFlagsBits.Administrator); return j; });
 }
 
-const PUBLIC_COMMANDS = ['help', 'bantime', 'status'];
+const PUBLIC_COMMANDS = ['help', 'bantime', 'status', 'mydeath'];
+// A member's own deaths: by the Steam64 of their whitelist application (the death log keys deaths by the DayZ id,
+// which is derived from it); with no application on file, by their character or display name.
+function ownDeaths(discordId, displayName) {
+  const dl = require('./deathlog'); const app = store().applications[discordId];
+  const keys = new Set(); if (app && app.steamId) { keys.add(lists.steamIdToDayzId(app.steamId)); keys.add(String(app.steamId)); }
+  const names = new Set([app && app.characterName, displayName].filter(Boolean).map(n => String(n).toLowerCase()));
+  return dl.list({ limit: 2000 }).filter(r => keys.size ? keys.has(r.key) : names.has(String(r.name).toLowerCase())).slice(0, 50);
+}
 
 // ---------- helpers ----------
 function isAllowed(interaction) {
@@ -620,6 +629,7 @@ async function execute(name, sub, opt, user) {
       '**/players**, **/kick**, **/say** — Live via RCon. *(Admin)*',
       '**/server start|stop|restart**, **/backup** — Control the server. *(Admin)*',
       '**/status** — Server status and player count.',
+      '**/mydeath** — In your ticket channel: link one of your own deaths to the ticket (you only see your own).',
       '**/bantime** — Check your own ban.'
     ];
     return { embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle('Available Commands').setDescription(lines.join('\n'))] };
@@ -757,11 +767,26 @@ async function execute(name, sub, opt, user) {
       return { content: r.ok ? `✅ ${name === 'vehicle' ? 'Spawned' : 'Gave'} ${what} ${name === 'vehicle' ? 'next to' : 'to'} **${p.name}** (${r.ok} item(s)${r.fail ? `, ${r.fail} failed` : ''}).` : `❌ Nothing could be spawned for ${p.name} (is every class name right?).` };
     } catch (e) { return { content: '⚠️ ' + e.message }; }
   }
+  if (name === 'mydeath') {
+    const tickets = require('./tickets'); const tk = (store().tickets || []).find(x => x.channelId === opt._channelId && x.status === 'open');
+    if (!tk) return { content: '❌ Use this inside your ticket channel.' };
+    if (tk.discordId !== by && !opt._admin) return { content: '❌ This is not your ticket.' };
+    const r = require('./deathlog').get(Number(opt.death)); if (!r) return { content: 'No such death record.' };
+    if (!opt._admin && !ownDeaths(by, opt._displayName).some(x => x.id === r.id)) return { content: '❌ That is not one of your deaths.' };
+    tickets.link(tk.id, r.id, who);
+    return { content: `✅ Linked death #${r.id} (<t:${Math.floor(r.ts / 1000)}:R>, ${deathLine(r)}) to ticket #${tk.id}.`, ephemeral: false, log: `${who}: linked death #${r.id} to ticket #${tk.id}` };
+  }
   if (name === 'refund') {
     const dl = require('./deathlog');
     let r = opt.id ? dl.get(Number(opt.id)) : null;
     if (!r && opt.player) { const s0 = dl.list({ q: opt.player, limit: 1 })[0]; if (s0) r = dl.get(s0.id); }
-    if (!r) return { content: 'Give a death record number (see /deaths) or the name of a player with a recorded death.' };
+    if (opt.ticket) {
+      let tk; try { tk = require('./tickets').get(opt.ticket); } catch (e) { return { content: '❌ ' + e.message }; }
+      if (!r) { const last = tk.deaths.filter(d => !d.missing).slice(-1)[0]; if (last) r = dl.get(last.id); else if (tk.player) { const s0 = dl.list({ q: tk.player, limit: 1 })[0]; if (s0) r = dl.get(s0.id); } }
+      if (!r) return { content: `Ticket #${tk.id} has no linked death and no player with a recorded death; pick the death.` };
+      if (!opt.reason) opt.reason = '#' + tk.id; else if (!require('./tickets').refFromText(opt.reason)) opt.reason = '#' + tk.id + ' ' + opt.reason;
+    }
+    if (!r) return { content: 'Pick a death, give a player name, or pick a ticket.' };
     if (!r.gear || !r.gear.length) return { content: `Death #${r.id} of ${r.name} has no gear snapshot (the bridge script was not running).` };
     try {
       require('./adminlog').check('refund', opt.reason);
@@ -849,6 +874,19 @@ async function onInteraction(interaction) {
     // ----- autocomplete: kit and vehicle names -----
     if (interaction.isAutocomplete()) {
       const f = interaction.options.getFocused(true); const q = String(f.value || '').toLowerCase(); const live = require('./live');
+      if (f.name === 'ticket' || (interaction.commandName === 'ticket' && f.name === 'id')) {
+        let rows = []; try { rows = require('./tickets').list({ status: 'open', q }); } catch { rows = []; }
+        return interaction.respond(rows.slice(0, 25).map(x => ({ name: `#${x.id} · ${x.subject}${x.player ? ' · ' + x.player : ''}${x.assignee ? ' · ' + x.assignee : ''}${x.deaths.length ? ' · death #' + x.deaths.join(', #') : ''}`.slice(0, 100), value: x.id }))).catch(() => {});
+      }
+      if (interaction.commandName === 'deaths' && f.name === 'player') {
+        let names = []; try { names = [...new Set(require('./deathlog').list({ limit: 2000 }).map(r => r.name))].filter(n => n.toLowerCase().includes(q)); } catch { names = []; }
+        return interaction.respond(names.slice(0, 25).map(n => ({ name: n, value: n }))).catch(() => {});
+      }
+      if (interaction.commandName === 'mydeath') {
+        const ago = (ts) => { const m = Math.round((Date.now() - ts) / 60000); return m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
+        const rows = ownDeaths(interaction.user.id, interaction.member && interaction.member.displayName).filter(r => !q || `${r.causeText} ${r.killer ? r.killer.name : ''} ${r.weapon || ''}`.toLowerCase().includes(q)).slice(0, 25);
+        return interaction.respond(rows.map(r => ({ name: `#${r.id} · ${r.cause === 'player' && r.killer ? 'killed by ' + r.killer.name + (r.weapon ? ' with ' + r.weapon : '') : r.causeText}${r.gearCount ? ` · ${r.gearCount} items` : ' · no gear'} · ${ago(r.ts)}`.slice(0, 100), value: String(r.id) }))).catch(() => {});
+      }
       if (f.name === 'death_id' || (f.name === 'id' && ['death', 'refund'].includes(interaction.commandName))) {
         const dl = require('./deathlog'); const ago = (ts) => { const m = Math.round((Date.now() - ts) / 60000); return m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
         let rows = []; try { rows = dl.list({ q: /^\d+$/.test(q) ? '' : q, limit: 25 }); if (/^\d+$/.test(q)) rows = rows.filter(r => String(r.id).startsWith(q)).concat(dl.list({ limit: 300 }).filter(r => String(r.id).startsWith(q) && !rows.some(x => x.id === r.id))).slice(0, 25); } catch { rows = []; }
@@ -882,7 +920,7 @@ async function onInteraction(interaction) {
         return interaction.showModal(reasonModal(`modal-ban-${t.steamId}-${t.discordId || '0'}-${days}`, sub === 'temporary' ? `Ban for ${days} day(s)` : 'Permanently Ban Player'));
       }
       await interaction.deferReply({ ephemeral: true });
-      opt._channelId = interaction.channelId;
+      opt._channelId = interaction.channelId; opt._admin = isAllowed(interaction); opt._displayName = interaction.member && interaction.member.displayName;
       const target = opt.server; delete opt.server;
       let r;
       if (target && target.toLowerCase() !== myName().toLowerCase()) r = await remoteExecute(target, name, sub, opt, interaction.user);

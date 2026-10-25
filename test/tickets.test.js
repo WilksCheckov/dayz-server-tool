@@ -1,0 +1,37 @@
+'use strict';
+// Tickets: create, link a death, actions tagged by "#id" in a reason, auto-linked deaths, assign, note, close, lists.
+const fs = require('fs'); const path = require('path');
+const t = require('./harness').setup({ name: 'tickets' });
+const settings = t.mod('settings'); settings.save({ installDir: path.join(t.S, 'i'), discord: { adminLogChannelId: '777', guildId: '1' }, adminLog: { adminName: 'Chris' } });
+t.mod('audit').init(t.emit);
+t.mod('jsonstore').write(path.join(t.S, 'deathlog.json'), { deaths: [{ id: 12, ts: Date.now() - 60000, name: 'Bob', key: '7656BOB', cause: 'player', causeText: 'Killed by a player', killer: { name: 'Al' }, hits: [], byPart: {}, totalDamage: 50, gear: [{ c: 'AKM' }], refunds: [], attackers: [] }], nextId: 13, pending: {}, gear: {}, gearFile: { offset: 0, rest: '' }, lastDeathAt: {} });
+const posted = [];
+const discord = t.mod('discord'); discord.init(t.emit);
+discord._tail.useStubClient({ channels: { fetch: async (id) => id === '777' ? { id, isTextBased: () => true, send: async (p) => { posted.push(p); return { id: 'm1' }; } } : null } });
+const al = t.mod('adminlog'); al.init(t.emit);
+const tk = t.mod('tickets'); tk.init(t.emit);
+const dl = t.mod('deathlog'); dl.init(t.emit);
+(async () => {
+  t.ok('death record present', !!dl.get(12));
+  const a = tk.create({ subject: 'Lost gear at NWAF', description: 'fell through the floor', by: 'app' });
+  t.ok('ticket created', a.id === '0001' && a.status === 'open');
+  tk.link(a.id, 12, 'app');
+  t.ok('death linked both ways', tk.get(a.id).deaths[0].name === 'Bob' && tk.forDeath(12)[0].id === '0001');
+  t.ok('reason references', tk.refFromText('#1 glitched') === '0001' && tk.refFromText('ticket 0001') === '0001' && tk.refFromText('see T1') === '0001' && tk.refFromText('no ticket here') === null && tk.refFromText('#9') === null);
+  al.record({ action: 'refund', by: 'map', target: { name: 'Bob', steam: '7656BOB' }, details: 'death #12: 1 item(s)', reason: 'Ticket #1 approved', result: { status: 'done', ok: 1, fail: 0 } });
+  await t.sleep(200);
+  const g = tk.get(a.id);
+  t.ok('action logged on the ticket', g.actions.length === 1 && g.actions[0].action === 'refund' && g.actions[0].result === 'done (1 ok)', JSON.stringify(g.actions[0]));
+  t.ok('embed names the ticket', posted[0].embeds[0].toJSON().fields.some(f => f.name === 'Ticket' && f.value === '#0001'));
+  const b = tk.create({ subject: 'Another one', by: 'Admin Cat' });
+  al.record({ action: 'tpdeath', by: 'Admin Cat', source: 'discord', target: { name: 'Bob', steam: '7656BOB' }, details: 'death #12', reason: '#2', result: { status: 'done' } });
+  t.ok('death linked from the reason, player filled in', tk.get(b.id).deaths.length === 1 && tk.get(b.id).player === 'Bob');
+  tk.assign(a.id, 'Chris', 'app'); tk.note(a.id, 'refunded, closing', 'app');
+  const closed = await tk.setStatus(a.id, 'closed', 'app', 'done');
+  t.ok('assign, note, close', closed.assignee === 'Chris' && closed.status === 'closed' && closed.notes.some(n => n.text === 'refunded, closing'));
+  t.ok('list filters', tk.list({ status: 'open' }).length === 1 && tk.list({ q: '#12' }).length === 2 && tk.list({ q: 'nwaf' })[0].id === '0001');
+  t.ok('stats', JSON.stringify(tk.stats()) === '{"open":1,"closed":1,"unassigned":1}', JSON.stringify(tk.stats()));
+  const saved = JSON.parse(fs.readFileSync(path.join(t.S, 'discord-data.json'), 'utf8'));
+  t.ok('saved with the bot data', saved.tickets.length === 2 && saved.ticketSeq === 2);
+  t.done();
+})();

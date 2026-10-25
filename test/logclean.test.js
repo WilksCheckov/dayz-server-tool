@@ -1,0 +1,27 @@
+'use strict';
+// Log cleanup: kinds and mod log folders, per-row ages, protected folders and unsafe patterns.
+const fs = require('fs'); const path = require('path');
+const t = require('./harness').setup({ name: 'logclean' });
+const settings = t.settings(); const prof = settings.paths().profilesDir;
+const old = Date.now() - 30 * 86400000, mid = Date.now() - 5 * 86400000;
+const put = (rel, when = old) => { const f = path.join(prof, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x'.repeat(1000)); fs.utimesSync(f, when / 1000, when / 1000); };
+['DayZServer_x64_a.RPT', 'DayZServer_x64_b.RPT', 'script_a.log', 'script_b.log', 'crash_a.log', 'x.mdmp', 'whitelist.txt', 'priority.txt'].forEach(f => put(f));
+put('DayZServer_x64_c.RPT', Date.now()); put('script_c.log', mid);
+['EventManagerLog/e1.log', 'EventManagerLog/e2.log', 'EventManagerLog/e3.log', 'DayZAdminTools/gear.log', 'DayZAdminTools/dupes.log', 'ExpansionMod/Logs/ExpLog_1.log', 'ExpansionMod/Logs/ExpLog_2.log', 'ExpansionMod/Settings/Ai.json', 'VPPAdminTools/Logs/a.txt', 'VPPAdminTools/Logs/b.txt', 'VPPAdminTools/Permissions/x.json', 'SomeMod/data.txt', 'SomeMod/run.log', 'SomeMod/run2.log'].forEach(f => put(f));
+const logs = t.mod('logs');
+const rule = (label) => logs.cleanupPreview().rules.find(r => r.label === label);
+t.ok('log-named folders on by default with logs and text', rule('EventManagerLog').on && rule('EventManagerLog').pattern === '*.log;*.txt' && rule('ExpansionMod/Logs').on);
+t.ok('other mod folders off by default', rule('SomeMod') && !rule('SomeMod').on);
+t.ok('protected folders never offered', !rule('DayZAdminTools') && !logs.cleanupPreview().rules.some(r => /Users|BattlEye|DataCache/.test(r.label)));
+const c = logs.cleanupCfg();
+logs.saveCleanupCfg({ ...c, enabled: true, keepDays: 14, kinds: { ...c.kinds, script: { on: true, days: 3 }, adm: { on: false } }, folders: { SomeMod: { on: true, pattern: '*.log' }, 'ExpansionMod/Settings': { on: true, pattern: '*;*.json;*.*' }, '../../Windows': { on: true, pattern: '*.log' } } });
+const saved = settings.load().logCleanup;
+t.ok('unsafe patterns dropped, outside paths refused', saved.folders['ExpansionMod/Settings'].pattern === '*.log' && !saved.folders['../../Windows']);
+t.ok('own age per row', rule('Script logs (script_*.log)').days === 3 && rule('Server reports (.RPT)').days === 14);
+const r = logs.cleanup();
+t.ok('cleanup count', r.removed === 10, `${r.removed}: ${r.perRule.join(', ')}`);
+const left = []; const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); e.isDirectory() ? walk(f) : left.push(path.relative(prof, f).replace(/\\/g, '/')); } }; walk(prof);
+const kept = ['whitelist.txt', 'priority.txt', 'DayZAdminTools/gear.log', 'DayZAdminTools/dupes.log', 'ExpansionMod/Settings/Ai.json', 'VPPAdminTools/Permissions/x.json', 'SomeMod/data.txt', 'DayZServer_x64_c.RPT', 'script_c.log'];
+t.ok('settings, saves, data and the newest of each kind kept', kept.every(k => left.includes(k)), left.join(' '));
+t.ok('one file of each cleaned folder kept', ['EventManagerLog', 'ExpansionMod/Logs', 'VPPAdminTools/Logs', 'SomeMod'].every(d => left.filter(f => f.startsWith(d + '/') && /\.(log|txt)$/.test(f) && !/data\.txt/.test(f)).length === 1));
+t.done();

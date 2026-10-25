@@ -1,0 +1,25 @@
+'use strict';
+// CPU cores: the auto split between instances, manual cores, -cpuCount.
+const fs = require('fs'); const path = require('path');
+let plan = [{ self: true, mode: 'auto' }];
+const t = require('./harness').setup({ name: 'cpu', stubs: { './instances@cpu': () => ({ cpuPlan: () => plan }) } });
+const settings = t.settings();
+fs.writeFileSync(path.join(t.S, 'cpu.json'), JSON.stringify({ physical: 8, logical: 16, smt: 2, name: 'Test CPU' }));
+const cpu = t.mod('cpu'); cpu.init(t.emit);
+t.ok('topology read from the cache', cpu.topology().physical === 8 && cpu.topology().smt === 2);
+t.ok('"all" leaves it to Windows', cpu.chosen() === null && cpu.cpuCountArg() === 0);
+settings.save({ cpu: { mode: 'auto' } });
+t.ok('one auto instance: every core but core 0', cpu.chosen().join(',') === '2,3,4,5,6,7,8,9,10,11,12,13,14,15' && cpu.cpuCountArg() === 14);
+plan = [{ self: true, mode: 'auto' }, { self: false, mode: 'auto' }];
+t.ok('two auto instances: this one gets the first half', cpu.chosen().join(',') === '2,3,4,5,6,7,8,9');
+plan = [{ self: false, mode: 'auto' }, { self: true, mode: 'auto' }];
+t.ok('…and the other one the second half', cpu.chosen().join(',') === '10,11,12,13,14,15');
+plan = [{ self: true, mode: 'auto' }, { self: false, mode: 'auto' }, { self: false, mode: 'auto' }];
+t.ok('three instances on 7 free cores: 3 + 2 + 2', cpu.chosen().join(',') === '2,3,4,5,6,7');
+plan = [{ self: true, mode: 'auto' }, { self: false, mode: 'all' }];
+t.ok('instances set to "all" do not take a share', cpu.chosen().length === 14);
+settings.save({ cpu: { mode: 'manual', cores: [4, 5, 99, -1, '6'] } });
+t.ok('manual cores filtered to real ones', cpu.chosen().join(',') === '4,5,6' && cpu.cpuCountArg() === 3);
+settings.save({ cpu: { mode: 'manual', cores: [4, 5] }, cpuCount: 2 });
+t.ok('a hand-set -cpuCount wins', cpu.cpuCountArg() === 2);
+t.done();

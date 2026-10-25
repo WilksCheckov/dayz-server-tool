@@ -12,7 +12,9 @@
     "dist": "electron-builder --win",
     "release": "electron-builder --win --publish always",
     "icon": "electron build/gen-icon.js",
-    "maps": "electron scripts/prepare-maps.js"
+    "maps": "electron scripts/prepare-maps.js",
+    "test": "node test/run.js",
+    "predist": "node test/run.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",

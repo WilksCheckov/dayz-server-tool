@@ -1,0 +1,34 @@
+'use strict';
+// Server keys: ownership, shared keys kept on removal, re-signed updates, leftovers, stale copies, name clashes.
+const fs = require('fs'); const path = require('path');
+const t = require('./harness').setup({ name: 'keys' });
+const settings = t.settings(); const p = settings.paths();
+const key = (name, seed) => Buffer.concat([Buffer.from(name.replace(/\.bikey$/, '') + '\0', 'latin1'), Buffer.alloc(4), Buffer.from('0602000000a40000525341310004000001000100', 'hex'), Buffer.from(seed.repeat(64).slice(0, 128))]);
+const put = (dir, name, seed) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name), key(name, seed)); };
+const wsA = path.join(p.workshopDir, '111'), wsB = path.join(p.workshopDir, '222');
+put(path.join(wsA, 'keys'), 'a.bikey', 'A'); put(path.join(wsA, 'keys'), 'shared.bikey', 'S');
+put(path.join(wsB, 'Keys'), 'shared.bikey', 'S'); put(path.join(wsB, 'Keys'), 'clash.bikey', 'X');
+put(path.join(p.serverDir, '@Loose', 'keys'), 'clash.bikey', 'Y'); put(path.join(p.serverDir, '@Loose', 'keys'), 'loose.bikey', 'L');
+for (const [n, sd] of [['dayz.bikey', 'D'], ['old.bikey', 'O'], ['a.bikey', 'A'], ['shared.bikey', 'S'], ['clash.bikey', 'X'], ['loose.bikey', 'stale']]) put(p.keysDir, n, sd);
+settings.save({ mods: [{ id: '111', enabled: true, serverSide: false }, { id: '222', enabled: true, serverSide: false }], modCache: { 111: { title: 'Mod A', folderName: '@ModA', keys: ['a.bikey', 'shared.bikey'] }, 222: { title: 'Mod B', folderName: '@ModB', keys: ['shared.bikey', 'clash.bikey'] } } });
+const mk = t.mod('modkeys'); mk.init(t.emit);
+const mods = t.mod('mods'); mods.init(t.emit);
+const status = () => Object.fromEntries(mk.map().keys.map(k => [k.file, k.status]));
+const users = (f) => (mk.map().keys.find(k => k.file === f) || { mods: [] }).mods.map(m => m.title).sort().join(',');
+
+let s = status();
+t.ok('ownership and statuses', s['a.bikey'] === 'ok' && s['shared.bikey'] === 'shared' && s['dayz.bikey'] === 'base' && s['old.bikey'] === 'orphan' && s['loose.bikey'] === 'outdated' && s['clash.bikey'] === 'conflict', JSON.stringify(s));
+t.ok('unmanaged @folder counted', users('clash.bikey') === '@Loose,Mod B' && users('shared.bikey') === 'Mod A,Mod B');
+t.ok('plan for removing Mod A', JSON.stringify(mk.plan('111', ['a.bikey', 'shared.bikey'])) === '{"remove":["a.bikey"],"keep":[{"file":"shared.bikey","by":["Mod B"]}]}');
+mods.remove('111'); s = status();
+t.ok('removing Mod A deletes its own key, keeps the shared one', !fs.existsSync(path.join(p.keysDir, 'a.bikey')) && s['shared.bikey'] === 'ok' && users('shared.bikey') === 'Mod B');
+fs.unlinkSync(path.join(wsB, 'Keys', 'shared.bikey')); put(path.join(wsB, 'Keys'), 'b_v2.bikey', 'B2');
+mods.link('222'); s = status();
+t.ok('re-signed update removes the old key, adds the new', !fs.existsSync(path.join(p.keysDir, 'shared.bikey')) && s['b_v2.bikey'] === 'ok' && t.lines.some(l => /Removed key shared.bikey/.test(l)));
+const r = mk.removeOrphans(['old.bikey', 'b_v2.bikey', 'dayz.bikey', '..\\x.bikey']);
+t.ok('leftover removal refuses used keys, the game key and paths', JSON.stringify(r.removed) === '["old.bikey"]' && fs.existsSync(path.join(p.keysDir, 'b_v2.bikey')) && fs.existsSync(path.join(p.keysDir, 'dayz.bikey')));
+mk.fix('loose.bikey'); s = status();
+t.ok('fix copies the current key', s['loose.bikey'] === 'ok' && fs.readFileSync(path.join(p.keysDir, 'loose.bikey')).equals(key('loose.bikey', 'L')));
+t.ok('clash stays reported', s['clash.bikey'] === 'conflict');
+t.ok('keys folder end state', fs.readdirSync(p.keysDir).sort().join(' ') === 'b_v2.bikey clash.bikey dayz.bikey loose.bikey', fs.readdirSync(p.keysDir).join(' '));
+t.done();
