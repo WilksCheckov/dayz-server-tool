@@ -862,7 +862,7 @@
                 <div class="muted">A small script the tool writes into the mission's <code>init.c</code> between markers. It records every player's gear every few seconds and at the moment of death, and spawns refunds at a player's feet. It takes effect at the next server start. Without it the death log still records causes, hits and damage, but gear and refunds are unavailable.</div></div>
               <div class="row gap wrap">
                 <label class="check"><input type="checkbox" id="dlBridgeAuto"> Keep it installed before each start</label>
-                <label class="check" title="When an admin presses Refund here or on the map, the player's dead body is removed with everything on it, so the gear cannot be refunded and looted from the body as well. Discord refunds do not remove the body."><input type="checkbox" id="dlDeleteBody"> Refund (in the app) removes the body and its gear</label>
+                <label class="check" title="When an admin presses Refund here or on the map, the player's dead body is removed with everything on it, so the gear cannot be refunded and looted from the body as well (app and Discord refunds alike)."><input type="checkbox" id="dlDeleteBody"> Refunds remove the body and its gear</label>
                 <button class="btn small" id="btnDlInstall">Install / update</button>
                 <button class="btn small" id="btnDlRemove">Remove</button>
                 <button class="btn small" id="btnDlOpenDir" title="Open the folder where the script writes its gear log and reads refund commands">Open bridge folder</button>

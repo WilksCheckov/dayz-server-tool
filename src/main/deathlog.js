@@ -253,8 +253,8 @@ async function refund(deathId, { by = 'app', items = null } = {}) {
   const list = (items || (rec.gear || []).map(i => i.c)).filter(Boolean);
   if (!list.length) throw new Error('No gear recorded for this death');
   const keep = (r) => { rec.refunds.push({ ts: Date.now(), by, ...r, items: list.length }); save(); emitRef('deathlog:changed', { id: rec.id }); };
-  // only when an admin presses Refund in the app (map or Death log page): not for Discord refunds, never on its own
-  const delBody = (by === 'app' || by === 'map') && (settings.load().deathlog || {}).deleteBody !== false;
+  // every refund (app or Discord) removes the body, unless switched off on the Death log page; never on its own
+  const delBody = (settings.load().deathlog || {}).deleteBody !== false;
   const corpse = (d.gear[rec.key] || []).find(x => x.dead && x.pos && Math.abs(x.ts - rec.ts) <= 180000);
   const res = await sendCommand({ type: 'refund', id: rec.key, what: delBody ? 'delbody' : '-', pos: corpse ? [corpse.pos[0], corpse.pos[2]] : null, items: list }, { by, onLate: keep }); res.items = list.length;
   if (delBody && res.status === 'done') emitRef('console', { source: 'deathlog', line: res.body === 'body' ? `Refund for ${rec.name}: their body and everything on it were removed.` : `Refund for ${rec.name}: no body found to remove (already gone, or the server restarted and the death position is not exact).` });
