@@ -1059,10 +1059,15 @@
                   <label class="check"><input type="checkbox" id="webEnabled"> Start automatically with the tool</label>
                 </div>
                 <label class="field">Extra CSS (appended to the generated stylesheet) <textarea id="webCss" class="input" rows="3" placeholder=".hero h1 { font-size: 48px }"></textarea></label>
-                <div class="card-title mt">Remote admin panel (/admin)</div>
-                <div class="row gap wrap"><label class="check"><input type="checkbox" id="webAdminEnabled"> Enable /admin (start, stop, restart, backup, broadcast, kick from a phone)</label></div>
-                <label class="field">Admin password <input id="webAdminPass" class="input" type="password" autocomplete="off" placeholder="required to enable"></label>
                 <div class="row gap mt"><button class="btn primary" id="btnWebSave">Save</button><span class="muted" id="webUrls"></span></div>
+                <div class="card-title mt row between"><span>Portal (/portal)</span><span class="muted" id="portalSummary"></span></div>
+                <p class="muted">A sign-in for your staff: moderators, admins, game masters and developers each see only what their group or their own permissions allow (players and the live map, in-game admin actions, deaths, tickets, logs, server control). Users and groups are managed inside the portal by anyone with the "Manage portal users" permission; everything they do is logged under their name.</p>
+                <div class="row gap wrap">
+                  <label class="check"><input type="checkbox" id="portalEnabled"> Portal on</label>
+                  <button class="btn small" id="btnPortalOpen">Open the portal</button>
+                  <button class="btn small" id="btnPortalOwner" title="Create the first account that can manage the portal, or reset an owner's password if you are locked out">Owner account…</button>
+                  <button class="btn small" id="btnPortalUsers" title="Who has an account and what they may do">Users…</button>
+                </div>
               </div>
               <div class="card">
                 <div class="card-title row between"><span>Domain and HTTPS</span><span class="muted" id="domStatus"></span></div>

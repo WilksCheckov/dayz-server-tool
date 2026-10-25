@@ -1202,7 +1202,7 @@ function loadWebForm() {
   $('webTitle').value = c.title || ''; $('webTagline').value = c.tagline || ''; $('webPort').value = c.port || 8080;
   $('webAccent').value = c.accent || '#4f8cff'; $('webAddress').value = c.serverAddress || ''; refreshJoinAddress(); $('webDiscord').value = c.discordInvite || '';
   $('webBanner').value = c.bannerUrl || ''; $('webDescription').value = c.description || ''; $('webCss').value = c.customCss || '';
-  $('webAdminEnabled').checked = !!(c.admin && c.admin.enabled); $('webAdminPass').value = ''; $('webAdminPass').placeholder = c.admin && (c.admin.passwordHash || c.admin.password) ? '(password set, type a new one to change it)' : 'password';
+  refreshPortal();
   $('webShowMods').checked = c.showMods !== false; $('webShowPlayers').checked = c.showPlayers !== false; $('webShowSchedule').checked = c.showSchedule !== false; $('webEnabled').checked = !!c.enabled;
   webPages = (c.pages || []).map(p => ({ type: 'markdown', ...p }));
   renderWebPages();
@@ -1210,8 +1210,31 @@ function loadWebForm() {
 }
 function webForm() {
   const c = webState ? webState.config : {};
-  return { ...c, title: $('webTitle').value.trim() || 'My DayZ Server', tagline: $('webTagline').value.trim(), port: Number($('webPort').value) || 8080, accent: $('webAccent').value, serverAddress: $('webAddress').value.trim(), discordInvite: $('webDiscord').value.trim(), bannerUrl: $('webBanner').value.trim(), description: $('webDescription').value, customCss: $('webCss').value, showMods: $('webShowMods').checked, showPlayers: $('webShowPlayers').checked, showSchedule: $('webShowSchedule').checked, enabled: $('webEnabled').checked, pages: webPages, admin: (() => { const cur = (c.admin || {}); const pw = $('webAdminPass').value; const has = !!(pw || cur.passwordHash || cur.password); return pw ? { enabled: $('webAdminEnabled').checked, password: pw } : { ...cur, enabled: $('webAdminEnabled').checked && has }; })() };
+  return { ...c, title: $('webTitle').value.trim() || 'My DayZ Server', tagline: $('webTagline').value.trim(), port: Number($('webPort').value) || 8080, accent: $('webAccent').value, serverAddress: $('webAddress').value.trim(), discordInvite: $('webDiscord').value.trim(), bannerUrl: $('webBanner').value.trim(), description: $('webDescription').value, customCss: $('webCss').value, showMods: $('webShowMods').checked, showPlayers: $('webShowPlayers').checked, showSchedule: $('webShowSchedule').checked, enabled: $('webEnabled').checked, pages: webPages };
 }
+// ---------- portal ----------
+async function refreshPortal() {
+  try {
+    const p = await ipc.invoke('portal:status');
+    $('portalEnabled').checked = p.enabled;
+    $('portalSummary').textContent = `${p.users} user${p.users === 1 ? '' : 's'}, ${p.groups} groups${p.owners.length ? ' · can manage: ' + p.owners.join(', ') : ' · no owner account yet'}${p.url ? ' · ' + p.url : ''}${p.enabled && !p.websiteOn ? ' · the website is not running' : ''}`;
+    $('btnPortalOpen').disabled = !p.url || !p.enabled || !p.websiteOn;
+  } catch { /* website module not ready */ }
+}
+$('portalEnabled').onchange = (e) => run(async () => { await ipc.invoke('portal:setEnabled', e.target.checked); refreshPortal(); });
+$('btnPortalOpen').onclick = () => run(async () => { const p = await ipc.invoke('portal:status'); if (p.url) ipc.invoke('shell:openExternal', p.url); });
+$('btnPortalOwner').onclick = (e) => run(async () => {
+  const ok = await showModal('Owner account', '<p class="muted">The account that manages the portal. Creating one turns the portal on; naming an existing user makes them an owner and sets a new password (use this if you are locked out).</p><label class="field">User name <input id="poName" class="input" placeholder="e.g. chris"></label><label class="field">Password (8+ characters) <input id="poPass" class="input" type="password" autocomplete="new-password"></label>', [{ label: 'Save', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  if (!ok) return; await ipc.invoke('portal:setOwner', $('poName').value.trim(), $('poPass').value); toast('Owner account saved; sign in on the portal'); refreshPortal();
+}, e.target);
+$('btnPortalUsers').onclick = (e) => run(async () => {
+  const d = await ipc.invoke('portal:users');
+  const rows = d.users.map(u => `<tr><td>${esc(u.name)}${u.enabled ? '' : ' <span class="badge">disabled</span>'}</td><td>${esc(u.groups.map(g => (d.groups.find(x => x.id === g) || { name: g }).name).join(', ') || '—')}</td><td class="muted">${u.perms.length}/${d.catalogue.length}</td><td class="muted">${u.lastLogin ? esc(fmtDate(Date.parse(u.lastLogin))) : 'never'}</td><td><button class="btn small danger po-del" data-id="${esc(u.id)}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">No users yet: create the owner account.</td></tr>';
+  const groups = d.groups.map(g => `<div><b>${esc(g.name)}</b> <span class="muted">${g.perms.length === d.catalogue.length ? 'everything' : g.perms.length + ' permissions'} · ${g.members} member${g.members === 1 ? '' : 's'}</span></div>`).join('');
+  const p = showModal('Portal users', `<div class="table-wrap" style="max-height:260px"><table class="table"><thead><tr><th>User</th><th>Groups</th><th>Perms</th><th>Last login</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="card-title mt">Groups</div>${groups}<p class="muted small">Add users, change groups and set each permission inside the portal (Users page) with an account that can manage the portal.</p>`, [{ label: 'Close', value: true, primary: true }]);
+  setTimeout(() => { for (const b of document.querySelectorAll('.po-del')) b.onclick = async () => { try { await ipc.invoke('portal:deleteUser', b.dataset.id); toast('User deleted'); $('modalActions').lastElementChild.click(); $('btnPortalUsers').click(); } catch (err) { toast(err.message, true); } }; }, 0);
+  await p; refreshPortal();
+}, e.target);
 async function saveWeb() { await saveSettings({ website: webForm() }); renderWeb(await ipc.invoke('website:status')); refreshWebPreview(); }
 $('btnWebSave').onclick = (e) => run(async () => { await saveWeb(); toast('Website settings saved'); }, e.target);
 $('btnWebStart').onclick = (e) => run(async () => { await saveWeb(); renderWeb(await ipc.invoke('website:start')); toast('Website started'); refreshWebPreview(); }, e.target);

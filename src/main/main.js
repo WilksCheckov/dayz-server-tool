@@ -74,6 +74,7 @@ const cpu = require('./cpu');
 const live = require('./live');
 const adminlog = require('./adminlog');
 const tickets = require('./tickets');
+const portal = require('./portal');
 const scheduler = require('./scheduler');
 
 let win = null;
@@ -162,6 +163,7 @@ function emit(channel, data) {
   if (channel === 'alerts:new' && data && (data.kind === 'crash' || data.kind === 'crash-loop')) stats.recordCrash();
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
   discord.notify(channel);
+  try { portal.notify(channel, data); } catch { /* ignore */ }
   if (channel === 'server:status') { refreshTray(); if (data && !data.running) { try { deathlog.housekeeping(); } catch { /* ignore */ } try { anticheat.housekeeping(); } catch { /* ignore */ } rcon.stopAuto(); if (rcon.status().connected) rcon.disconnect(true); } if (data && data.running) { rcon.autoConnectLoop(); servererrors.reset(); ensureFirewall(); setTimeout(() => network.webStacks().then(w => { const vuln = (w.found || []).filter(f => f.vulnerable); if (vuln.length && w.running.length) alerts.alert('web-stack', 'Vulnerable PHP is running on this machine', `${vuln.map(f => `${f.name} PHP ${f.version} (fix: ${f.fixed})`).join(', ')} with ${w.running.join(', ')} running. Stop it or update it; see the Network page.`); }).catch(() => {}), 20000); setTimeout(() => logs.cleanupIfEnabled(emit), 15000); } }
 }
 
@@ -215,7 +217,7 @@ function createWindow() {
 }
 
 // Wrap handlers so errors reach the renderer as { error } instead of opaque IPC failures.
-const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:(cleanup|saveCleanupCfg)|tickets:(create|setStatus|assign|link|unlink))$/;
+const AUDITED = /^(server:(start|stop|restart)|lists:(add|remove)|mission:(wipe|switch|saveGameplay)|configs:(write|createFile)|cfgform:write|economy:(save\w+|createFile|unregisterFile)|backups:(create|restore|remove)|rcon:(kick|ban|say|command|addBan)|tasks:(upsert|remove|run)|mods:(add|remove|update|updateAll|reorder|toggle|setServerSide|removeOrphanKeys|fixKey)|steam:setCredentials|discord:(start|stop)|website:(start|stop|importSite|removeSite)|updates?:(runNow|run)|app:setPrefs|settings:(set|import)|domain:(save|issue)|heat:(clear|rebuild)|players:(remove|rebuild)|logs:(cleanup|saveCleanupCfg)|tickets:(create|setStatus|assign|link|unlink)|portal:(setEnabled|setOwner|deleteUser))$/;
 const handlerMap = new Map();
 function handle(channel, fn) {
   handlerMap.set(channel, fn);
@@ -412,6 +414,11 @@ handle('tickets:assign', (id, who) => tickets.assign(id, who, 'app'));
 handle('tickets:link', (id, deathId) => tickets.link(id, deathId, 'app'));
 handle('tickets:unlink', (id, deathId) => tickets.unlink(id, deathId, 'app'));
 handle('tickets:setStatus', (id, status, reason) => tickets.setStatus(id, status, 'app', reason || ''));
+handle('portal:status', () => portal.status());
+handle('portal:setEnabled', (on) => portal.setEnabled(on));
+handle('portal:setOwner', (name, password) => portal.setOwner(name, password));
+handle('portal:users', () => ({ users: portal.listUsers(), groups: portal.listGroups(), catalogue: portal.PERMS }));
+handle('portal:deleteUser', (id) => portal.deleteUser(id, 'app'));
 handle('adminlog:cfg', () => ({ ...adminlog.cfg(), channelId: (settings.load().discord || {}).adminLogChannelId || '', needsReason: adminlog.NEEDS_REASON }));
 handle('adminlog:save', (c) => { const cur = settings.load(); settings.save({ adminLog: { ...(cur.adminLog || {}), requireReason: !!c.requireReason, adminName: String(c.adminName || '').trim().slice(0, 40) || adminlog.cfg().adminName }, discord: { ...(cur.discord || {}), adminLogChannelId: String(c.channelId || '').trim() } }); return adminlog.cfg(); });
 handle('lootmap:spawns', (name) => lootmap.spawns(name));
@@ -657,6 +664,7 @@ app.whenReady().then(() => {
   live.init(emit);
   adminlog.init(emit);
   tickets.init(emit);
+  portal.init(emit);
   instances.init(emit);
   instances.setLocalStatus(localStatus);
   instances.setLocal({ open: () => showWindow(), call: (ch, ...args) => handlerMap.get(ch)(...args) });

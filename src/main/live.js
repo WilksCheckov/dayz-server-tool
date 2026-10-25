@@ -91,10 +91,12 @@ async function spawnAt({ x, z, item, count, kit, vehicle, reason }, by = 'app', 
   const items = vehicle ? [vehicleSpec(vehicle)] : kit ? kitItems(kit) : expand([`${String(item || '').trim()} x${Number(count) || 1}`]);
   const r = said(await sendItems({ type: 'spawn', id: '-', pos: [Number(x), Number(z)] }, items, by), 'spawn');
   const what = vehicle || (kit ? 'kit ' + kit : `${Number(count) || 1} × ${item}`);
-  if (record) require('./adminlog').record({ action: 'spawn', by, source: by === 'app' || by === 'map' ? 'app' : 'discord', details: `${what} at ${Math.round(x)}, ${Math.round(z)}`, reason: String(reason || '').trim(), result: r });
+  if (record) require('./adminlog').record({ action: 'spawn', by, source: sourceOf(by), details: `${what} at ${Math.round(x)}, ${Math.round(z)}`, reason: String(reason || '').trim(), result: r });
   return r;
 }
 
+// where an action came from, for the audit log: this PC's app, the web portal, or the Discord bot
+const sourceOf = (by) => by === 'app' || by === 'map' ? 'app' : /\(portal\)$/.test(String(by)) ? 'web' : 'discord';
 function find(id) { const p = players().players.find(x => x.id === id || x.steam === id); if (!p) throw new Error('That player is not online.'); return p; }
 
 // RCon's player number for a live player (by name; BattlEye knows no Steam or DayZ ids)
@@ -122,7 +124,7 @@ async function act(action, id, args = {}, by = 'app') {
   const p = find(id);
   const reason = String(args.reason || '').trim();
   const adminlog = require('./adminlog'); adminlog.check(action, reason);
-  const log = (line, r) => adminlog.record({ action, by, source: by === 'app' || by === 'map' ? 'app' : 'discord', target: { name: p.name, steam: p.steam }, details: line, reason, result: r });
+  const log = (line, r) => adminlog.record({ action, by, source: sourceOf(by), target: { name: p.name, steam: p.steam }, details: line, reason, result: r });
   switch (action) {
     case 'heal': { const what = args.what || 'all'; const r = said(await dl.heal(p.id, what, { by }), 'heal'); log(`healed (${dl.HEAL_KINDS[what] || what})`, r); return r; }
     case 'tp': { const r = said(await dl.teleport(p.id, [Number(args.x), Number(args.z)], { by }), 'teleport'); log(`teleported to ${Math.round(args.x)}, ${Math.round(args.z)}`, r); return r; }

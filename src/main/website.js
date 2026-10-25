@@ -190,82 +190,7 @@ async function modsPage(c) {
 
 function customPage(c, p) { return layout(c, '/' + p.slug, p.title, pageBody(p)); }
 
-// ---------- admin panel (/admin): password-protected remote control ----------
-const crypto = require('crypto');
-const adminSessions = new Map(); // token -> expiry
-const loginFails = new Map(); // ip -> { n, until }
-function safeEq(a, b) { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
-function hashPw(pw, salt) { return crypto.createHash('sha256').update(salt + ':' + pw).digest('hex'); }
-// The admin password is stored as a salted hash. A plain password left over from an older version is hashed on first read.
-function adminCfg() {
-  const s = settings.load();
-  const ac = { enabled: false, password: '', passwordHash: '', salt: '', ...((s.website || {}).admin || {}) };
-  if (ac.password) {
-    ac.salt = crypto.randomBytes(8).toString('hex'); ac.passwordHash = hashPw(ac.password, ac.salt); ac.password = '';
-    settings.save({ website: { ...(s.website || {}), admin: { enabled: ac.enabled, passwordHash: ac.passwordHash, salt: ac.salt } } });
-  }
-  return ac;
-}
-function adminToken(req) { const m = (req.headers.cookie || '').match(/dzadmin=([a-f0-9]+)/); const t = m && m[1]; return t && adminSessions.get(t) > Date.now() ? t : null; }
-function adminPage(c, body, { loggedIn = false, error = '' } = {}) {
-  return layout(c, '/admin', 'Admin', loggedIn ? body : `<h1>Admin</h1>${error ? `<p style="color:#ff5f5f">${esc(error)}</p>` : ''}<form method="post" action="/admin/login" class="card" style="max-width:380px"><label>Password<br><input type="password" name="password" style="width:100%;padding:8px;margin:6px 0 12px;border-radius:8px;border:1px solid #333;background:#0b0d12;color:#fff"></label><button class="btn" type="submit" style="margin:0">Log in</button></form>`);
-}
-function adminHtml(c) {
-  return `<h1>Admin</h1><div class="grid">
-<div class="card"><h3>Server</h3><div class="big" id="st">…</div><div class="muted" id="st2"></div><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="start">Start</button><button class="btn" data-act="restart">Restart</button><button class="btn" data-act="stop" style="background:#5a2a33">Stop</button><button class="btn" data-act="backup" style="background:#333">Backup now</button></div></div>
-<div class="card"><h3>Broadcast</h3><input id="say" placeholder="Message to all players" style="width:100%;padding:8px;border-radius:8px;border:1px solid #333;background:#0b0d12;color:#fff"><button class="btn" data-act="say">Send</button></div>
-</div>
-<div class="card"><h3>Online players</h3><table><thead><tr><th>#</th><th>Name</th><th>Ping</th><th></th></tr></thead><tbody id="pl"><tr><td colspan="4" class="muted">RCon not connected in the tool.</td></tr></tbody></table></div>
-<p class="muted"><a href="/admin/logout">Log out</a></p>
-<script>
-async function api(path, body){const r=await fetch('/admin/api/'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(r.status===401){location.reload();return null;}return r.json();}
-async function refresh(){const d=await api('status');if(!d)return;document.getElementById('st').textContent=d.online?'Online':'Offline';document.getElementById('st2').textContent=(d.players!==null?d.players+' players · ':'')+(d.online?'up '+Math.floor(d.uptimeSeconds/60)+' min':'');const tb=document.getElementById('pl');if(d.playerRows){tb.innerHTML=d.playerRows.map(p=>'<tr><td>'+p.num+'</td><td>'+p.name.replace(/</g,'&lt;')+'</td><td>'+p.ping+'</td><td><button class="btn" style="margin:0;padding:4px 10px" data-kick="'+p.num+'">Kick</button></td></tr>').join('')||'<tr><td colspan="4" class="muted">No players</td></tr>';}}
-document.addEventListener('click',async e=>{const a=e.target.getAttribute('data-act');const k=e.target.getAttribute('data-kick');if(a==='say'){const m=document.getElementById('say').value.trim();if(m){await api('say',{message:m});document.getElementById('say').value='';}return;}if(a){if(a==='stop'&&!confirm('Stop the server?'))return;await api(a,{});setTimeout(refresh,1500);}if(k!==null&&k!==undefined){if(confirm('Kick player #'+k+'?'))await api('kick',{num:Number(k)});setTimeout(refresh,1500);}});
-refresh();setInterval(refresh,15000);
-</script>`;
-}
-async function handleAdmin(req, res, p, c, send) {
-  const ac = adminCfg();
-  if (!ac.enabled || !ac.passwordHash) return send(404, 'text/html', layout(c, '', 'Not found', '<h1>Admin panel is disabled</h1><p class="muted">Enable it on the Website page in DayZ Admin Tools and set a password.</p>'));
-  if (p === '/admin/login' && req.method === 'POST') {
-    let body = ''; req.on('data', d => { body += d; if (body.length > 4096) req.destroy(); });
-    req.on('end', () => {
-      const ip = String(req.socket.remoteAddress || ''); const lf = loginFails.get(ip);
-      if (lf && lf.n >= 5 && Date.now() < lf.until) { res.writeHead(429, { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '900' }); return res.end(adminPage(c, '', { error: 'Too many attempts. Try again in 15 minutes.' })); }
-      const pw = decodeURIComponent((new URLSearchParams(body).get('password') || ''));
-      if (!pw || !safeEq(hashPw(pw, ac.salt), ac.passwordHash)) {
-        const f = loginFails.get(ip) || { n: 0, until: 0 }; f.n++; f.until = Date.now() + 15 * 60000; loginFails.set(ip, f);
-        try { require('./audit').log('web', ip, 'admin login failed', ''); } catch { /* ignore */ } res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(adminPage(c, '', { error: 'Wrong password.' })); }
-      loginFails.delete(ip);
-      const token = crypto.randomBytes(24).toString('hex'); adminSessions.set(token, Date.now() + 12 * 3600 * 1000);
-      try { require('./audit').log('web', ip, 'admin login', ''); } catch { /* ignore */ }
-      res.writeHead(302, { Location: '/admin', 'Set-Cookie': `dzadmin=${token}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=43200${req.socket.encrypted ? '; Secure' : ''}` }); res.end();
-    });
-    return;
-  }
-  if (p === '/admin/logout') { const t = adminToken(req); if (t) adminSessions.delete(t); res.writeHead(302, { Location: '/admin', 'Set-Cookie': 'dzadmin=; Path=/admin; Max-Age=0' }); return res.end(); }
-  const token = adminToken(req);
-  if (p.startsWith('/admin/api/')) {
-    if (!token) return send(401, 'application/json', '{"error":"unauthorized"}');
-    if (req.method === 'POST') { const origin = req.headers.origin || req.headers.referer || ''; const host = String(req.headers.host || ''); if (origin && !new RegExp('^https?://' + host.replace(/[.*+?^$()|[\]\\]/g, '\\$&') + '(/|$)', 'i').test(origin)) return send(403, 'application/json', '{"error":"cross-site request blocked"}'); if (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin') return send(403, 'application/json', '{"error":"cross-site request blocked"}'); }
-    const action = p.slice('/admin/api/'.length);
-    let body = {}; if (req.method === 'POST') { let raw = ''; await new Promise(r => { req.on('data', d => { raw += d; if (raw.length > 8192) req.destroy(); }); req.on('end', r); }); try { body = JSON.parse(raw || '{}'); } catch { body = {}; } }
-    try {
-      if (action === 'status') { const d = await serverStatus(); let playerRows = null; if (d.online && rcon.status().connected) { try { playerRows = (await rcon.players()).players.map(x => ({ num: x.num, name: x.name, ping: x.ping })); } catch { playerRows = null; } } return send(200, 'application/json', JSON.stringify({ ...d, playerRows })); }
-      if (req.method !== 'POST') return send(405, 'application/json', '{"error":"POST required"}');
-      if (action === 'start') server.start(); else if (action === 'stop') await server.stop(); else if (action === 'restart') await require('./scheduler').restartNow();
-      else if (action === 'backup') await require('./backups').create('admin-panel');
-      else if (action === 'say') await rcon.say(String(body.message || '').slice(0, 200));
-      else if (action === 'kick') await rcon.kick(Number(body.num), 'Kicked by admin');
-      else return send(404, 'application/json', '{"error":"unknown action"}');
-      emitRef('console', { source: 'website', line: `Admin panel: ${action}` });
-      try { require('./audit').log('web', String(req.socket.remoteAddress || ''), 'admin panel: ' + action, body && Object.keys(body).length ? body : ''); } catch { /* ignore */ }
-      return send(200, 'application/json', '{"ok":true}');
-    } catch (e) { return send(500, 'application/json', JSON.stringify({ error: e.message })); }
-  }
-  return send(200, 'text/html', adminPage(c, adminHtml(c), { loggedIn: !!token }));
-}
-
+// The portal (/portal) with accounts, groups and permissions replaced the single-password /admin panel.
 // ---------- http ----------
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json', '.txt': 'text/plain', '.woff2': 'font/woff2' };
 
@@ -283,7 +208,8 @@ async function handle(req, res) {
         if (host === dc.name.toLowerCase()) { res.writeHead(301, { Location: `https://${dc.name}${Number(dc.httpsPort) === 443 ? '' : ':' + dc.httpsPort}${req.url}` }); return res.end(); }
       } }
     if (p === '/dayz-status.js') return send(200, 'text/javascript', STATUS_JS);
-    if (p === '/admin' || p.startsWith('/admin/')) return handleAdmin(req, res, p, c, send);
+    if (p === '/admin' || p.startsWith('/admin/')) { res.writeHead(302, { Location: '/portal' }); return res.end(); }
+    if (p === '/portal' || p.startsWith('/portal/')) return require('./portal').handle(req, res, p, send, url);
     if (p === '/api/maptiles') return require('./maplink').handleUpload(req, res, url, send);
     // A dropped website wins over everything except the API.
     if (!p.startsWith('/api/')) {

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DayZ Admin Tools portal</title>
+<style>
+:root { --bg: #0f1115; --panel: #171a21; --panel2: #1f232c; --border: #2a2f3a; --text: #e6e8ee; --muted: #8a94a6; --accent: #4f8cff; --ok: #3ddc84; --warn: #f5b942; --bad: #ff5f5f; }
+* { box-sizing: border-box; } body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, Segoe UI, sans-serif; }
+a { color: var(--accent); } button, input, select, textarea { font: inherit; color: inherit; }
+.btn { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 11px; cursor: pointer; } .btn:hover { border-color: var(--accent); } .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; } .btn.danger { color: var(--bad); } .btn.small { padding: 3px 8px; font-size: 12.5px; } .btn:disabled { opacity: .5; cursor: default; }
+.input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; width: 100%; } textarea.input { min-height: 70px; }
+.muted { color: var(--muted); } .small { font-size: 12.5px; } .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .grow { flex: 1; } .mt { margin-top: 10px; }
+.badge { font-size: 11px; padding: 0 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--muted); } .badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); } .badge.bad { color: var(--bad); }
+header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header b { font-size: 16px; } nav { display: flex; gap: 4px; flex-wrap: wrap; } nav button { background: none; border: 1px solid transparent; border-radius: 6px; padding: 6px 10px; cursor: pointer; color: var(--muted); } nav button.on { color: var(--text); background: var(--panel2); border-color: var(--border); }
+main { padding: 14px 16px; max-width: 1400px; margin: 0 auto; } .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; } .card h3 { margin: 0 0 8px; font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; } .big { font-size: 26px; font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; } th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); } td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; } tr.sel td { background: #1d2a44; } tbody tr:hover td { background: var(--panel2); cursor: pointer; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 12px; } @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+.login { max-width: 360px; margin: 10vh auto; }
+pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 12px; max-height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+#mapWrap { position: relative; } #map { width: 100%; height: 70vh; background: #11151b; border: 1px solid var(--border); border-radius: 8px; display: block; cursor: grab; }
+.menu { position: fixed; z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px; min-width: 200px; box-shadow: 0 8px 24px rgba(0,0,0,.5); } .menu div { padding: 6px 10px; border-radius: 4px; cursor: pointer; } .menu div:hover { background: var(--panel2); } .menu .h { font-weight: 600; cursor: default; border-bottom: 1px solid var(--border); margin-bottom: 3px; } .menu .d { color: var(--bad); }
+.modalbg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 30; } .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; width: 480px; max-width: 94vw; max-height: 90vh; overflow: auto; } .modal h3 { margin: 0 0 8px; } .modal label { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 12.5px; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; z-index: 40; } .toast.bad { border-color: var(--bad); }
+.perm { display: grid; grid-template-columns: 1fr; gap: 2px; } .perm label { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; } .perm .g { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border); font-size: 12px; margin: 1px; }
+</style>
+</head>
+<body>
+<header><b>DayZ Admin Tools</b><span class="muted" id="hdInst"></span><nav id="nav"></nav><span class="grow"></span><span class="muted small" id="hdUser"></span><button class="btn small" id="btnPw" hidden>Password</button><button class="btn small" id="btnOut" hidden>Sign out</button></header>
+<main id="main"></main>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (ts) => ts ? new Date(typeof ts === 'string' ? Date.parse(ts) : ts).toLocaleString() : '—';
+const ago = (ts) => { if (!ts) return '—'; const m = Math.round((Date.now() - (typeof ts === 'string' ? Date.parse(ts) : ts)) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
+let me = null, page = 'dashboard', toastT = null;
+function toast(msg, bad) { let t = document.querySelector('.toast'); if (!t) { t = document.createElement('div'); document.body.appendChild(t); } t.className = 'toast' + (bad ? ' bad' : ''); t.textContent = msg; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), bad ? 6000 : 3000); }
+async function api(route, body, params) {
+  const qs = params ? '?' + new URLSearchParams(params) : '';
+  const r = await fetch('/portal/api/' + route + qs, { method: body ? 'POST' : 'GET', headers: body ? { 'Content-Type': 'application/json', 'X-Portal': '1' } : { 'X-Portal': '1' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({ ok: false, error: 'bad reply' }));
+  if (r.status === 401) { me = null; render(); throw new Error(j.error || 'Sign in.'); }
+  if (!j.ok) throw new Error(j.error || 'failed');
+  return j.data;
+}
+const can = (p) => !!(me && me.perms.includes(p));
+// ---------- modal ----------
+function modal(title, bodyHtml, buttons = [['OK', true, true], ['Cancel', false]]) {
+  return new Promise(resolve => {
+    const bg = document.createElement('div'); bg.className = 'modalbg';
+    bg.innerHTML = `<div class="modal"><h3>${esc(title)}</h3>${bodyHtml}<div class="row mt" style="justify-content:flex-end">${buttons.map((b, i) => `<button class="btn ${b[2] ? 'primary' : ''}" data-i="${i}">${esc(b[0])}</button>`).join('')}</div></div>`;
+    bg.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) { const v = buttons[Number(b.dataset.i)][1]; bg.remove(); resolve(v); } else if (e.target === bg) { bg.remove(); resolve(false); } });
+    document.body.appendChild(bg); const f = bg.querySelector('input, textarea, select'); if (f) f.focus();
+    bg.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { const b = bg.querySelector('button.primary'); if (b) b.click(); } });
+  });
+}
+async function askReason(title, extraHtml = '', required = true) {
+  const ok = await modal(title, extraHtml + `<label>Reason${required ? '' : ' (optional)'}</label><input id="mWhy" class="input" placeholder="Why (goes to the admin action channel)">`);
+  if (!ok) return null; const v = $('mWhy').value.trim(); if (required && !v) { toast('Give a reason.', true); return null; } return v;
+}
+// ---------- pages ----------
+const PAGES = [['dashboard', 'Dashboard', 'server.view'], ['players', 'Players', 'players.view'], ['map', 'Map', 'players.view'], ['deaths', 'Deaths', 'deaths.view'], ['tickets', 'Tickets', 'tickets.view'], ['logs', 'Logs', 'logs.view'], ['audit', 'Audit', 'audit.view'], ['users', 'Users', 'portal.users']];
+let timer = null;
+function render() {
+  clearInterval(timer); timer = null; closeMenu();
+  const main = $('main');
+  if (!me) {
+    $('nav').innerHTML = ''; $('hdUser').textContent = ''; $('btnOut').hidden = true; $('btnPw').hidden = true; $('hdInst').textContent = '';
+    main.innerHTML = `<div class="card login"><h3>Sign in</h3><label class="muted small">User name</label><input id="lgName" class="input" autocomplete="username"><label class="muted small mt">Password</label><input id="lgPass" class="input" type="password" autocomplete="current-password"><div class="row mt"><button class="btn primary" id="lgGo">Sign in</button><span class="muted small" id="lgErr"></span></div></div>`;
+    const go = async () => { try { await api('login', { name: $('lgName').value, password: $('lgPass').value }); await loadMe(); } catch (e) { $('lgErr').textContent = e.message; } };
+    $('lgGo').onclick = go; $('lgPass').onkeydown = e => { if (e.key === 'Enter') go(); }; $('lgName').focus(); return;
+  }
+  const pages = PAGES.filter(p => can(p[2])); if (!pages.some(p => p[0] === page)) page = pages.length ? pages[0][0] : 'none';
+  $('nav').innerHTML = pages.map(p => `<button class="${p[0] === page ? 'on' : ''}" data-p="${p[0]}">${p[1]}</button>`).join('');
+  $('nav').onclick = e => { const b = e.target.closest('button'); if (b) { page = b.dataset.p; render(); } };
+  $('hdUser').textContent = `${me.name} · ${me.groups.join(', ') || 'no group'}`; $('btnOut').hidden = false; $('btnPw').hidden = false; $('hdInst').textContent = me.instance;
+  const fn = { dashboard: pageDashboard, players: pagePlayers, map: pageMap, deaths: pageDeaths, tickets: pageTickets, logs: pageLogs, audit: pageAudit, users: pageUsers }[page];
+  if (!fn) { main.innerHTML = '<div class="card">Your account has no permissions yet. Ask whoever manages the portal.</div>'; return; }
+  fn(main).catch(e => { main.innerHTML = `<div class="card">${esc(e.message)}</div>`; });
+}
+async function loadMe() { try { me = await api('me'); } catch { me = null; } render(); }
+$('btnOut').onclick = async () => { await api('logout', {}).catch(() => {}); me = null; render(); };
+$('btnPw').onclick = async () => { const ok = await modal('Change your password', '<label>Current password</label><input id="pwA" class="input" type="password"><label>New password (8+ characters)</label><input id="pwB" class="input" type="password">'); if (!ok) return; try { await api('password', { current: $('pwA').value, password: $('pwB').value }); toast('Password changed'); } catch (e) { toast(e.message, true); } };
+const stageText = (s) => !s.running ? 'Offline' : s.stage && !s.stage.ready ? 'Loading: ' + s.stage.label : s.stopping ? 'Stopping…' : 'Online';
+// ---------- dashboard ----------
+async function pageDashboard(main) {
+  const draw = async () => {
+    const d = await api('status'); const h = d.health || {};
+    main.innerHTML = `<div class="grid">
+      <div class="card"><h3>Server</h3><div class="big">${esc(stageText(d.server))}</div><div class="muted">${d.server.startedAt ? 'up since ' + fmt(d.server.startedAt) : ''}${d.server.crashLoop ? ' · crash loop: auto-restart paused' : ''}${d.server.restartPending ? ' · restarting' : ''}</div>
+        ${can('server.control') ? `<div class="row mt">${d.server.running ? `<button class="btn" data-srv="restart">Restart</button><button class="btn danger" data-srv="stop">${d.server.stopping ? 'Force stop' : 'Stop'}</button>` : '<button class="btn primary" data-srv="start">Start</button>'}${can('server.backup') ? '<button class="btn" id="btnBackup">Backup now</button>' : ''}</div>` : ''}</div>
+      <div class="card"><h3>Players</h3><div class="big">${d.online === null ? '—' : d.online}</div><div class="muted">online now · RCon ${d.rcon ? 'connected' : 'off'}</div></div>
+      <div class="card"><h3>Health</h3><div>CPU ${h.cpu != null ? Math.round(h.cpu) + '%' : '—'} · RAM ${h.ramMB ? (h.ramMB / 1024).toFixed(1) + ' GB' : '—'} · FPS ${h.fps ? Math.round(h.fps) : '—'}</div><div class="muted">${d.map ? d.map.label + ' · ' + d.map.size + ' m' : ''} · ${esc(d.instance)}</div></div></div>`;
+    main.querySelectorAll('[data-srv]').forEach(b => b.onclick = async () => { const what = b.dataset.srv; if (what !== 'start' && !(await modal(`${what === 'stop' ? 'Stop' : 'Restart'} the server?`, '<p class="muted">Players are disconnected; the world is saved first.</p>'))) return; try { await api('server', { what, force: d.server.stopping }); toast('Done'); draw(); } catch (e) { toast(e.message, true); } });
+    const bk = $('btnBackup'); if (bk) bk.onclick = async () => { bk.disabled = true; try { const r = await api('backup', {}); toast(`Backup ${r.name} saved`); } catch (e) { toast(e.message, true); } bk.disabled = false; };
+  };
+  await draw(); timer = setInterval(() => draw().catch(() => {}), 5000);
+}
+// ---------- players ----------
+let live = null;
+const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
+async function act(action, p, args = {}) {
+  try { const r = await api('act', { action, id: p.id, args }); if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(`${p.name}: ${action} done${r && r.ok !== undefined && (r.ok || r.fail) ? ` (${r.ok} ok${r.fail ? ', ' + r.fail + ' failed' : ''})` : ''}${r && r.body === 'body' ? ' · body removed' : ''}`); }
+  catch (e) { toast(e.message, true); }
+}
+function closeMenu() { const m = document.querySelector('.menu'); if (m) m.remove(); }
+function showMenu(items, x, y) {
+  closeMenu(); const m = document.createElement('div'); m.className = 'menu';
+  m.innerHTML = items.map((it, i) => it.h ? `<div class="h">${esc(it.h)}</div>` : `<div data-i="${i}" class="${it.danger ? 'd' : ''}">${esc(it.label)}</div>`).join('');
+  m.onclick = e => { const d = e.target.closest('[data-i]'); if (!d) return; closeMenu(); items[Number(d.dataset.i)].run(); };
+  document.body.appendChild(m); const r = m.getBoundingClientRect(); m.style.left = Math.min(x, innerWidth - r.width - 8) + 'px'; m.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+}
+document.addEventListener('click', e => { if (!e.target.closest('.menu')) closeMenu(); });
+function playerMenu(p) {
+  const others = (live && live.players || []).filter(o => o.id !== p.id); const items = [{ h: p.name + (p.god ? ' (god mode)' : '') + (!p.alive ? ' (dead)' : '') }];
+  const withWhy = (title, run, required = true, extra = '') => async () => { const why = await askReason(title, extra, required); if (why !== null) run(why); };
+  if (can('admin.heal')) for (const [k, l] of HEALS) items.push({ label: l, run: withWhy(`${l} · ${p.name}`, why => act('heal', p, { what: k, reason: why })) });
+  if (can('admin.teleport')) {
+    for (const o of others) items.push({ label: `Teleport to ${o.name}`, run: withWhy(`Teleport ${p.name} to ${o.name}`, why => act('tpto', p, { to: o.id, reason: why })) });
+    for (const o of others) items.push({ label: `Bring ${o.name} here`, run: withWhy(`Bring ${o.name} to ${p.name}`, why => act('bring', p, { to: o.id, reason: why })) });
+    items.push({ label: 'Teleport to their last death', run: withWhy(`Teleport ${p.name} to their last death`, why => act('tpdeath', p, { reason: why })) });
+    items.push({ label: 'Teleport to a map point…', run: async () => { const ok = await modal(`Teleport ${p.name}`, '<label>X</label><input id="tX" class="input" type="number"><label>Z</label><input id="tZ" class="input" type="number"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('tp', p, { x: Number($('tX').value), z: Number($('tZ').value), reason: why }); } });
+  }
+  if (can('admin.spawn')) {
+    items.push({ label: 'Give item…', run: async () => { const ok = await modal(`Give ${p.name} an item`, '<label>Class name (Parent; Attachment fits attachments)</label><input id="gI" class="input" placeholder="e.g. BandageDressing"><label>How many</label><input id="gN" class="input" type="number" value="1" min="1" max="50"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('give', p, { item: $('gI').value.trim(), count: Number($('gN').value) || 1, reason: why }); } });
+    items.push({ label: 'Give kit…', run: async () => { const kits = await api('kits'); if (!kits.length) return toast('No kits yet (made in the app)', true); const ok = await modal(`Give ${p.name} a kit`, `<label>Kit</label><select id="gK" class="input">${kits.map(k => `<option value="${esc(k.name)}">${esc(k.name)} (${k.items})</option>`).join('')}</select><label>Reason</label><input id="mWhy" class="input">`); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('kit', p, { kit: $('gK').value, reason: why }); } });
+    items.push({ label: 'Spawn a vehicle next to them…', run: async () => { const v = await api('vehicles'); const ok = await modal(`Spawn a vehicle next to ${p.name}`, `<label>Vehicle (every part fitted, fluids full)</label><select id="gV" class="input">${v.map(x => `<option>${esc(x.name)}</option>`).join('')}</select><label>Reason</label><input id="mWhy" class="input">`); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('vehicle', p, { vehicle: $('gV').value, reason: why }); } });
+  }
+  if (can('admin.refund')) items.push({ label: 'Refund their last death…', run: withWhy(`Refund ${p.name}'s last death`, why => act('refund', p, { reason: why }), false, '<p class="muted small">Spawns the gear of their last recorded death at their feet; their body is removed.</p>') });
+  if (can('admin.god')) items.push({ label: p.god ? 'God mode off' : 'God mode on', run: withWhy(`God mode ${p.god ? 'off' : 'on'} · ${p.name}`, why => act('god', p, { on: !p.god, reason: why })) });
+  if (can('players.message')) items.push({ label: 'Message…', run: async () => { const ok = await modal(`Message ${p.name}`, '<label>Message (only they see it)</label><input id="mT" class="input">'); if (ok && $('mT').value.trim()) act('message', p, { text: $('mT').value.trim() }); } });
+  if (can('players.kick')) items.push({ label: 'Kick…', danger: true, run: withWhy(`Kick ${p.name}?`, why => act('kick', p, { reason: why }), true, '<p class="muted small">The reason is shown to them.</p>') });
+  if (can('players.ban')) items.push({ label: 'Ban…', danger: true, run: withWhy(`Ban ${p.name}?`, why => act('ban', p, { reason: why }), true, `<p class="muted small">Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them.</p>`) });
+  if (can('admin.kill')) items.push({ label: 'Kill…', danger: true, run: withWhy(`Kill ${p.name}?`, why => act('kill', p, { reason: why })) });
+  return items;
+}
+async function pagePlayers(main) {
+  main.innerHTML = '<div class="card"><div class="row"><h3 class="grow" style="margin:0">Online players</h3><span class="muted small" id="plWhen"></span></div><table id="plT"><thead><tr><th>Name</th><th>Health</th><th>Blood</th><th>Position</th><th>Vehicle</th><th></th></tr></thead><tbody></tbody></table><p class="muted small">Right-click a player, or use the ⋯ button, for actions. Positions come from the server every 1.5 s.</p></div>';
+  const draw = async () => {
+    live = await api('players'); const tb = main.querySelector('tbody');
+    if (!live.available) { tb.innerHTML = `<tr><td colspan="6" class="muted">${esc(live.reason)}</td></tr>`; $('plWhen').textContent = ''; return; }
+    $('plWhen').textContent = `${live.players.length} online · ${ago(live.at)}`;
+    tb.innerHTML = live.players.map(p => `<tr data-id="${esc(p.id)}"><td>${esc(p.name)}${p.god ? ' <span class="badge">god</span>' : ''}${!p.alive ? ' <span class="badge bad">dead</span>' : ''}</td><td>${Math.round(p.health * 100)}%</td><td>${Math.round(p.blood)}</td><td class="muted">${Math.round(p.x)}, ${Math.round(p.z)}</td><td class="muted">${esc(p.vehicle || '')}</td><td><button class="btn small pl-more">⋯</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nobody online.</td></tr>';
+  };
+  main.addEventListener('contextmenu', e => { const tr = e.target.closest('tr[data-id]'); if (!tr) return; e.preventDefault(); const p = live.players.find(x => x.id === tr.dataset.id); if (p) showMenu(playerMenu(p), e.clientX, e.clientY); });
+  main.addEventListener('click', e => { const b = e.target.closest('.pl-more'); if (!b) return; const tr = b.closest('tr'); const p = live.players.find(x => x.id === tr.dataset.id); const r = b.getBoundingClientRect(); if (p) showMenu(playerMenu(p), r.left, r.bottom + 2); });
+  await draw(); timer = setInterval(() => draw().catch(() => {}), 2000);
+}
+// ---------- map ----------
+async function pageMap(main) {
+  const info = await api('map');
+  main.innerHTML = `<div class="card" style="padding:8px"><div class="row" style="margin-bottom:6px"><b>${esc(info.label || info.key || 'Map')}</b><span class="muted small" id="mapInfo">scroll to zoom, drag to pan, right-click a player or a point</span><span class="grow"></span><span class="muted small" id="mapWhen"></span></div><div id="mapWrap"><canvas id="map"></canvas></div></div>`;
+  const c = $('map'); const ctx = c.getContext('2d'); const size = info.size || 15360; const view = { scale: 1, ox: 0, oy: 0 }; const tiles = new Map(); let img = null; let sel = null;
+  if (!info.tiles && info.image) { img = new Image(); img.src = '/portal/map/image'; img.onload = draw; }
+  const base = () => Math.max(100, Math.min(c.width, c.height));
+  const toScreen = (x, z) => { const sz = base(); return [(c.width - sz) / 2 + (x / size) * sz * view.scale + view.ox, (c.height - sz) / 2 + (sz - (z / size) * sz) * view.scale + view.oy]; };
+  const toWorld = (px, py) => { const sz = base(); const bx = (px - (c.width - sz) / 2 - view.ox) / view.scale, by = (py - (c.height - sz) / 2 - view.oy) / view.scale; return [bx / sz * size, (sz - by) / sz * size]; };
+  const tile = (z, x, y) => { const k = `${z}/${x}_${y}`; let t = tiles.get(k); if (!t) { t = { img: new Image(), ok: false }; t.img.onload = () => { t.ok = true; draw(); }; t.img.src = `/portal/map/tiles/${z}/${x}_${y}.jpg`; tiles.set(k, t); } return t; };
+  function draw() {
+    const rect = c.getBoundingClientRect(); if (c.width !== Math.round(rect.width) || c.height !== Math.round(rect.height)) { c.width = Math.round(rect.width); c.height = Math.round(rect.height); }
+    ctx.fillStyle = '#11151b'; ctx.fillRect(0, 0, c.width, c.height);
+    const sz = base(); const [ox, oy] = toScreen(0, size);
+    if (info.tiles) {
+      const T = info.tiles; const shown = sz * view.scale; const z = Math.max(T.minZ, Math.min(T.maxZ, Math.round(Math.log2(Math.max(1, shown / T.tile)))));
+      const n = Math.ceil(T.width / T.tile / Math.pow(2, T.maxZ - z)); const ts = shown / n;
+      for (let x = 0; x < n; x++) for (let y = 0; y < n; y++) { const px = ox + x * ts, py = oy + y * ts; if (px + ts < 0 || py + ts < 0 || px > c.width || py > c.height) continue; const t = tile(z, x, y); if (t.ok) ctx.drawImage(t.img, px, py, ts + 0.5, ts + 0.5); }
+    } else if (img && img.complete) ctx.drawImage(img, ox, oy, sz * view.scale, sz * view.scale);
+    ctx.font = '12px system-ui';
+    for (const p of (live && live.players) || []) {
+      const [x, y] = toScreen(p.x, p.z); const col = !p.alive ? '#8a8f98' : p.god ? '#6fa8ff' : '#46d36a'; const h = (p.heading || 0) * Math.PI / 180;
+      ctx.beginPath(); ctx.moveTo(x + Math.sin(h) * 13, y - Math.cos(h) * 13); ctx.lineTo(x + Math.sin(h + 2.5) * 6, y - Math.cos(h + 2.5) * 6); ctx.lineTo(x + Math.sin(h - 2.5) * 6, y - Math.cos(h - 2.5) * 6); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke();
+      if (sel === p.id) { ctx.beginPath(); ctx.arc(x, y, 11, 0, Math.PI * 2); ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
+      const w = ctx.measureText(p.name).width; ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 9, y - 8, w + 6, 15); ctx.fillStyle = '#fff'; ctx.fillText(p.name, x + 12, y + 3);
+    }
+  }
+  const at = (px, py) => { let best = null, bd = 9; for (const p of (live && live.players) || []) { const [x, y] = toScreen(p.x, p.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = p; } } return best; };
+  let drag = null;
+  c.addEventListener('wheel', e => { e.preventDefault(); const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; const f = e.deltaY < 0 ? 1.2 : 1 / 1.2; const ns = Math.min(40, Math.max(1, view.scale * f)); const k = ns / view.scale; const sz = base(); const cx = (c.width - sz) / 2, cy = (c.height - sz) / 2; view.ox = px - cx - (px - cx - view.ox) * k; view.oy = py - cy - (py - cy - view.oy) * k; view.scale = ns; draw(); }, { passive: false });
+  c.addEventListener('mousedown', e => { if (e.button === 0) drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false }; });
+  window.addEventListener('mousemove', e => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; view.ox = drag.ox + dx; view.oy = drag.oy + dy; draw(); });
+  window.addEventListener('mouseup', e => { const d = drag; drag = null; if (!d || d.moved) return; const r = c.getBoundingClientRect(); const p = at(e.clientX - r.left, e.clientY - r.top); sel = p ? p.id : null; draw(); });
+  c.addEventListener('contextmenu', e => { e.preventDefault(); const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; const p = at(px, py); if (p) { sel = p.id; draw(); return showMenu(playerMenu(p), e.clientX, e.clientY); } const w = toWorld(px, py); const items = [{ h: `${Math.round(w[0])}, ${Math.round(w[1])}` }];
+    const s = sel && live && live.players.find(x => x.id === sel);
+    if (can('admin.teleport')) { if (s) items.push({ label: `Teleport ${s.name} here`, run: async () => { const why = await askReason(`Teleport ${s.name} here`); if (why !== null) act('tp', s, { x: w[0], z: w[1], reason: why }); } }); for (const o of (live && live.players) || []) if (!s || o.id !== s.id) items.push({ label: `Teleport ${o.name} here`, run: async () => { const why = await askReason(`Teleport ${o.name} here`); if (why !== null) act('tp', o, { x: w[0], z: w[1], reason: why }); } }); }
+    if (can('admin.spawn')) items.push({ label: 'Spawn item here…', run: async () => { const ok = await modal(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, '<label>Class name</label><input id="gI" class="input"><label>How many</label><input id="gN" class="input" type="number" value="1" min="1" max="50"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); try { const r = await api('spawnAt', { x: w[0], z: w[1], item: $('gI').value.trim(), count: Number($('gN').value) || 1, reason: why }); toast(`Spawned ${r.ok} item(s)`); } catch (err) { toast(err.message, true); } } });
+    items.push({ label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Copied'); } });
+    showMenu(items, e.clientX, e.clientY); });
+  const poll = async () => { try { live = await api('players'); $('mapWhen').textContent = live.available ? `${live.players.length} online · ${ago(live.at)}` : live.reason; } catch { /* keep the last */ } draw(); };
+  window.addEventListener('resize', draw); draw(); await poll(); timer = setInterval(poll, 2000);
+}
+// ---------- deaths ----------
+async function pageDeaths(main) {
+  main.innerHTML = '<div class="two"><div class="card"><div class="row"><input id="dq" class="input" placeholder="Search player, killer, weapon…" style="max-width:320px"></div><table id="dT"><thead><tr><th>When</th><th>Player</th><th>Cause</th><th>Gear</th><th>Tickets</th></tr></thead><tbody></tbody></table></div><div class="card" id="dD"><span class="muted">Select a death.</span></div></div>';
+  let rows = [];
+  const draw = async () => { rows = await api('deaths', null, { q: $('dq').value.trim(), limit: 150 }); main.querySelector('#dT tbody').innerHTML = rows.map(r => `<tr data-id="${r.id}"><td class="muted">${esc(ago(r.ts))}</td><td>${esc(r.name)}</td><td>${esc(r.cause === 'player' && r.killer ? 'killed by ' + r.killer.name + (r.weapon ? ' with ' + r.weapon : '') : r.causeText)}</td><td>${r.gearCount ?? '—'}${r.refunds ? ' <span class="badge ok">refunded</span>' : ''}</td><td>${r.tickets.map(t => '#' + esc(t.id)).join(', ')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No deaths.</td></tr>'; };
+  const show = async (id) => {
+    const r = await api('death', null, { id }); if (!r) return; main.querySelectorAll('#dT tr').forEach(tr => tr.classList.toggle('sel', Number(tr.dataset.id) === id));
+    const parts = Object.entries(r.byPart || {}).sort((a, b) => b[1].damage - a[1].damage);
+    $('dD').innerHTML = `<h3>#${r.id} · ${esc(r.name)} ${r.online ? '<span class="badge ok">online</span>' : ''}</h3><div class="muted">${esc(fmt(r.ts))}${r.pos ? ` · ${Math.round(r.pos.x)}, ${Math.round(r.pos.z)}` : ''}</div><div><b>${esc(r.cause === 'player' && r.killer ? 'Killed by ' + r.killer.name : r.causeText)}</b>${r.weapon ? ' with ' + esc(r.weapon) : ''}${r.distance != null ? ` from ${Math.round(r.distance)} m` : ''}</div>
+      ${parts.length ? '<div class="muted mt">Damage by body part</div>' + parts.map(([p, v]) => `<div class="row"><span style="width:110px">${esc(p)}</span><span class="muted">${v.hits} hit${v.hits === 1 ? '' : 's'}, ${Math.round(v.damage)}</span></div>`).join('') : ''}
+      <div class="muted mt">Gear (${(r.gear || []).length})</div><div style="max-height:200px;overflow:auto;font-size:12.5px">${(r.gear || []).map(g => esc(g.c)).join(', ') || '—'}</div>
+      ${(r.refunds || []).length ? '<div class="muted mt">Refunds</div>' + r.refunds.map(f => `<div class="small">${esc(fmt(f.ts))} by ${esc(f.by)}: ${f.ok}/${f.items}${f.status !== 'done' ? ' (' + esc(f.status) + ')' : ''}</div>`).join('') : ''}
+      <div class="muted mt">Tickets</div>${(r.tickets || []).map(t => `<div>#${esc(t.id)} ${esc(t.subject)} <span class="muted">${esc(t.status)}</span></div>`).join('') || '<div class="muted small">none</div>'}
+      <div class="row mt">${can('admin.refund') && r.gear && r.gear.length ? '<button class="btn primary" id="dRefund">Refund</button>' : ''}${can('tickets.manage') ? '<button class="btn" id="dTicket">New ticket</button>' : ''}</div>`;
+    const rb = $('dRefund'); if (rb) rb.onclick = async () => { const why = await askReason(`Refund death #${r.id} of ${r.name}`, `<p class="muted small">Spawns ${r.gear.length} items pristine at their feet (they must be online); their body is removed.</p>`, false); if (why === null) return; try { const res = await api('refund', { id: r.id, reason: why }); toast(res.ok ? `Refunded ${res.ok} of ${res.items}${res.body === 'body' ? ' · body removed' : ''}` : res.status === 'offline' ? 'They are not in game' : 'Nothing spawned: ' + res.status, !res.ok); show(id); } catch (e) { toast(e.message, true); } };
+    const tb = $('dTicket'); if (tb) tb.onclick = async () => { const ok = await modal('New ticket', `<label>Subject</label><input id="tS" class="input"><label>Details</label><textarea id="tD" class="input"></textarea><p class="muted small">Death #${r.id} is linked to it.</p>`); if (!ok) return; try { const t = await api('ticketOp', { op: 'create', subject: $('tS').value, description: $('tD').value, player: r.name, deathId: r.id }); toast('Ticket #' + t.id + ' opened'); show(id); } catch (e) { toast(e.message, true); } };
+  };
+  main.querySelector('#dT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) show(Number(tr.dataset.id)); });
+  let t; $('dq').oninput = () => { clearTimeout(t); t = setTimeout(draw, 250); }; await draw();
+}
+// ---------- tickets ----------
+async function pageTickets(main) {
+  main.innerHTML = '<div class="two"><div class="card"><div class="row"><input id="tq" class="input" placeholder="Search…" style="max-width:260px"><select id="ts" class="input" style="width:120px"><option value="open">Open</option><option value="closed">Closed</option><option value="">All</option></select><span class="grow"></span>' + (can('tickets.manage') ? '<button class="btn primary" id="tNew">New ticket</button>' : '') + '</div><table id="tT"><thead><tr><th>#</th><th>Subject</th><th>Player</th><th>Assignee</th><th>Deaths</th><th>Activity</th></tr></thead><tbody></tbody></table></div><div class="card" id="tD"><span class="muted">Select a ticket.</span></div></div>';
+  const draw = async () => { const rows = await api('tickets', null, { status: $('ts').value, q: $('tq').value.trim() }); main.querySelector('#tT tbody').innerHTML = rows.map(t => `<tr data-id="${esc(t.id)}"><td>#${esc(t.id)}${t.status !== 'open' ? ' <span class="badge">closed</span>' : ''}</td><td>${esc(t.subject)}</td><td>${esc(t.player || '')}</td><td>${esc(t.assignee || '')}</td><td>${t.deaths.map(d => '#' + d).join(', ')}</td><td class="muted">${esc(ago(t.lastActivity))}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No tickets.</td></tr>'; };
+  const show = async (id) => {
+    const t = await api('ticket', null, { id }); const m = can('tickets.manage');
+    $('tD').innerHTML = `<h3>#${esc(t.id)} ${esc(t.subject)} <span class="badge ${t.status === 'open' ? 'ok' : ''}">${esc(t.status)}</span></h3><div class="muted small">Opened ${esc(fmt(t.createdAt))}${t.createdBy ? ' by ' + esc(t.createdBy) : ''}${t.channelUrl ? ` · <a href="${esc(t.channelUrl)}" target="_blank" rel="noopener">Discord channel</a>` : ''}</div>${t.description ? `<div class="mt" style="white-space:pre-wrap">${esc(t.description)}</div>` : ''}
+      <div class="row mt"><span class="muted">Player</span><b>${esc(t.player || '—')}</b><span class="grow"></span><span class="muted">Assignee</span>${m ? `<input id="tA" class="input" style="width:140px" value="${esc(t.assignee || '')}"><button class="btn small" id="tAssign">Assign</button>` : `<b>${esc(t.assignee || '—')}</b>`}</div>
+      ${m ? `<div class="row mt">${t.status === 'open' ? '<button class="btn small" id="tClose">Close</button>' : '<button class="btn small" id="tReopen">Reopen</button>'}<input id="tLink" class="input" style="width:90px" type="number" placeholder="death #"><button class="btn small" id="tLinkB">Link</button></div>` : ''}
+      <div class="muted mt">Linked deaths</div>${t.deaths.map(d => `<div class="small">#${d.id} ${d.missing ? '(gone)' : `${esc(d.name)} · ${esc(d.cause)}${d.refunded ? ' <span class="badge ok">refunded</span>' : ''}`}</div>`).join('') || '<div class="muted small">none</div>'}
+      <div class="muted mt">Admin actions</div>${t.actions.map(a => `<div class="small">${esc(fmt(a.ts))} · ${esc(a.by)}: <b>${esc(a.action)}</b>${a.target ? ' · ' + esc(a.target) : ''}${a.details ? ' · ' + esc(a.details) : ''}${a.result ? ' <span class="muted">' + esc(a.result) + '</span>' : ''}${a.reason ? '<br><span class="muted">reason: ' + esc(a.reason) + '</span>' : ''}</div>`).join('') || '<div class="muted small">none yet; put #' + esc(t.id) + ' in the reason of an action</div>'}
+      <div class="muted mt">Notes</div>${m ? '<div class="row"><input id="tN" class="input" placeholder="Add a note"><button class="btn small" id="tNoteB">Add</button></div>' : ''}${t.notes.slice().reverse().map(n => `<div class="small ${n.system ? 'muted' : ''}">${esc(fmt(n.ts))} · ${esc(n.by)}: ${esc(n.text)}</div>`).join('')}`;
+    const op = (body) => api('ticketOp', { id: t.id, ...body }).then(() => { show(id); draw(); }).catch(e => toast(e.message, true));
+    const b = (sel, fn) => { const el = $(sel); if (el) el.onclick = fn; };
+    b('tAssign', () => op({ op: 'assign', assignee: $('tA').value })); b('tLinkB', () => op({ op: 'link', deathId: Number($('tLink').value) })); b('tNoteB', () => op({ op: 'note', text: $('tN').value }));
+    b('tClose', async () => { const ok = await modal(`Close ticket #${t.id}?`, '<label>Reason (optional)</label><input id="cR" class="input">'); if (ok) op({ op: 'status', status: 'closed', reason: $('cR').value }); }); b('tReopen', () => op({ op: 'status', status: 'open' }));
+  };
+  main.querySelector('#tT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) { main.querySelectorAll('#tT tr').forEach(x => x.classList.toggle('sel', x === tr)); show(tr.dataset.id); } });
+  const nb = $('tNew'); if (nb) nb.onclick = async () => { const ok = await modal('New ticket', '<label>Subject</label><input id="tS" class="input"><label>Player</label><input id="tP" class="input"><label>Details</label><textarea id="tDd" class="input"></textarea>'); if (!ok) return; try { const t = await api('ticketOp', { op: 'create', subject: $('tS').value, player: $('tP').value, description: $('tDd').value }); toast('Ticket #' + t.id + ' opened'); draw(); } catch (e) { toast(e.message, true); } };
+  let tm; $('tq').oninput = () => { clearTimeout(tm); tm = setTimeout(draw, 250); }; $('ts').onchange = draw; await draw();
+}
+// ---------- logs / audit ----------
+async function pageLogs(main) {
+  main.innerHTML = '<div class="card"><div class="row"><select id="lk" class="input" style="width:200px"><option value="rpt">Server log (RPT)</option><option value="adm">Admin log (ADM)</option><option value="console">Tool console</option></select><label class="small"><input type="checkbox" id="lf" checked> follow</label><span class="muted small" id="ln"></span></div><pre id="lp" class="mt"></pre></div>';
+  const draw = async () => { const d = await api('logs', null, { kind: $('lk').value }); $('ln').textContent = d.name || ''; const pre = $('lp'); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20; pre.textContent = d.lines ? d.lines.map(l => `${new Date(l.at).toLocaleTimeString()} [${l.source}] ${l.line}`).join('\n') : d.text; if ($('lf').checked || atEnd) pre.scrollTop = pre.scrollHeight; };
+  $('lk').onchange = draw; await draw(); timer = setInterval(() => { if ($('lf').checked) draw().catch(() => {}); }, 3000);
+}
+async function pageAudit(main) {
+  main.innerHTML = '<div class="card"><div class="row"><input id="aq" class="input" placeholder="Search…" style="max-width:300px"></div><table id="aT"><thead><tr><th>When</th><th>Source</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody></tbody></table></div>';
+  const draw = async () => { const rows = await api('audit', null, { q: $('aq').value.trim() }); main.querySelector('tbody').innerHTML = rows.map(r => `<tr><td class="muted">${esc(fmt(r.ts))}</td><td>${esc(r.source)}</td><td>${esc(r.who)}</td><td>${esc(r.action)}</td><td class="muted">${esc(typeof r.details === 'string' ? r.details : JSON.stringify(r.details))}</td></tr>`).join(''); };
+  let t; $('aq').oninput = () => { clearTimeout(t); t = setTimeout(draw, 250); }; await draw();
+}
+// ---------- users and groups ----------
+async function pageUsers(main) {
+  const d = await api('users');
+  const permList = (checked, prefix) => { let g = ''; return d.catalogue.map(([k, l, grp]) => (grp !== g ? ((g = grp), `<div class="g">${esc(grp)}</div>`) : '') + `<label><input type="checkbox" data-perm="${k}" ${checked.includes(k) ? 'checked' : ''}> ${esc(l)} <span class="muted small">${k}</span></label>`).join(''); };
+  main.innerHTML = `<div class="two"><div><div class="card"><div class="row"><h3 class="grow" style="margin:0">Users</h3><button class="btn primary" id="uNew">New user</button></div><table id="uT"><thead><tr><th>User</th><th>Groups</th><th>Own permissions</th><th>Last login</th></tr></thead><tbody>${d.users.map(u => `<tr data-id="${esc(u.id)}"><td>${esc(u.name)}${u.enabled ? '' : ' <span class="badge bad">disabled</span>'}</td><td>${u.groups.map(g => `<span class="chip">${esc((d.groups.find(x => x.id === g) || { name: g }).name)}</span>`).join('') || '<span class="muted">—</span>'}</td><td class="muted small">${u.allow.length ? '+' + u.allow.length : ''}${u.deny.length ? ' −' + u.deny.length : ''}${!u.allow.length && !u.deny.length ? '—' : ''}</td><td class="muted small">${u.lastLogin ? esc(ago(u.lastLogin)) : 'never'}</td></tr>`).join('')}</tbody></table></div>
+    <div class="card"><div class="row"><h3 class="grow" style="margin:0">Groups</h3><button class="btn" id="gNew">New group</button></div><table id="gT"><thead><tr><th>Group</th><th>Permissions</th><th>Members</th></tr></thead><tbody>${d.groups.map(g => `<tr data-id="${esc(g.id)}"><td>${esc(g.name)}${g.builtin ? ' <span class="badge">built in</span>' : ''}</td><td class="muted small">${g.perms.length === d.catalogue.length ? 'everything' : g.perms.length + ' of ' + d.catalogue.length}</td><td>${g.members}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="card" id="uD"><span class="muted">Select a user or a group. A user gets the permissions of their groups, plus their own granted ones, minus their own denied ones.</span></div></div>`;
+  const checked = (root, attr) => [...root.querySelectorAll(`input[data-${attr}]:checked`)].map(i => i.dataset[attr]);
+  const showUser = (u) => {
+    $('uD').innerHTML = `<h3>${esc(u.name)}</h3><div class="muted small">Effective: ${u.perms.length} of ${d.catalogue.length} permissions</div>
+      <div class="muted mt">Groups</div><div id="ug">${d.groups.map(g => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-group="${esc(g.id)}" ${u.groups.includes(g.id) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('')}</div>
+      <div class="muted mt">Granted on top of the groups</div><div class="perm" id="ua">${permList(u.allow, 'a')}</div>
+      <details class="mt"><summary class="muted">Denied even if a group grants it</summary><div class="perm" id="ud">${permList(u.deny, 'd')}</div></details>
+      <div class="row mt"><button class="btn primary" id="uSave">Save</button><button class="btn" id="uPw">Set password</button><button class="btn" id="uTog">${u.enabled ? 'Disable' : 'Enable'}</button><button class="btn danger" id="uDel">Delete</button></div>`;
+    const upd = (patch) => api('user', { op: 'update', id: u.id, patch }).then(() => { toast('Saved'); pageUsers(main); }).catch(e => toast(e.message, true));
+    $('uSave').onclick = () => upd({ groups: checked($('ug'), 'group'), allow: checked($('ua'), 'perm'), deny: checked($('ud'), 'perm') });
+    $('uPw').onclick = async () => { const ok = await modal(`Password for ${u.name}`, '<label>New password (8+ characters)</label><input id="np" class="input" type="password">'); if (ok) upd({ password: $('np').value }); };
+    $('uTog').onclick = () => upd({ enabled: !u.enabled });
+    $('uDel').onclick = async () => { if (await modal(`Delete ${u.name}?`, '<p class="muted">Their sessions end at once.</p>')) api('user', { op: 'delete', id: u.id }).then(() => pageUsers(main)).catch(e => toast(e.message, true)); };
+  };
+  const showGroup = (g) => {
+    $('uD').innerHTML = `<h3>${esc(g.name)}</h3><label>Name</label><input id="gn" class="input" value="${esc(g.name)}" ${g.builtin ? 'disabled' : ''}><div class="muted mt">Permissions${g.id === 'owner' ? ' (the Owner group always has everything)' : ''}</div><div class="perm" id="gp">${permList(g.perms, 'p')}</div><div class="row mt"><button class="btn primary" id="gSave">Save</button>${g.builtin ? '' : '<button class="btn danger" id="gDel">Delete</button>'}</div>`;
+    $('gSave').onclick = () => api('group', { op: 'upsert', id: g.id, name: $('gn').value, perms: checked($('gp'), 'perm') }).then(() => { toast('Saved'); pageUsers(main); }).catch(e => toast(e.message, true));
+    const del = $('gDel'); if (del) del.onclick = async () => { if (await modal(`Delete the group ${g.name}?`, '<p class="muted">Its members keep their other groups.</p>')) api('group', { op: 'delete', id: g.id }).then(() => pageUsers(main)).catch(e => toast(e.message, true)); };
+  };
+  main.querySelector('#uT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) showUser(d.users.find(u => u.id === tr.dataset.id)); });
+  main.querySelector('#gT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) showGroup(d.groups.find(g => g.id === tr.dataset.id)); });
+  $('uNew').onclick = async () => { const ok = await modal('New user', `<label>User name</label><input id="nn" class="input"><label>Password (8+ characters)</label><input id="np" class="input" type="password"><label>Groups</label><div>${d.groups.map(g => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-group="${esc(g.id)}"> ${esc(g.name)}</label>`).join('')}</div>`); if (!ok) return; try { await api('user', { op: 'create', name: $('nn').value, password: $('np').value, groups: checked(document.querySelector('.modalbg') || document, 'group') }); toast('User created'); pageUsers(main); } catch (e) { toast(e.message, true); } };
+  $('gNew').onclick = async () => { const ok = await modal('New group', '<label>Name</label><input id="gn2" class="input">'); if (!ok) return; try { await api('group', { op: 'upsert', name: $('gn2').value, perms: [] }); pageUsers(main); } catch (e) { toast(e.message, true); } };
+}
+loadMe();
+</script>
+</body>
+</html>
