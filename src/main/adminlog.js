@@ -13,8 +13,8 @@ function cfg() {
 }
 // every admin action needs a reason except a refund (its death record and ticket explain it) and a message (the text is the reason)
 const NEEDS_REASON = ['give', 'kit', 'vehicle', 'spawn', 'heal', 'tp', 'tpto', 'bring', 'tpdeath', 'kill', 'god', 'kick', 'ban'];
-const LABEL = { heal: '💚 Heal', tp: '📍 Teleport', tpto: '📍 Teleport to a player', bring: '📍 Bring a player', tpdeath: '📍 Teleport to their death', kill: '☠️ Kill', god: '🛡️ God mode', give: '🎁 Give item', kit: '🎒 Give kit', vehicle: '🚗 Spawn vehicle', spawn: '📦 Spawn at a point', refund: '↩️ Refund', message: '💬 Message', kick: '👢 Kick', ban: '⛔ Ban' };
-const COLOR = { kill: 0xff5f5f, ban: 0xff5f5f, kick: 0xf5b942, refund: 0x4f8cff, give: 0x3ddc84, kit: 0x3ddc84, vehicle: 0x3ddc84, spawn: 0x3ddc84, god: 0xa970ff };
+const LABEL = { heal: '💚 Heal', tp: '📍 Teleport', tpto: '📍 Teleport to a player', bring: '📍 Bring a player', tpdeath: '📍 Teleport to their death', kill: '☠️ Kill', god: '🛡️ God mode', give: '🎁 Give item', kit: '🎒 Give kit', vehicle: '🚗 Spawn vehicle', spawn: '📦 Spawn at a point', refund: '↩️ Refund', message: '💬 Message', kick: '👢 Kick', ban: '⛔ Ban', beban: '⛔ BattlEye ban', unban: '✅ Unban', whitelist: '📋 Whitelist', priority: '⭐ Priority queue', unlist: '📋 Removed from a list' };
+const COLOR = { kill: 0xff5f5f, ban: 0xff5f5f, beban: 0xff5f5f, unban: 0x3ddc84, kick: 0xf5b942, refund: 0x4f8cff, give: 0x3ddc84, kit: 0x3ddc84, vehicle: 0x3ddc84, spawn: 0x3ddc84, god: 0xa970ff };
 
 // Throws when this action needs a reason and none was given (checked before anything happens in game).
 function check(action, reason) {

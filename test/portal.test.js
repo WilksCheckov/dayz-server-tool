@@ -63,5 +63,22 @@ srv.listen(0, '127.0.0.1', async () => {
   const audit = t.mod('audit').list({ limit: 50 });
   t.ok('audit trail names the portal user', audit.some(a => a.who === 'Chris (portal)' && /user created/.test(a.action)) && audit.some(a => /login failed/.test(a.action)));
   r = await call('user', { op: 'delete', id: 'chris' }); t.ok('cannot delete yourself', !r.ok && /yourself/.test(r.error));
+  // lists and the player profile (owner)
+  r = await call('listOp', { op: 'add', kind: 'ban', id: '76561198000000009', name: 'Griefer', reason: '' }); t.ok('a ban through the lists needs a reason', !r.ok && /reason/.test(r.error), r.error);
+  r = await call('listOp', { op: 'add', kind: 'ban', id: '76561198000000009', name: 'Griefer', reason: 'duping' }); t.ok('ban added by Steam64', r.ok && r.data.entries.some(e => e.steamId === '76561198000000009' && e.name === 'Griefer'), r.error);
+  r = await call('listOp', { op: 'add', kind: 'whitelist', id: '76561198000000009', name: 'Griefer' }); t.ok('whitelist needs no reason', r.ok, r.error);
+  r = await call('lists'); t.ok('lists for lists.view', r.ok && r.data.ban.entries.length === 1 && r.data.whitelist.entries.length === 1 && r.data.bebans);
+  r = await call('listOp', { op: 'remove', kind: 'ban', id: '76561198000000009', name: 'Griefer' }); t.ok('unban', r.ok && r.data.entries.length === 0);
+  const au = t.mod('audit').list({ limit: 10 });
+  t.ok('list changes are admin actions under the portal user', au.some(a => a.action === 'admin:ban' && a.who === 'Chris (portal)' && /duping/.test(a.details)) && au.some(a => a.action === 'admin:unban'));
+  // a player in the database, then the profile
+  const pl = t.mod('players'); pl.init(t.emit); const dbf = require('path').join(t.S, 'players.json');
+  t.mod('jsonstore').write(dbf, { players: { 'KEY1': { key: 'KEY1', id: 'KEY1', names: ['Bob'], name: 'Bob', firstSeen: Date.now() - 86400000, lastSeen: Date.now() - 3600000, playtimeSec: 7200, kills: 3, deaths: 2, sessions: [], notes: 'watch him' } }, files: {}, peaks: {}, online: {} });
+  delete require.cache[require.resolve(require('path').join(t.SRC, 'players.js'))];
+  r = await call('playerSearch', null, { q: 'bo' }); t.ok('player search', r.ok && r.data.length === 1 && r.data[0].name === 'Bob' && r.data[0].key === 'KEY1', JSON.stringify(r.data));
+  r = await call('player', null, { key: 'KEY1' }); t.ok('profile: record, lists, deaths, tickets, actions', r.ok && r.data.name === 'Bob' && r.data.playtimeSec === 7200 && r.data.lists && r.data.lists.whitelist === false && r.data.deaths === 2 && Array.isArray(r.data.recentDeaths) && Array.isArray(r.data.tickets) && Array.isArray(r.data.actions) && r.data.notes === 'watch him', r.error || Object.keys(r.data || {}).join(','));
+  r = await call('player', null, { key: 'Bob' }); t.ok('profile by name', r.ok && r.data.key === 'KEY1');
+  r = await call('playerNote', { key: 'KEY1', text: 'cleared' }); t.ok('note saved', r.ok && (await call('player', null, { key: 'KEY1' })).data.notes === 'cleared');
+  cookie = ''; r = await call('login', { name: 'mod mike', password: 'newpassword1' }); t.ok('disabled user cannot sign in', r.status === 401);
   srv.close(); t.done();
 });

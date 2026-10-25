@@ -26,10 +26,15 @@ pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; z-index: 40; } .toast.bad { border-color: var(--bad); }
 .perm { display: grid; grid-template-columns: 1fr; gap: 2px; } .perm label { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; } .perm .g { color: var(--muted); font-size: 12px; margin-top: 6px; }
 .chip { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border); font-size: 12px; margin: 1px; }
+a[data-prof] { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); } a[data-prof]:hover { color: var(--accent); }
+#hdSearch { width: 200px; padding: 5px 9px; } #hdHits { position: fixed; min-width: 280px; }
+.drawerbg { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,.35); } .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 460px; max-width: 96vw; background: var(--panel); border-left: 1px solid var(--border); z-index: 26; overflow: auto; padding: 14px 16px; box-shadow: -8px 0 24px rgba(0,0,0,.4); }
+.drawer h2 { margin: 0 0 4px; font-size: 18px; } .drawer .sec { margin-top: 12px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; } .drawer .kv { display: grid; grid-template-columns: 110px 1fr; gap: 3px 10px; font-size: 13px; } .drawer .close { position: absolute; top: 10px; right: 12px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 8px; } .tabs button { background: none; border: 1px solid transparent; border-radius: 6px; padding: 5px 10px; cursor: pointer; color: var(--muted); } .tabs button.on { color: var(--text); background: var(--panel2); border-color: var(--border); }
 </style>
 </head>
 <body>
-<header><b>DayZ Admin Tools</b><span class="muted" id="hdInst"></span><nav id="nav"></nav><span class="grow"></span><span class="muted small" id="hdUser"></span><button class="btn small" id="btnPw" hidden>Password</button><button class="btn small" id="btnOut" hidden>Sign out</button></header>
+<header><b>DayZ Admin Tools</b><span class="muted" id="hdInst"></span><nav id="nav"></nav><input id="hdSearch" class="input" placeholder="Find a player…" autocomplete="off" hidden><div id="hdHits" class="menu" hidden></div><span class="grow"></span><span class="muted small" id="hdUser"></span><button class="btn small" id="btnPw" hidden>Password</button><button class="btn small" id="btnOut" hidden>Sign out</button></header>
 <main id="main"></main>
 <script>
 'use strict';
@@ -63,7 +68,7 @@ async function askReason(title, extraHtml = '', required = true) {
   if (!ok) return null; const v = $('mWhy').value.trim(); if (required && !v) { toast('Give a reason.', true); return null; } return v;
 }
 // ---------- pages ----------
-const PAGES = [['dashboard', 'Dashboard', 'server.view'], ['players', 'Players', 'players.view'], ['map', 'Map', 'players.view'], ['deaths', 'Deaths', 'deaths.view'], ['tickets', 'Tickets', 'tickets.view'], ['logs', 'Logs', 'logs.view'], ['audit', 'Audit', 'audit.view'], ['users', 'Users', 'portal.users']];
+const PAGES = [['dashboard', 'Dashboard', 'server.view'], ['players', 'Players', 'players.view'], ['map', 'Map', 'players.view'], ['lists', 'Lists', 'lists.view'], ['deaths', 'Deaths', 'deaths.view'], ['tickets', 'Tickets', 'tickets.view'], ['logs', 'Logs', 'logs.view'], ['audit', 'Audit', 'audit.view'], ['users', 'Users', 'portal.users']];
 let timer = null;
 function render() {
   clearInterval(timer); timer = null; closeMenu();
@@ -77,8 +82,8 @@ function render() {
   const pages = PAGES.filter(p => can(p[2])); if (!pages.some(p => p[0] === page)) page = pages.length ? pages[0][0] : 'none';
   $('nav').innerHTML = pages.map(p => `<button class="${p[0] === page ? 'on' : ''}" data-p="${p[0]}">${p[1]}</button>`).join('');
   $('nav').onclick = e => { const b = e.target.closest('button'); if (b) { page = b.dataset.p; render(); } };
-  $('hdUser').textContent = `${me.name} · ${me.groups.join(', ') || 'no group'}`; $('btnOut').hidden = false; $('btnPw').hidden = false; $('hdInst').textContent = me.instance;
-  const fn = { dashboard: pageDashboard, players: pagePlayers, map: pageMap, deaths: pageDeaths, tickets: pageTickets, logs: pageLogs, audit: pageAudit, users: pageUsers }[page];
+  $('hdUser').textContent = `${me.name} · ${me.groups.join(', ') || 'no group'}`; $('btnOut').hidden = false; $('btnPw').hidden = false; $('hdInst').textContent = me.instance; $('hdSearch').hidden = !can('players.view');
+  const fn = { dashboard: pageDashboard, players: pagePlayers, map: pageMap, lists: pageLists, deaths: pageDeaths, tickets: pageTickets, logs: pageLogs, audit: pageAudit, users: pageUsers }[page];
   if (!fn) { main.innerHTML = '<div class="card">Your account has no permissions yet. Ask whoever manages the portal.</div>'; return; }
   fn(main).catch(e => { main.innerHTML = `<div class="card">${esc(e.message)}</div>`; });
 }
@@ -107,7 +112,7 @@ async function act(action, p, args = {}) {
   try { const r = await api('act', { action, id: p.id, args }); if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(`${p.name}: ${action} done${r && r.ok !== undefined && (r.ok || r.fail) ? ` (${r.ok} ok${r.fail ? ', ' + r.fail + ' failed' : ''})` : ''}${r && r.body === 'body' ? ' · body removed' : ''}`); }
   catch (e) { toast(e.message, true); }
 }
-function closeMenu() { const m = document.querySelector('.menu'); if (m) m.remove(); }
+function closeMenu() { for (const m of document.querySelectorAll('.menu')) if (m.id !== 'hdHits') m.remove(); }
 function showMenu(items, x, y) {
   closeMenu(); const m = document.createElement('div'); m.className = 'menu';
   m.innerHTML = items.map((it, i) => it.h ? `<div class="h">${esc(it.h)}</div>` : `<div data-i="${i}" class="${it.danger ? 'd' : ''}">${esc(it.label)}</div>`).join('');
@@ -117,6 +122,7 @@ function showMenu(items, x, y) {
 document.addEventListener('click', e => { if (!e.target.closest('.menu')) closeMenu(); });
 function playerMenu(p) {
   const others = (live && live.players || []).filter(o => o.id !== p.id); const items = [{ h: p.name + (p.god ? ' (god mode)' : '') + (!p.alive ? ' (dead)' : '') }];
+  if (can('players.view')) items.push({ label: 'Profile', run: () => openPlayer(p.id, p.name) });
   const withWhy = (title, run, required = true, extra = '') => async () => { const why = await askReason(title, extra, required); if (why !== null) run(why); };
   if (can('admin.heal')) for (const [k, l] of HEALS) items.push({ label: l, run: withWhy(`${l} · ${p.name}`, why => act('heal', p, { what: k, reason: why })) });
   if (can('admin.teleport')) {
@@ -144,7 +150,7 @@ async function pagePlayers(main) {
     live = await api('players'); const tb = main.querySelector('tbody');
     if (!live.available) { tb.innerHTML = `<tr><td colspan="6" class="muted">${esc(live.reason)}</td></tr>`; $('plWhen').textContent = ''; return; }
     $('plWhen').textContent = `${live.players.length} online · ${ago(live.at)}`;
-    tb.innerHTML = live.players.map(p => `<tr data-id="${esc(p.id)}"><td>${esc(p.name)}${p.god ? ' <span class="badge">god</span>' : ''}${!p.alive ? ' <span class="badge bad">dead</span>' : ''}</td><td>${Math.round(p.health * 100)}%</td><td>${Math.round(p.blood)}</td><td class="muted">${Math.round(p.x)}, ${Math.round(p.z)}</td><td class="muted">${esc(p.vehicle || '')}</td><td><button class="btn small pl-more">⋯</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nobody online.</td></tr>';
+    tb.innerHTML = live.players.map(p => `<tr data-id="${esc(p.id)}"><td><a href="#" data-prof="${esc(p.id)}" data-name="${esc(p.name)}">${esc(p.name)}</a>${p.god ? ' <span class="badge">god</span>' : ''}${!p.alive ? ' <span class="badge bad">dead</span>' : ''}</td><td>${Math.round(p.health * 100)}%</td><td>${Math.round(p.blood)}</td><td class="muted">${Math.round(p.x)}, ${Math.round(p.z)}</td><td class="muted">${esc(p.vehicle || '')}</td><td><button class="btn small pl-more">⋯</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nobody online.</td></tr>';
   };
   main.addEventListener('contextmenu', e => { const tr = e.target.closest('tr[data-id]'); if (!tr) return; e.preventDefault(); const p = live.players.find(x => x.id === tr.dataset.id); if (p) showMenu(playerMenu(p), e.clientX, e.clientY); });
   main.addEventListener('click', e => { const b = e.target.closest('.pl-more'); if (!b) return; const tr = b.closest('tr'); const p = live.players.find(x => x.id === tr.dataset.id); const r = b.getBoundingClientRect(); if (p) showMenu(playerMenu(p), r.left, r.bottom + 2); });
@@ -197,7 +203,7 @@ async function pageMap(main) {
 async function pageDeaths(main) {
   main.innerHTML = '<div class="two"><div class="card"><div class="row"><input id="dq" class="input" placeholder="Search player, killer, weapon…" style="max-width:320px"></div><table id="dT"><thead><tr><th>When</th><th>Player</th><th>Cause</th><th>Gear</th><th>Tickets</th></tr></thead><tbody></tbody></table></div><div class="card" id="dD"><span class="muted">Select a death.</span></div></div>';
   let rows = [];
-  const draw = async () => { rows = await api('deaths', null, { q: $('dq').value.trim(), limit: 150 }); main.querySelector('#dT tbody').innerHTML = rows.map(r => `<tr data-id="${r.id}"><td class="muted">${esc(ago(r.ts))}</td><td>${esc(r.name)}</td><td>${esc(r.cause === 'player' && r.killer ? 'killed by ' + r.killer.name + (r.weapon ? ' with ' + r.weapon : '') : r.causeText)}</td><td>${r.gearCount ?? '—'}${r.refunds ? ' <span class="badge ok">refunded</span>' : ''}</td><td>${r.tickets.map(t => '#' + esc(t.id)).join(', ')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No deaths.</td></tr>'; };
+  const draw = async () => { rows = await api('deaths', null, { q: $('dq').value.trim(), limit: 150 }); main.querySelector('#dT tbody').innerHTML = rows.map(r => `<tr data-id="${r.id}"><td class="muted">${esc(ago(r.ts))}</td><td><a href="#" data-prof="${esc(r.key)}" data-name="${esc(r.name)}">${esc(r.name)}</a></td><td>${esc(r.cause === 'player' && r.killer ? 'killed by ' + r.killer.name + (r.weapon ? ' with ' + r.weapon : '') : r.causeText)}</td><td>${r.gearCount ?? '—'}${r.refunds ? ' <span class="badge ok">refunded</span>' : ''}</td><td>${r.tickets.map(t => '#' + esc(t.id)).join(', ')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No deaths.</td></tr>'; };
   const show = async (id) => {
     const r = await api('death', null, { id }); if (!r) return; main.querySelectorAll('#dT tr').forEach(tr => tr.classList.toggle('sel', Number(tr.dataset.id) === id));
     const parts = Object.entries(r.byPart || {}).sort((a, b) => b[1].damage - a[1].damage);
@@ -216,7 +222,7 @@ async function pageDeaths(main) {
 // ---------- tickets ----------
 async function pageTickets(main) {
   main.innerHTML = '<div class="two"><div class="card"><div class="row"><input id="tq" class="input" placeholder="Search…" style="max-width:260px"><select id="ts" class="input" style="width:120px"><option value="open">Open</option><option value="closed">Closed</option><option value="">All</option></select><span class="grow"></span>' + (can('tickets.manage') ? '<button class="btn primary" id="tNew">New ticket</button>' : '') + '</div><table id="tT"><thead><tr><th>#</th><th>Subject</th><th>Player</th><th>Assignee</th><th>Deaths</th><th>Activity</th></tr></thead><tbody></tbody></table></div><div class="card" id="tD"><span class="muted">Select a ticket.</span></div></div>';
-  const draw = async () => { const rows = await api('tickets', null, { status: $('ts').value, q: $('tq').value.trim() }); main.querySelector('#tT tbody').innerHTML = rows.map(t => `<tr data-id="${esc(t.id)}"><td>#${esc(t.id)}${t.status !== 'open' ? ' <span class="badge">closed</span>' : ''}</td><td>${esc(t.subject)}</td><td>${esc(t.player || '')}</td><td>${esc(t.assignee || '')}</td><td>${t.deaths.map(d => '#' + d).join(', ')}</td><td class="muted">${esc(ago(t.lastActivity))}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No tickets.</td></tr>'; };
+  const draw = async () => { const rows = await api('tickets', null, { status: $('ts').value, q: $('tq').value.trim() }); main.querySelector('#tT tbody').innerHTML = rows.map(t => `<tr data-id="${esc(t.id)}"><td>#${esc(t.id)}${t.status !== 'open' ? ' <span class="badge">closed</span>' : ''}</td><td>${esc(t.subject)}</td><td>${t.player ? `<a href="#" data-prof="${esc(t.player)}" data-name="${esc(t.player)}">${esc(t.player)}</a>` : ''}</td><td>${esc(t.assignee || '')}</td><td>${t.deaths.map(d => '#' + d).join(', ')}</td><td class="muted">${esc(ago(t.lastActivity))}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No tickets.</td></tr>'; };
   const show = async (id) => {
     const t = await api('ticket', null, { id }); const m = can('tickets.manage');
     $('tD').innerHTML = `<h3>#${esc(t.id)} ${esc(t.subject)} <span class="badge ${t.status === 'open' ? 'ok' : ''}">${esc(t.status)}</span></h3><div class="muted small">Opened ${esc(fmt(t.createdAt))}${t.createdBy ? ' by ' + esc(t.createdBy) : ''}${t.channelUrl ? ` · <a href="${esc(t.channelUrl)}" target="_blank" rel="noopener">Discord channel</a>` : ''}</div>${t.description ? `<div class="mt" style="white-space:pre-wrap">${esc(t.description)}</div>` : ''}
@@ -274,6 +280,68 @@ async function pageUsers(main) {
   main.querySelector('#gT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) showGroup(d.groups.find(g => g.id === tr.dataset.id)); });
   $('uNew').onclick = async () => { const ok = await modal('New user', `<label>User name</label><input id="nn" class="input"><label>Password (8+ characters)</label><input id="np" class="input" type="password"><label>Groups</label><div>${d.groups.map(g => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-group="${esc(g.id)}"> ${esc(g.name)}</label>`).join('')}</div>`); if (!ok) return; try { await api('user', { op: 'create', name: $('nn').value, password: $('np').value, groups: checked(document.querySelector('.modalbg') || document, 'group') }); toast('User created'); pageUsers(main); } catch (e) { toast(e.message, true); } };
   $('gNew').onclick = async () => { const ok = await modal('New group', '<label>Name</label><input id="gn2" class="input">'); if (!ok) return; try { await api('group', { op: 'upsert', name: $('gn2').value, perms: [] }); pageUsers(main); } catch (e) { toast(e.message, true); } };
+}
+// ---------- player profile drawer ----------
+const dur = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
+function closeDrawer() { for (const el of document.querySelectorAll('.drawerbg, .drawer')) el.remove(); }
+async function openPlayer(key, name) {
+  closeDrawer(); let p;
+  try { p = await api('player', null, { key }); } catch (e) { if (name && name !== key) { try { p = await api('player', null, { key: name }); } catch (e2) { return toast(e2.message, true); } } else return toast(e.message, true); }
+  const bg = document.createElement('div'); bg.className = 'drawerbg'; bg.onclick = closeDrawer; const d = document.createElement('div'); d.className = 'drawer';
+  const lp = p.live; const m = can('lists.manage');
+  const flags = [p.lists.ban ? '<span class="badge bad">banned</span>' : '', p.lists.whitelist ? '<span class="badge ok">whitelisted</span>' : '', p.lists.priority ? '<span class="badge">priority</span>' : '', p.steam && p.steam.flagged ? '<span class="badge bad">Steam bans</span>' : '', p.account && p.account.suspicious ? '<span class="badge warn">⚠ suspicious</span>' : ''].filter(Boolean).join(' ');
+  d.innerHTML = `<button class="btn small close">✕</button><h2>${esc(p.name)} ${lp ? '<span class="badge ok">online</span>' : ''}</h2><div>${flags}</div>
+    <div class="kv mt"><span class="muted">Steam64</span><span>${p.steamId ? `${esc(p.steamId)} <a href="https://steamcommunity.com/profiles/${esc(p.steamId)}" target="_blank" rel="noopener">↗</a>` : '<span class="muted">unknown</span>'}</span><span class="muted">DayZ id</span><span class="small">${esc(p.id || p.key)}</span><span class="muted">Names</span><span>${esc(p.names.join(', '))}</span><span class="muted">Status</span><span>${lp ? `in game at ${Math.round(lp.x)}, ${Math.round(lp.z)} · health ${Math.round(lp.health * 100)}%${lp.vehicle ? ' · in ' + esc(lp.vehicle) : ''}` : 'last seen ' + esc(ago(p.lastSeen))}</span><span class="muted">Playtime</span><span>${dur(p.playtimeSec || 0)}</span><span class="muted">Kills / deaths</span><span>${p.kills} / ${p.deaths}</span>${p.discordId ? `<span class="muted">Discord</span><span>${esc(p.discordId)}${p.application ? ' · application ' + esc(p.application) : ''}</span>` : ''}</div>
+    ${lp && (can('admin.heal') || can('admin.teleport') || can('admin.spawn') || can('players.kick')) ? '<div class="row mt"><button class="btn primary" id="prAct">Actions ▾</button></div>' : ''}
+    ${can('lists.view') ? `<div class="sec">Lists</div><div class="row">${['ban', 'whitelist', 'priority'].map(k => `<span class="badge ${p.lists[k] ? (k === 'ban' ? 'bad' : 'ok') : ''}">${k}: ${p.lists[k] ? 'yes' : 'no'}</span>`).join('')}${m ? `<span class="grow"></span><button class="btn small" data-list="ban">${p.lists.ban ? 'Unban' : 'Ban…'}</button><button class="btn small" data-list="whitelist">${p.lists.whitelist ? 'Remove from whitelist' : 'Whitelist'}</button><button class="btn small" data-list="priority">${p.lists.priority ? 'Remove priority' : 'Priority'}</button>` : ''}</div>` : ''}
+    ${can('lists.view') ? `<div class="sec">Note</div>${m ? `<textarea id="prNote" class="input" rows="2">${esc(p.notes || '')}</textarea><div class="row mt"><button class="btn small" id="prNoteSave">Save note</button></div>` : `<div>${esc(p.notes || '—')}</div>`}` : ''}
+    ${p.steam ? `<div class="sec">Steam</div><div class="small">${esc(typeof p.steam.text === 'string' ? p.steam.text : JSON.stringify(p.steam))}</div>` : ''}
+    ${p.account ? `<div class="sec">Account signals</div><div class="small">${esc((p.account.flags || []).join('; ') || 'nothing unusual')}${p.account.score ? ` <span class="muted">(score ${p.account.score})</span>` : ''}${p.account.ips ? `<div class="muted">${p.account.ips.length} address(es) seen</div>` : ''}</div>` : ''}
+    ${p.combat ? `<div class="sec">Combat</div><div class="small">${p.combat.hits} hits dealt (${p.combat.dealt} dmg), ${p.combat.hitsTaken} taken, ${p.combat.headshots} headshots, longest kill ${Math.round(p.combat.longestKill || 0)} m${p.combat.flags && Object.keys(p.combat.flags).length ? ' · flags: ' + esc(Object.keys(p.combat.flags).join(', ')) : ''}</div>` : ''}
+    ${can('deaths.view') ? `<div class="sec">Recent deaths</div>${p.recentDeaths.map(x => `<div class="small">#${x.id} ${esc(ago(x.ts))} · ${esc(x.cause === 'player' && x.killer ? 'killed by ' + x.killer.name : x.causeText)}${x.refunds ? ' <span class="badge ok">refunded</span>' : ''}</div>`).join('') || '<div class="muted small">none</div>'}` : ''}
+    ${can('tickets.view') ? `<div class="sec">Tickets</div>${p.tickets.map(t => `<div class="small">#${esc(t.id)} ${esc(t.subject)} <span class="muted">${esc(t.status)}</span></div>`).join('') || '<div class="muted small">none</div>'}` : ''}
+    ${can('audit.view') ? `<div class="sec">Admin actions on them</div>${p.actions.map(a => `<div class="small"><span class="muted">${esc(ago(a.ts))} · ${esc(a.who)}</span> ${esc(a.action.replace('admin:', ''))}: ${esc(String(a.details).slice(0, 140))}</div>`).join('') || '<div class="muted small">none</div>'}` : ''}`;
+  document.body.appendChild(bg); document.body.appendChild(d);
+  d.querySelector('.close').onclick = closeDrawer;
+  const act = $('prAct'); if (act) act.onclick = () => { const r = act.getBoundingClientRect(); showMenu(playerMenu(lp).filter(i => i.h || i.label !== 'Profile'), r.left, r.bottom + 2); };
+  const ns = $('prNoteSave'); if (ns) ns.onclick = async () => { try { await api('playerNote', { key: p.key, text: $('prNote').value }); toast('Note saved'); } catch (e) { toast(e.message, true); } };
+  for (const b of d.querySelectorAll('[data-list]')) b.onclick = async () => {
+    const kind = b.dataset.list; const on = p.lists[kind]; const id = p.steamId || p.id || p.key;
+    if (on) { if (!(await modal(`Remove ${p.name} from the ${kind} list?`, ''))) return; try { await api('listOp', { op: 'remove', kind, id, name: p.name }); toast('Removed'); openPlayer(p.key); } catch (e) { toast(e.message, true); } return; }
+    const why = kind === 'ban' ? await askReason(`Ban ${p.name}`, `<p class="muted small">Adds ${esc(id)} to ban.txt (they are kicked at their next join or by the server).</p>`) : await askReason(`${kind === 'whitelist' ? 'Whitelist' : 'Priority for'} ${p.name}`, '', false);
+    if (why === null) return; try { await api('listOp', { op: 'add', kind, id, name: p.name, reason: why }); toast('Added'); openPlayer(p.key); } catch (e) { toast(e.message, true); }
+  };
+}
+document.addEventListener('click', e => { const a = e.target.closest('[data-prof]'); if (a) { e.preventDefault(); openPlayer(a.dataset.prof, a.dataset.name); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDrawer(); closeMenu(); $('hdHits').hidden = true; } });
+// header search
+let hsT = null;
+$('hdSearch').oninput = () => { clearTimeout(hsT); const q = $('hdSearch').value.trim(); if (!q) { $('hdHits').hidden = true; return; } hsT = setTimeout(async () => { try { const rows = await api('playerSearch', null, { q }); const box = $('hdHits'); const r = $('hdSearch').getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = (r.bottom + 4) + 'px'; box.innerHTML = rows.slice(0, 12).map(p => `<div data-key="${esc(p.key)}">${esc(p.name)} <span class="muted small">${p.online ? 'online' : ago(p.lastSeen)}${p.banned ? ' · banned' : ''}</span></div>`).join('') || '<div class="muted">No player matches.</div>'; box.hidden = false; } catch (e) { toast(e.message, true); } }, 250); };
+$('hdHits').onclick = e => { const d = e.target.closest('[data-key]'); if (d) { $('hdHits').hidden = true; $('hdSearch').value = ''; openPlayer(d.dataset.key); } };
+document.addEventListener('click', e => { if (!e.target.closest('#hdHits, #hdSearch')) $('hdHits').hidden = true; });
+// ---------- lists ----------
+async function pageLists(main) {
+  const KINDS = [['ban', 'Bans', 'ban.txt'], ['whitelist', 'Whitelist', 'whitelist.txt'], ['priority', 'Priority queue', 'priority.txt'], ['bebans', 'BattlEye bans', 'battleye\\bans.txt']];
+  let kind = 'ban'; const m = can('lists.manage');
+  main.innerHTML = `<div class="card"><div class="tabs" id="lTabs">${KINDS.map(k => `<button data-k="${k[0]}" class="${k[0] === kind ? 'on' : ''}">${k[1]}</button>`).join('')}</div><div class="row"><input id="lq" class="input" placeholder="Search…" style="max-width:260px"><span class="muted small" id="lInfo"></span><span class="grow"></span>${m ? '<button class="btn primary" id="lAdd">Add</button>' : ''}</div><table id="lT" class="mt"><thead></thead><tbody></tbody></table></div>`;
+  const draw = async () => {
+    const all = await api('lists'); const l = all[kind]; const q = $('lq').value.trim().toLowerCase();
+    const be = kind === 'bebans'; $('lInfo').textContent = `${l.entries.length} entr${l.entries.length === 1 ? 'y' : 'ies'} · ${KINDS.find(k => k[0] === kind)[2]}${l.exists === false ? ' (file not there yet)' : ''}`;
+    main.querySelector('thead').innerHTML = be ? '<tr><th>GUID / IP</th><th>Minutes</th><th>Reason</th><th></th></tr>' : '<tr><th>Player</th><th>Steam64</th><th>DayZ id</th><th>Reason / note</th><th>Added</th><th></th></tr>';
+    const rows = l.entries.filter(e => !q || JSON.stringify(e).toLowerCase().includes(q));
+    main.querySelector('tbody').innerHTML = rows.map(e => be ? `<tr><td class="small">${esc(e.id)}</td><td>${esc(e.minutes || '0')}</td><td>${esc(e.reason || '')}</td><td>${m ? `<button class="btn small danger l-del" data-id="${esc(e.id)}">Remove</button>` : ''}</td></tr>`
+      : `<tr><td>${e.name ? `<a href="#" data-prof="${esc(e.steamId || e.id)}" data-name="${esc(e.name)}">${esc(e.name)}</a>` : '<span class="muted">unknown</span>'}</td><td class="small">${esc(e.steamId || '')}</td><td class="small muted">${esc(e.id)}</td><td>${esc(e.reason || e.note || '')}</td><td class="muted small">${e.added ? esc(ago(e.added)) : ''}</td><td>${m ? `<button class="btn small danger l-del" data-id="${esc(e.steamId || e.id)}" data-name="${esc(e.name || '')}">Remove</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Empty.</td></tr>';
+  };
+  $('lTabs').onclick = e => { const b = e.target.closest('button[data-k]'); if (!b) return; kind = b.dataset.k; $('lTabs').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); draw(); };
+  let t; $('lq').oninput = () => { clearTimeout(t); t = setTimeout(draw, 200); };
+  main.querySelector('#lT').addEventListener('click', async e => { const b = e.target.closest('.l-del'); if (!b) return; if (!(await modal(`Remove ${b.dataset.name || b.dataset.id} from this list?`, ''))) return; try { await api('listOp', { op: 'remove', kind, id: b.dataset.id, name: b.dataset.name }); toast('Removed'); draw(); } catch (err) { toast(err.message, true); } });
+  const add = $('lAdd'); if (add) add.onclick = async () => {
+    const be = kind === 'bebans';
+    const ok = await modal(`Add to ${KINDS.find(k => k[0] === kind)[1]}`, be ? '<label>BattlEye GUID or IP</label><input id="aI" class="input"><label>Minutes (0 = permanent)</label><input id="aM" class="input" type="number" value="0"><label>Reason</label><input id="mWhy" class="input">' : `<label>Steam64 ID (or DayZ id)</label><input id="aI" class="input"><label>Player name (for your records)</label><input id="aN" class="input"><label>Reason${kind === 'ban' ? '' : ' (optional)'}</label><input id="mWhy" class="input">`, [['Add', true, true], ['Cancel', false]]);
+    if (!ok) return; const why = $('mWhy').value.trim(); if ((kind === 'ban' || be) && !why) return toast('Give a reason.', true);
+    try { await api('listOp', { op: 'add', kind, id: $('aI').value.trim(), name: be ? '' : $('aN').value.trim(), minutes: be ? Number($('aM').value) || 0 : undefined, reason: why }); toast('Added'); draw(); } catch (err) { toast(err.message, true); }
+  };
+  await draw();
 }
 loadMe();
 </script>

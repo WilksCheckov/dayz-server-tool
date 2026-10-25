@@ -21,6 +21,8 @@ const PERMS = [
   ['players.message', 'Message a player', 'Players'],
   ['players.kick', 'Kick a player', 'Players'],
   ['players.ban', 'Ban a player', 'Players'],
+  ['lists.view', 'See the ban list, whitelist, priority queue and player notes', 'Players'],
+  ['lists.manage', 'Add to and remove from the ban list, whitelist and priority queue; edit player notes', 'Players'],
   ['admin.heal', 'Heal', 'In-game admin'],
   ['admin.teleport', 'Teleport players (to a player, a map point, their death)', 'In-game admin'],
   ['admin.spawn', 'Give items, kits and vehicles; spawn at a map point', 'In-game admin'],
@@ -38,8 +40,8 @@ const ALL = PERMS.map(p => p[0]);
 const DEFAULT_GROUPS = {
   owner: { name: 'Owner', perms: ALL, builtin: true },
   admin: { name: 'Admin', perms: ALL.filter(p => p !== 'portal.users') },
-  moderator: { name: 'Moderator', perms: ['server.view', 'players.view', 'players.message', 'players.kick', 'players.ban', 'deaths.view', 'tickets.view', 'tickets.manage', 'audit.view'] },
-  gm: { name: 'Game master', perms: ['server.view', 'players.view', 'players.message', 'admin.heal', 'admin.teleport', 'admin.spawn', 'admin.god', 'admin.refund', 'deaths.view', 'tickets.view'] },
+  moderator: { name: 'Moderator', perms: ['server.view', 'players.view', 'players.message', 'players.kick', 'players.ban', 'lists.view', 'lists.manage', 'deaths.view', 'tickets.view', 'tickets.manage', 'audit.view'] },
+  gm: { name: 'Game master', perms: ['server.view', 'players.view', 'players.message', 'lists.view', 'admin.heal', 'admin.teleport', 'admin.spawn', 'admin.god', 'admin.refund', 'deaths.view', 'tickets.view'] },
   developer: { name: 'Developer', perms: ['server.view', 'server.control', 'server.backup', 'logs.view', 'audit.view', 'deaths.view'] }
 };
 // which permission each in-game action needs
@@ -51,6 +53,12 @@ function load() {
   if (db) return db;
   db = { enabled: false, users: {}, groups: {}, sessions: {}, ...(jsonstore.readOr(file(), {}) || {}) };
   for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (!db.groups[id]) db.groups[id] = { ...g, perms: g.perms.slice() };
+  // permissions added in a later version join the built-in groups that had them by default (your own groups are left alone)
+  const PERMS_VERSION = 2;
+  if ((db.permsVersion || 1) < PERMS_VERSION) {
+    for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
+    db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save();
+  }
   return db;
 }
 function save() { jsonstore.write(file(), load(), true); }
@@ -161,6 +169,24 @@ function mapFile(rel) {
   const f = path.join(info.tiles.dir, m[1], `${m[2]}_${m[3]}.jpg`); return f.startsWith(info.tiles.dir) && fs.existsSync(f) ? f : null;
 }
 
+// One player, everything the tool knows: the database record, where they are now, deaths, tickets, combat, Steam
+// bans, account signals, list membership, the note, and every admin action done to them.
+function profile(key) {
+  const players = require('./players'); const lists = require('./lists');
+  const r = players.get(key) || (() => { const row = players.all({ query: key, limit: 1 })[0]; return row ? players.get(row.key) : null; })();
+  if (!r) throw new Error('No such player in the database.');
+  const names = r.names || [r.name]; const name = r.name || names[names.length - 1];
+  const ids = [r.key, r.id, r.steamId].filter(Boolean);
+  let live = null; try { const L = require('./live').players(); if (L.available) live = L.players.find(p => ids.includes(p.id) || ids.includes(p.steam) || p.name === name) || null; } catch { /* ignore */ }
+  const recentDeaths = require('./deathlog').forPlayer(r.key, 10);
+  let tickets = []; try { tickets = require('./tickets').list({ q: name }).filter(t => t.player === name || (t.deaths || []).some(d => recentDeaths.some(x => x.id === d))); } catch { /* ignore */ }
+  let combat = null; try { combat = require('./combat').forPlayer(r.key) || require('./combat').forPlayer(name); } catch { /* ignore */ }
+  let steam = null; try { const sb = require('./steambans'); const rec = sb.get(r.steamId); if (rec) steam = { text: sb.summary(rec), flagged: sb.flagged(rec), checkedAt: rec.checkedAt || null }; } catch { /* ignore */ }
+  let account = null; try { account = require('./accounts').summary({ steamId: r.steamId, names }); } catch { /* ignore */ }
+  const on = (kind) => ids.some(i => { try { return lists.has(kind, i); } catch { return false; } });
+  const actions = require('./audit').list({ limit: 2000 }).filter(a => /^admin:/.test(a.action) && typeof a.details === 'string' && (a.details.includes(name) || (r.steamId && a.details.includes(r.steamId)))).slice(0, 30);
+  return { ...r, name, names, live, recentDeaths, tickets, combat, steam, account, lists: { ban: on('ban'), whitelist: on('whitelist'), priority: on('priority') }, actions };
+}
 // ---------- HTTP ----------
 let uiCache = null;
 function ui() { if (!uiCache || !require('electron').app.isPackaged) uiCache = fs.readFileSync(path.join(__dirname, 'portal-ui.html'), 'utf8'); return uiCache; }
@@ -203,6 +229,23 @@ async function api(route, b, url, user, need, by) {
     case 'spawnAt': need('admin.spawn'); return require('./live').spawnAt(b, by);
     case 'kits': need('admin.spawn'); return require('./live').kits();
     case 'vehicles': need('admin.spawn'); return require('./live').vehicles();
+    case 'player': need('players.view'); return profile(q('key'));
+    case 'playerSearch': need('players.view'); return require('./players').all({ query: q('q'), limit: 30 }).map(p => ({ key: p.key, name: p.name, steamId: p.steamId || null, online: !!p.online, lastSeen: p.lastSeen, playtimeSec: p.playtimeSec, kills: p.kills, deaths: p.deaths, banned: !!p.banned, whitelisted: !!p.whitelisted }));
+    case 'playerNote': { need('lists.manage'); const r = require('./players').setNote(b.key, String(b.text || '').slice(0, 2000)); audit(by, 'players:setNote', `${r.name}: ${String(b.text || '').slice(0, 200)}`); return true; }
+    case 'lists': need('lists.view'); return require('./lists').allLists();
+    case 'listOp': {
+      need('lists.manage'); const lists = require('./lists'); const kind = b.kind;
+      if (!lists.KINDS[kind]) throw new Error('Unknown list.');
+      const al = require('./adminlog'); const action = kind === 'ban' || kind === 'bebans' ? 'ban' : kind;
+      if (b.op === 'add') {
+        if (action === 'ban') al.check('ban', b.reason);
+        lists.add(kind, { id: b.id, minutes: b.minutes, reason: b.reason || '', name: b.name || '' }, { name: b.name || '', note: b.reason || '' });
+        al.record({ action: kind === 'ban' ? 'ban' : kind === 'bebans' ? 'beban' : kind, by, source: 'web', target: { name: b.name || b.id, steam: b.id }, details: `added to ${lists.KINDS[kind].label}${b.minutes ? ` for ${b.minutes} min` : ''}`, reason: String(b.reason || '').trim(), result: { status: 'done' } });
+        return lists.read(kind);
+      }
+      if (b.op === 'remove') { lists.remove(kind, b.id); al.record({ action: kind === 'ban' || kind === 'bebans' ? 'unban' : 'unlist', by, source: 'web', target: { name: b.name || b.id, steam: b.id }, details: `removed from ${lists.KINDS[kind].label}`, reason: String(b.reason || '').trim(), result: { status: 'done' } }); return lists.read(kind); }
+      throw new Error('Unknown list operation.');
+    }
     case 'map': { need('players.view'); const i = require('./mission').mapInfo(); return { key: i.map, label: i.label, size: i.size, image: !!i.image, tiles: i.tiles ? { tile: i.tiles.tile, width: i.tiles.width, maxZ: i.tiles.maxZ, minZ: i.tiles.minZ } : null }; }
     case 'deaths': { need('deaths.view'); const dl = require('./deathlog'); const tk = require('./tickets'); return dl.list({ q: q('q'), limit: Math.min(300, Number(q('limit')) || 100) }).map(r => ({ ...r, tickets: tk.forDeath(r.id) })); }
     case 'death': { need('deaths.view'); const r = require('./deathlog').get(Number(q('id'))); return r ? { ...r, tickets: require('./tickets').forDeath(r.id) } : null; }
