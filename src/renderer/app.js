@@ -1621,7 +1621,7 @@ async function refreshBridgeState() {
   const st = await ipc.invoke('deathlog:bridgeStatus'); const b = $('dlBridgeState');
   b.className = 'badge ' + (st.upToDate ? 'ok' : st.installed ? 'warn' : 'bad');
   b.textContent = st.error ? st.error : st.upToDate ? `installed (v${st.version})` : st.installed ? `installed v${st.version}, update available` : 'not installed';
-  const s = await ipc.invoke('settings:get'); $('dlBridgeAuto').checked = ((s.deathlog || {}).bridge !== false);
+  const s = await ipc.invoke('settings:get'); $('dlBridgeAuto').checked = ((s.deathlog || {}).bridge !== false); $('dlDeleteBody').checked = ((s.deathlog || {}).deleteBody !== false);
 }
 async function showDeath(id) {
   const r = await ipc.invoke('deathlog:get', id); const box = $('dlDetail');
@@ -1659,14 +1659,15 @@ async function showDeath(id) {
     const ok = await showModal('Refund gear', `<p>Spawn the ${r.gear.length} items ${esc(r.name)} had when they died, in pristine condition, at their feet now?</p><p class="muted">Weapons come without their attachments fitted; attachments, magazines and cargo are spawned as separate items.</p><label class="field">Reason / ticket <input id="dlWhy" class="input" value="${(r.tickets || []).length ? '#' + esc(r.tickets[0].id) + ' ' : ''}" placeholder="Reason or ticket number (posted to the admin action channel)"></label>`, [{ label: 'Refund', value: true, primary: true }, { label: 'Cancel', value: false }]);
     if (!ok) return;
     const res = await ipc.invoke('deathlog:refund', r.id, null, $('dlWhy').value.trim());
-    toast(res.status === 'done' && res.ok > 0 ? `Spawned ${res.ok} of ${res.items} items at ${r.name}'s feet${res.fail ? ` (${res.fail} failed)` : ''}` : res.status === 'done' ? `Nothing could be spawned for ${r.name} (${res.fail} item(s) failed: classes from a removed mod?)` : res.status === 'offline' ? `${r.name} is not in game right now` : res.status === 'pending' ? 'The game picked the refund up but has not answered yet; the result shows in the death record when it does.' : res.withdrawn ? 'The game did not pick the refund up in time, so it was withdrawn and nothing was spawned. Is the server running with the bridge script loaded (it loads at server start)?' : 'The server did not answer. Is the bridge script installed and the server running?', !(res.status === 'done' && res.ok > 0) && res.status !== 'pending');
+    toast(res.status === 'done' && res.ok > 0 ? `Spawned ${res.ok} of ${res.items} items at ${r.name}'s feet${res.fail ? ` (${res.fail} failed)` : ''}${res.body === 'body' ? ' · body removed' : res.body === 'nobody' ? ' · no body found to remove' : ''}` : res.status === 'done' ? `Nothing could be spawned for ${r.name} (${res.fail} item(s) failed: classes from a removed mod?)` : res.status === 'offline' ? `${r.name} is not in game right now` : res.status === 'pending' ? 'The game picked the refund up but has not answered yet; the result shows in the death record when it does.' : res.withdrawn ? 'The game did not pick the refund up in time, so it was withdrawn and nothing was spawned. Is the server running with the bridge script loaded (it loads at server start)?' : 'The server did not answer. Is the bridge script installed and the server running?', !(res.status === 'done' && res.ok > 0) && res.status !== 'pending');
     showDeath(r.id); refreshDeathLog();
   }, e.target);
 }
 $('btnDlRefresh').onclick = () => refreshDeathLog();
 let dlTimer = null; $('dlQuery').oninput = () => { clearTimeout(dlTimer); dlTimer = setTimeout(refreshDeathLog, 250); };
 $('dlCause').onchange = $('dlRange').onchange = () => refreshDeathLog();
-$('dlBridgeAuto').onchange = () => saveSettings({ deathlog: { bridge: $('dlBridgeAuto').checked } });
+const saveDl = () => saveSettings({ deathlog: { ...((state.settings && state.settings.deathlog) || {}), bridge: $('dlBridgeAuto').checked, deleteBody: $('dlDeleteBody').checked } });
+$('dlBridgeAuto').onchange = saveDl; $('dlDeleteBody').onchange = saveDl;
 $('btnDlInstall').onclick = (e) => run(async () => { const st = await ipc.invoke('deathlog:installBridge'); toast(st.installed ? 'Bridge script written to init.c. Restart the server for it to load.' : 'Could not install'); refreshBridgeState(); }, e.target);
 $('btnDlRemove').onclick = (e) => run(async () => { if (!await showModal('Remove bridge script', '<p>Remove the bridge script from init.c? Gear snapshots and refunds stop at the next server start. Turn off "Keep it installed" as well, or it comes back on the next start.</p>', [{ label: 'Remove', value: true, primary: true }, { label: 'Cancel', value: false }])) return; await ipc.invoke('deathlog:removeBridge'); refreshBridgeState(); }, e.target);
 $('btnDlOpenDir').onclick = () => ipc.invoke('deathlog:openBridgeDir');

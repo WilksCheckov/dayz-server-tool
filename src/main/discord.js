@@ -767,7 +767,7 @@ async function execute(name, sub, opt, user) {
       require('./adminlog').check('refund', opt.reason);
       const res = await dl.refund(r.id, { by: who });
       require('./adminlog').record({ action: 'refund', by: who, source: 'discord', target: { name: r.name, steam: r.steamId || r.key }, details: `death #${r.id}: ${res.items} item(s)`, reason: opt.reason || '', result: res });
-      if (res.status === 'done' && res.ok > 0) { await postLog(`↩️ ${who} refunded ${res.ok}/${res.items} items to ${r.name} (death #${r.id})`); return { content: `✅ Refunded ${res.ok} of ${res.items} items to **${r.name}** at their feet${res.fail ? ` (${res.fail} could not be spawned)` : ''}.` }; }
+      if (res.status === 'done' && res.ok > 0) { await postLog(`↩️ ${who} refunded ${res.ok}/${res.items} items to ${r.name} (death #${r.id})`); return { content: `✅ Refunded ${res.ok} of ${res.items} items to **${r.name}** at their feet${res.fail ? ` (${res.fail} could not be spawned)` : ''}.${res.body === 'body' ? ' Their body was removed.' : res.body === 'nobody' ? ' No body was found to remove.' : ''}` }; }
       if (res.status === 'done') return { content: `❌ Nothing could be spawned for **${r.name}**: all ${res.fail} item(s) failed (classes from a removed mod?).` };
       if (res.status === 'pending') return { content: 'The game picked the refund up but has not answered yet; its result is recorded on the death when it does. Check with /death before trying again.' };
       if (res.withdrawn) return { content: 'The game did not pick the refund up in time, so it was withdrawn and nothing was spawned. Safe to try again once the server is up with the bridge script loaded.' };

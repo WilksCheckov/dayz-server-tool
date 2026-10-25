@@ -19,7 +19,7 @@ const COLOR = { kill: 0xff5f5f, ban: 0xff5f5f, kick: 0xf5b942, refund: 0x4f8cff,
 function check(action, reason) {
   if (cfg().requireReason && NEEDS_REASON.includes(action) && !String(reason || '').trim()) throw new Error('Give a reason or ticket number for this (required: Discord Bot page → Admin action log).');
 }
-const resultText = (r) => !r ? '' : r.status === 'done' ? (r.ok !== undefined && (r.ok || r.fail) ? `${r.ok} ok${r.fail ? `, ${r.fail} failed` : ''}` : 'done') : r.status === 'pending' ? 'picked up by the game, result pending' : r.withdrawn ? 'not picked up by the game: nothing done' : (r.status || '');
+const resultText = (r) => !r ? '' : r.status === 'done' ? (r.ok !== undefined && (r.ok || r.fail) ? `${r.ok} ok${r.fail ? `, ${r.fail} failed` : ''}` : 'done') + (r.body === 'body' ? ', body removed' : r.body === 'nobody' ? ', no body found' : '') : r.status === 'pending' ? 'picked up by the game, result pending' : r.withdrawn ? 'not picked up by the game: nothing done' : (r.status || '');
 
 // { action, by ('app'/'map' = the admin at this PC, else a Discord user), source ('app' | 'discord'), target {name, steam}, details, reason, result }
 function record({ action, by = 'app', source = 'app', target = null, details = '', reason = '', result = null }) {

@@ -193,8 +193,8 @@ async function sendCommand(cmd, { by = 'app', timeoutMs = 25000, onLate = null }
   while (Date.now() - started < timeoutMs) {
     await new Promise(r => setTimeout(r, 700));
     let txt = ''; try { txt = fs.readFileSync(resFile, 'utf8'); } catch { /* not yet */ }
-    const m = txt.match(new RegExp('^' + nonce + '\\|(\\w+)\\|(\\d+)\\|(\\d+)', 'm'));
-    if (m) { const res = { status: m[1], ok: Number(m[2]), fail: Number(m[3]) }; try { require('./audit').log('app', by, 'bridge:' + (cmd.type || 'refund'), `${cmd.id}: ${res.status}${cmd.what ? ' (' + cmd.what + ')' : ''}`); } catch { /* ignore */ } return res; }
+    const m = txt.match(new RegExp('^' + nonce + '\\|(\\w+)\\|(\\d+)\\|(\\d+)(?:\\|(\\w+))?', 'm'));
+    if (m) { const res = { status: m[1], ok: Number(m[2]), fail: Number(m[3]), ...(m[4] ? { body: m[4] } : {}) }; try { require('./audit').log('app', by, 'bridge:' + (cmd.type || 'refund'), `${cmd.id}: ${res.status}${cmd.what ? ' (' + cmd.what + ')' : ''}`); } catch { /* ignore */ } return res; }
   }
   // No answer in time. If the game has not picked the command up, take it back out of the queue so it cannot run
   // later (an admin who clicks again would otherwise refund twice). If it was picked up, keep watching for the result.
@@ -212,8 +212,8 @@ async function sendCommand(cmd, { by = 'app', timeoutMs = 25000, onLate = null }
     while (Date.now() < end) {
       await new Promise(r => setTimeout(r, 3000));
       let txt = ''; try { txt = fs.readFileSync(resFile, 'utf8'); } catch { /* not yet */ }
-      const m = txt.match(new RegExp('^' + nonce + '\\|(\\w+)\\|(\\d+)\\|(\\d+)', 'm'));
-      if (m) { const res = { status: m[1], ok: Number(m[2]), fail: Number(m[3]) }; emitRef('console', { source: 'deathlog', line: `The ${label} finished late: ${res.status}${res.status === 'done' ? ` (${res.ok} ok, ${res.fail} failed)` : ''}.` }); if (onLate) onLate(res); return; }
+      const m = txt.match(new RegExp('^' + nonce + '\\|(\\w+)\\|(\\d+)\\|(\\d+)(?:\\|(\\w+))?', 'm'));
+      if (m) { const res = { status: m[1], ok: Number(m[2]), fail: Number(m[3]), ...(m[4] ? { body: m[4] } : {}) }; emitRef('console', { source: 'deathlog', line: `The ${label} finished late: ${res.status}${res.status === 'done' ? ` (${res.ok} ok, ${res.fail} failed)` : ''}.` }); if (onLate) onLate(res); return; }
     }
     emitRef('console', { source: 'deathlog', line: `No result for the ${label} after 3 minutes; check in game whether it happened before trying again.` });
   })().catch(() => {});
@@ -253,7 +253,11 @@ async function refund(deathId, { by = 'app', items = null } = {}) {
   const list = (items || (rec.gear || []).map(i => i.c)).filter(Boolean);
   if (!list.length) throw new Error('No gear recorded for this death');
   const keep = (r) => { rec.refunds.push({ ts: Date.now(), by, ...r, items: list.length }); save(); emitRef('deathlog:changed', { id: rec.id }); };
-  const res = await sendCommand({ type: 'refund', id: rec.key, items: list }, { by, onLate: keep }); res.items = list.length;
+  // only when an admin presses Refund in the app (map or Death log page): not for Discord refunds, never on its own
+  const delBody = (by === 'app' || by === 'map') && (settings.load().deathlog || {}).deleteBody !== false;
+  const corpse = (d.gear[rec.key] || []).find(x => x.dead && x.pos && Math.abs(x.ts - rec.ts) <= 180000);
+  const res = await sendCommand({ type: 'refund', id: rec.key, what: delBody ? 'delbody' : '-', pos: corpse ? [corpse.pos[0], corpse.pos[2]] : null, items: list }, { by, onLate: keep }); res.items = list.length;
+  if (delBody && res.status === 'done') emitRef('console', { source: 'deathlog', line: res.body === 'body' ? `Refund for ${rec.name}: their body and everything on it were removed.` : `Refund for ${rec.name}: no body found to remove (already gone, or the server restarted and the death position is not exact).` });
   if (res.status !== 'timeout' && res.status !== 'pending') keep(res);
   return res;
 }
@@ -280,7 +284,7 @@ function forPlayer(key, limit = 20) { return load().deaths.filter(r => r.key ===
 function stats() { const d = load(); const causes = {}; for (const r of d.deaths) causes[r.cause] = (causes[r.cause] || 0) + 1; return { deaths: d.deaths.length, causes, snapshots: Object.values(d.gear).filter(Array.isArray).reduce((n, l) => n + l.length, 0), players: Object.keys(d.gear).filter(k => !k.startsWith('steam:')).length }; }
 
 // ---------- bridge script in the mission's init.c ----------
-const BRIDGE_VERSION = 3;
+const BRIDGE_VERSION = 4;
 const MARK_BEGIN = '// >>> DayZ Admin Tools bridge v' + BRIDGE_VERSION + ' (managed by the tool: do not edit between the markers)';
 const MARK_END = '// <<< DayZ Admin Tools bridge';
 const HOOK = 'DZAT_Bridge.Tick(timeslice); // DayZ Admin Tools hook';

@@ -7,6 +7,8 @@ class DZAT_Bridge
 	static ref map<string, int> s_God = new map<string, int>();
 	static ref map<string, string> s_Last = new map<string, string>();
 	static ref map<string, int> s_Dead = new map<string, int>();
+	// the body of each player who died this session (by identity id), so a refund can remove it with its gear
+	static ref map<string, PlayerBase> s_Corpses = new map<string, PlayerBase>();
 	static const string DIR = "$profile:DayZAdminTools";
 
 	static string Esc(string s)
@@ -230,6 +232,31 @@ class DZAT_Bridge
 		}
 		return made;
 	}
+	// Remove a dead player's body and everything on it: the one remembered for this identity, else (after a restart)
+	// a dead body within 3 m of the exact death position. Returns "body" when one was deleted, "nobody" otherwise.
+	static string DeleteCorpse(string id, string xs, string zs)
+	{
+		PlayerBase corpse = null;
+		if (s_Corpses.Contains(id)) corpse = s_Corpses.Get(id);
+		if (corpse && corpse.IsAlive()) corpse = null;
+		if (!corpse && xs != "-" && zs != "-")
+		{
+			vector at = Vector(xs.ToFloat(), 0, zs.ToFloat());
+			at[1] = GetGame().SurfaceY(at[0], at[2]);
+			array<Object> objs = new array<Object>();
+			array<CargoBase> proxies = new array<CargoBase>();
+			GetGame().GetObjectsAtPosition(at, 3.0, objs, proxies);
+			for (int i = 0; i < objs.Count(); i++)
+			{
+				PlayerBase cand = PlayerBase.Cast(objs[i]);
+				if (cand && !cand.IsAlive()) { corpse = cand; break; }
+			}
+		}
+		if (!corpse) return "nobody";
+		if (s_Corpses.Contains(id)) s_Corpses.Remove(id);
+		GetGame().ObjectDelete(corpse);
+		return "body";
+	}
 	static PlayerBase FindPlayer(array<Man> players, string id)
 	{
 		for (int j = 0; j < players.Count(); j++)
@@ -308,6 +335,9 @@ class DZAT_Bridge
 		}
 		if (type == "refund")
 		{
+			// f[3] = "delbody" removes the body first (f[4], f[5] = the death position for the search after a restart)
+			string body = "kept";
+			if (f[3] == "delbody") body = DeleteCorpse(f[2], f[4], f[5]);
 			array<string> items = new array<string>();
 			f[6].Split(",", items);
 			int ok = 0;
@@ -332,7 +362,7 @@ class DZAT_Bridge
 				if (smag) smag.ServerSetAmmoCount(smag.GetAmmoMax());
 				ok++;
 			}
-			Append(DIR + "/results.log", nonce + "|done|" + ok.ToString() + "|" + fail.ToString());
+			Append(DIR + "/results.log", nonce + "|done|" + ok.ToString() + "|" + fail.ToString() + "|" + body);
 			return;
 		}
 		// to another player: f[3] = that player's id, placed next to them at their height (works on upper floors)
@@ -449,6 +479,7 @@ class DZAT_Bridge
 				if (!s_Dead.Contains(id))
 				{
 					s_Dead.Insert(id, 1);
+					s_Corpses.Set(id, p);
 					Snapshot(p, id, true);
 				}
 			}
