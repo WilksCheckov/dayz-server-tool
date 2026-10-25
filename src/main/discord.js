@@ -744,6 +744,7 @@ async function execute(name, sub, opt, user) {
     if (!p.online) return { content: `${p.name} is not online.` };
     const al = require('./adminlog');
     try {
+      al.check(name === 'heal' ? 'heal' : 'tp', opt.reason);
       let res, what;
       if (name === 'heal') { what = opt.what || 'all'; res = await dl.heal(p.key, what, { by: who }); }
       else if (opt.x !== undefined && opt.x !== null && opt.z !== undefined && opt.z !== null) { res = await dl.teleport(p.key, [opt.x, opt.z], { by: who }); res.pos = [opt.x, opt.z]; }

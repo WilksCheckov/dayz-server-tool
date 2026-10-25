@@ -25,7 +25,7 @@ discord.store().tickets = [{ id: '0001', subject: 'Lost my gear at Tisy', discor
 discord.store().ticketSeq = 1; discord.saveStore();
 tk.create({ subject: 'Cat fell off a roof', player: 'Cat', by: 'app' });
 // the game answers refunds
-setInterval(() => { const q = path.join(dl.bridgeDir(), 'commands.txt'); if (!fs.existsSync(q)) return; const line = fs.readFileSync(q, 'utf8').trim(); if (!line) return; fs.unlinkSync(q); fs.appendFileSync(path.join(dl.bridgeDir(), 'results.log'), `${line.split('|')[0]}|done|2|0|body\r\n`); }, 100).unref();
+setInterval(() => { const q = path.join(dl.bridgeDir(), 'commands.txt'); if (!fs.existsSync(q)) return; const line = fs.readFileSync(q, 'utf8').trim(); if (!line) return; fs.unlinkSync(q); const f = line.split('|'); fs.appendFileSync(path.join(dl.bridgeDir(), 'results.log'), `${f[0]}|done|${f[6].split(',').length}|0|body\r\n`); }, 100).unref();
 const admin = { id: 'D-ADMIN', tag: 'Chris#1', username: 'Chris' };
 async function pick(commandName, field, value, user = admin, member = { displayName: 'Chris', permissions: { has: () => true }, roles: { cache: new Map() } }) { let out = null; await discord._onInteraction({ isAutocomplete: () => true, commandName, user, member, options: { getFocused: () => ({ name: field, value }) }, respond: async (c) => { out = c; } }); return out; }
 async function slash(commandName, options, { user = admin, member = { displayName: 'Chris', permissions: { has: () => true }, roles: { cache: new Map() } }, channelId = 'X' } = {}) {
@@ -56,6 +56,6 @@ async function slash(commandName, options, { user = admin, member = { displayNam
   r = await slash('refund', { ticket: '0002', reason: 'approved' });
   t.ok("a ticket without a linked death falls back to the player's latest death", /\*\*Cat\*\*/.test(r.content) && tk.get('0002').deaths.map(d => d.id).join() === '2' && tk.get('0002').actions[0].reason === '#0002 approved', r.content);
   r = await slash('refund', { id: '1' });
-  t.ok('a refund without ticket or reason is refused while reasons are required', /reason or ticket/i.test(r.content), r.content);
+  t.ok('a refund needs no reason (its death and ticket explain it)', /Refunded 1 of 1 items to \*\*Bob\*\*/.test(r.content), r.content);
   t.done();
 })();

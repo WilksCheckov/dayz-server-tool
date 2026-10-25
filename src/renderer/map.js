@@ -246,7 +246,7 @@ function mapInit() {
     if (d.moved) return;
     const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const w = toWorld(c, px, py);
     if (e.shiftKey) { const m = mapState.measure; if (!m || m.b) mapState.measure = { a: w, b: null, cursor: w }; else m.b = w; scheduleDraw(); return; }
-    if (adm.pickTp) { const p = livePlayer(adm.pickTp); adm.pickTp = null; c.style.cursor = ''; if (p) admAct('tp', p, { x: w[0], z: w[1] }); return; }
+    if (adm.pickTp) { const p = livePlayer(adm.pickTp); adm.pickTp = null; c.style.cursor = ''; if (p) withReason(`Teleport ${p.name} to ${Math.round(w[0])}, ${Math.round(w[1])}`, '', 'Teleport', (why) => admAct('tp', p, { x: w[0], z: w[1], reason: why })); return; }
     { const hit = liveAt(c, px, py); if (hit) { admSelect(hit.id); return; } }
     // click a player dot
     for (const r of mapState.players) { const [x, y] = toScreen(c, r.lastPos.x, r.lastPos.z); if (Math.hypot(px - x, py - y) <= 7) { showPlayerPopup(r); return; } }
@@ -372,27 +372,28 @@ const ask = (title, body, label = 'OK', danger = false) => showModal(title, body
 // the reason box every accountable action carries; required when the setting says so
 let reasonRequired = true;
 ipc.invoke('adminlog:cfg').then(c => { reasonRequired = c.requireReason !== false; }).catch(() => {});
-const reasonField = (ph = 'Reason or ticket number') => `<label class="field">Reason / ticket${reasonRequired ? '' : ' (optional)'} <input id="admWhy" class="input" placeholder="${ph}"></label>`;
+const reasonField = (ph = 'Why (posted to the admin action channel)', required = reasonRequired) => `<label class="field">Reason${required ? '' : ' / ticket (optional)'} <input id="admWhy" class="input" placeholder="${ph}"></label>`;
 const reason = () => ($('admWhy') ? $('admWhy').value.trim() : '');
-const withReason = async (title, body, label, run) => { const ok = await ask(title, body + reasonField(), label); if (!ok) return; if (reasonRequired && !reason()) return toast('Give a reason or ticket number.', true); run(reason()); };
+// every action asks why; refunds (explained by their death and ticket) only offer the box
+const withReason = async (title, body, label, run, required = reasonRequired) => { const ok = await ask(title, body + reasonField(undefined, required), label); if (!ok) return; if (required && !reason()) return toast('Give a reason.', true); run(reason()); };
 function playerMenu(p) {
   const others = (adm.live.players || []).filter(o => o.id !== p.id);
   return [
     { header: p.name + (p.god ? ' (god mode)' : '') + (!p.alive ? ' (dead)' : '') },
-    { label: 'Heal', sub: HEALS.map(([k, l]) => ({ label: l, run: () => admAct('heal', p, { what: k }) })) },
-    { label: 'Teleport to player', sub: others.map(o => ({ label: o.name, run: () => admAct('tpto', p, { to: o.id }) })) },
-    { label: 'Bring a player to them', sub: others.map(o => ({ label: o.name, run: () => admAct('bring', p, { to: o.id }) })) },
+    { label: 'Heal', sub: HEALS.map(([k, l]) => ({ label: l, run: () => withReason(`Heal ${p.name}: ${l.toLowerCase()}`, '', 'Heal', (why) => admAct('heal', p, { what: k, reason: why })) })) },
+    { label: 'Teleport to player', sub: others.map(o => ({ label: o.name, run: () => withReason(`Teleport ${p.name} to ${o.name}`, '', 'Teleport', (why) => admAct('tpto', p, { to: o.id, reason: why })) })) },
+    { label: 'Bring a player to them', sub: others.map(o => ({ label: o.name, run: () => withReason(`Bring ${o.name} to ${p.name}`, '', 'Bring', (why) => admAct('bring', p, { to: o.id, reason: why })) })) },
     { label: 'Teleport by clicking the map', run: () => { adm.sel = p.id; adm.pickTp = p.id; $('mapCanvas').style.cursor = 'crosshair'; renderAdmin(); toast(`Click the map where ${p.name} should go (Esc cancels)`); } },
-    { label: 'Teleport to their last death', run: () => admAct('tpdeath', p) },
+    { label: 'Teleport to their last death', run: () => withReason(`Teleport ${p.name} to their last death`, '', 'Teleport', (why) => admAct('tpdeath', p, { reason: why })) },
     { sep: true },
-    { label: 'Refund their last death…', run: () => withReason('Refund last death', `<p>Spawn the gear ${esc(p.name)} had at their last recorded death, pristine, at their feet?</p>`, 'Refund', (why) => admAct('refund', p, { reason: why })) },
+    { label: 'Refund their last death…', run: () => withReason('Refund last death', `<p>Spawn the gear ${esc(p.name)} had at their last recorded death, pristine, at their feet? Their body is removed.</p>`, 'Refund', (why) => admAct('refund', p, { reason: why }), false) },
     { label: 'Give item…', run: () => giveDialog(p) },
     { label: 'Give kit', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => withReason(`Give ${p.name} the kit ${k.name}`, '', 'Give', (why) => admAct('kit', p, { kit: k.name, reason: why })) })), { label: 'Manage kits…', run: () => kitManager() }] },
     { label: 'Spawn a vehicle next to them', sub: adm.vehicles.map(v => ({ label: v.name, run: () => withReason(`Spawn ${v.name} next to ${p.name}`, '<p class="muted">Every part fitted, every fluid full.</p>', 'Spawn', (why) => admAct('vehicle', p, { vehicle: v.name, reason: why })) })) },
-    { label: p.god ? 'Turn god mode off' : 'Turn god mode on', run: () => admAct('god', p, { on: !p.god }) },
+    { label: p.god ? 'Turn god mode off' : 'Turn god mode on', run: () => withReason(`God mode ${p.god ? 'off' : 'on'} for ${p.name}`, '', 'OK', (why) => admAct('god', p, { on: !p.god, reason: why })) },
     { sep: true },
     { label: 'Message…', run: async () => { if (await ask(`Message ${p.name}`, '<input id="admMsg" class="input" placeholder="Only they see it">', 'Send')) admAct('message', p, { text: $('admMsg').value }); } },
-    { label: 'Kick…', danger: true, run: async () => { if (await ask(`Kick ${p.name}?`, '<label class="field">Reason (shown to them) <input id="admWhy" class="input"></label>', 'Kick', true)) admAct('kick', p, { reason: reason() }); } },
+    { label: 'Kick…', danger: true, run: () => withReason(`Kick ${p.name}?`, '<p class="muted">The reason is shown to them.</p>', 'Kick', (why) => admAct('kick', p, { reason: why })) },
     { label: 'Ban…', danger: true, run: () => withReason(`Ban ${p.name}?`, `<p>Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them now.</p>`, 'Ban', (why) => admAct('ban', p, { reason: why })) },
     { label: 'Kill…', danger: true, run: () => withReason(`Kill ${p.name}?`, '<p>Their character dies where it stands.</p>', 'Kill', (why) => admAct('kill', p, { reason: why })) },
     { sep: true },
@@ -474,8 +475,8 @@ function pointMenu(w) {
   const s = livePlayer(adm.sel); const all = adm.live && adm.live.available ? adm.live.players : [];
   return [
     { header: `${Math.round(w[0])}, ${Math.round(w[1])}` },
-    ...(s ? [{ label: `Teleport ${s.name} here`, run: () => admAct('tp', s, { x: w[0], z: w[1] }) }] : []),
-    { label: 'Teleport a player here', sub: all.map(o => ({ label: o.name, run: () => admAct('tp', o, { x: w[0], z: w[1] }) })) },
+    ...(s ? [{ label: `Teleport ${s.name} here`, run: () => withReason(`Teleport ${s.name} to ${Math.round(w[0])}, ${Math.round(w[1])}`, '', 'Teleport', (why) => admAct('tp', s, { x: w[0], z: w[1], reason: why })) }] : []),
+    { label: 'Teleport a player here', sub: all.map(o => ({ label: o.name, run: () => withReason(`Teleport ${o.name} to ${Math.round(w[0])}, ${Math.round(w[1])}`, '', 'Teleport', (why) => admAct('tp', o, { x: w[0], z: w[1], reason: why })) })) },
     { sep: true },
     { label: 'Spawn item here…', run: () => spawnItemDialog(w) },
     { label: 'Spawn kit here', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => withReason(`Spawn the kit ${k.name} here`, '', 'Spawn', (why) => spawnHere(w, { kit: k.name, reason: why }, 'Kit ' + k.name)) })), { label: 'Manage kits…', run: () => kitManager() }] },
@@ -492,7 +493,7 @@ $('admList').addEventListener('contextmenu', e => { const it = e.target.closest(
 $('admSel').addEventListener('click', e => {
   const b = e.target.closest('button'); const p = livePlayer(adm.sel); if (!b || !p) return;
   const a = b.dataset.a; const r = b.getBoundingClientRect();
-  if (a === 'heal') showCtx(HEALS.map(([k, l]) => ({ label: l, run: () => admAct('heal', p, { what: k }) })), r.left, r.bottom + 2);
+  if (a === 'heal') showCtx(HEALS.map(([k, l]) => ({ label: l, run: () => withReason(`Heal ${p.name}: ${l.toLowerCase()}`, '', 'Heal', (why) => admAct('heal', p, { what: k, reason: why })) })), r.left, r.bottom + 2);
   if (a === 'tpmap') showCtx(playerMenu(p).filter(x => x.label && /^Teleport/.test(x.label)), r.left, r.bottom + 2);
   if (a === 'refund') playerMenu(p).find(x => x.label === 'Refund their last death…').run();
   if (a === 'give') giveDialog(p);

@@ -439,8 +439,8 @@ handle('deathlog:refund', async (id, items, reason) => {
   return r;
 });
 handle('deathlog:bridgeStatus', () => deathlog.bridgeStatus());
-handle('deathlog:heal', async (key, what, reason) => { const r = await deathlog.heal(key, what || 'all', { by: 'app' }); const p = deathlog.findPlayer(key); adminlog.record({ action: 'heal', target: { name: p ? p.name : key, steam: key }, details: deathlog.HEAL_KINDS[what || 'all'], reason: String(reason || '').trim(), result: r }); return r; });
-handle('deathlog:teleportToDeath', async (id, reason) => { const d = deathlog.get(id); const r = await deathlog.teleportToDeath(id, { by: 'app' }); adminlog.record({ action: 'tpdeath', target: d ? { name: d.name, steam: d.key } : null, details: `death #${id}`, reason: String(reason || '').trim(), result: r }); return r; });
+handle('deathlog:heal', async (key, what, reason) => { adminlog.check('heal', reason); const r = await deathlog.heal(key, what || 'all', { by: 'app' }); const p = deathlog.findPlayer(key); adminlog.record({ action: 'heal', target: { name: p ? p.name : key, steam: key }, details: deathlog.HEAL_KINDS[what || 'all'], reason: String(reason || '').trim(), result: r }); return r; });
+handle('deathlog:teleportToDeath', async (id, reason) => { adminlog.check('tpdeath', reason); const d = deathlog.get(id); const r = await deathlog.teleportToDeath(id, { by: 'app' }); adminlog.record({ action: 'tpdeath', target: d ? { name: d.name, steam: d.key } : null, details: `death #${id}`, reason: String(reason || '').trim(), result: r }); return r; });
 handle('deathlog:installBridge', () => deathlog.installBridge());
 handle('deathlog:removeBridge', () => deathlog.removeBridge());
 handle('deathlog:openBridgeDir', () => { const d = deathlog.bridgeDir(); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
