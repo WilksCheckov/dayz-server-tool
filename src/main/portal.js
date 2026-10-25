@@ -25,7 +25,9 @@ const PERMS = [
   ['lists.manage', 'Add to and remove from the ban list, whitelist and priority queue; edit player notes', 'Players'],
   ['admin.heal', 'Heal', 'In-game admin'],
   ['admin.teleport', 'Teleport players (to a player, a map point, their death)', 'In-game admin'],
-  ['admin.spawn', 'Give items, kits and vehicles; spawn at a map point', 'In-game admin'],
+  ['admin.spawn', 'Give or spawn any item by class name', 'In-game admin'],
+  ['admin.kits', 'Give or spawn saved kits', 'In-game admin'],
+  ['admin.vehicles', 'Spawn vehicles', 'In-game admin'],
   ['admin.god', 'God mode', 'In-game admin'],
   ['admin.kill', 'Kill a player', 'In-game admin'],
   ['admin.refund', 'Refund a death', 'In-game admin'],
@@ -34,18 +36,22 @@ const PERMS = [
   ['tickets.manage', 'Assign, note, link and close tickets', 'Records'],
   ['logs.view', 'Server logs and the tool console', 'Records'],
   ['audit.view', 'Audit log', 'Records'],
+  ['requests.approve', 'Approve or deny requests from other staff', 'Portal'],
   ['portal.users', 'Manage portal users, groups and permissions', 'Portal']
 ];
+// what an action counts as for approval rules, blocked classes and daily limits
+const CATEGORY = { refund: 'refund', give: 'spawn', spawn: 'spawn', kit: 'kits', vehicle: 'vehicles', tp: 'teleport', tpto: 'teleport', bring: 'teleport', tpdeath: 'teleport', heal: 'heal', god: 'god', kill: 'kill' };
+const CATEGORIES = [['refund', 'Refunds'], ['spawn', 'Items by class name'], ['kits', 'Kits'], ['vehicles', 'Vehicles'], ['teleport', 'Teleports'], ['heal', 'Heals'], ['god', 'God mode'], ['kill', 'Kills']];
 const ALL = PERMS.map(p => p[0]);
 const DEFAULT_GROUPS = {
   owner: { name: 'Owner', perms: ALL, builtin: true },
-  admin: { name: 'Admin', perms: ALL.filter(p => p !== 'portal.users') },
+  admin: { name: 'Admin', perms: ALL.filter(p => p !== 'portal.users'), approval: {} },
   moderator: { name: 'Moderator', perms: ['server.view', 'players.view', 'players.message', 'players.kick', 'players.ban', 'lists.view', 'lists.manage', 'deaths.view', 'tickets.view', 'tickets.manage', 'audit.view'] },
-  gm: { name: 'Game master', perms: ['server.view', 'players.view', 'players.message', 'lists.view', 'admin.heal', 'admin.teleport', 'admin.spawn', 'admin.god', 'admin.refund', 'deaths.view', 'tickets.view'] },
+  gm: { name: 'Game master', perms: ['server.view', 'players.view', 'players.message', 'lists.view', 'admin.heal', 'admin.teleport', 'admin.spawn', 'admin.kits', 'admin.vehicles', 'admin.god', 'admin.refund', 'deaths.view', 'tickets.view'] },
   developer: { name: 'Developer', perms: ['server.view', 'server.control', 'server.backup', 'logs.view', 'audit.view', 'deaths.view'] }
 };
 // which permission each in-game action needs
-const ACTION_PERM = { heal: 'admin.heal', tp: 'admin.teleport', tpto: 'admin.teleport', bring: 'admin.teleport', tpdeath: 'admin.teleport', give: 'admin.spawn', kit: 'admin.spawn', vehicle: 'admin.spawn', god: 'admin.god', kill: 'admin.kill', refund: 'admin.refund', message: 'players.message', kick: 'players.kick', ban: 'players.ban' };
+const ACTION_PERM = { heal: 'admin.heal', tp: 'admin.teleport', tpto: 'admin.teleport', bring: 'admin.teleport', tpdeath: 'admin.teleport', give: 'admin.spawn', kit: 'admin.kits', vehicle: 'admin.vehicles', god: 'admin.god', kill: 'admin.kill', refund: 'admin.refund', message: 'players.message', kick: 'players.kick', ban: 'players.ban' };
 
 // ---------- data ----------
 let db = null;
@@ -54,11 +60,13 @@ function load() {
   db = { enabled: false, users: {}, groups: {}, sessions: {}, ...(jsonstore.readOr(file(), {}) || {}) };
   for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (!db.groups[id]) db.groups[id] = { ...g, perms: g.perms.slice() };
   // permissions added in a later version join the built-in groups that had them by default (your own groups are left alone)
-  const PERMS_VERSION = 2;
-  if ((db.permsVersion || 1) < PERMS_VERSION) {
-    for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
-    db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save();
-  }
+  const PERMS_VERSION = 3;
+  const was = db.permsVersion || 1;
+  if (was < 2) for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
+  // v3 split "give items, kits and vehicles" into three: whoever had it keeps all three; Owner and Admin may approve
+  if (was < 3) { for (const g of Object.values(db.groups)) if ((g.perms || []).includes('admin.spawn')) g.perms = [...new Set([...g.perms, 'admin.kits', 'admin.vehicles'])]; for (const u of Object.values(db.users)) if ((u.allow || []).includes('admin.spawn')) u.allow = [...new Set([...u.allow, 'admin.kits', 'admin.vehicles'])]; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'requests.approve'])]; }
+  if (was < PERMS_VERSION) { db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save(); }
+  db.requests = db.requests || []; db.usage = db.usage || {}; db.policy = { blockedClasses: [], ...(db.policy || {}) };
   return db;
 }
 function save() { jsonstore.write(file(), load(), true); }
@@ -72,10 +80,47 @@ function permsOf(u) {
   for (const p of u.deny || []) set.delete(p);
   return set;
 }
-const publicUser = (u) => ({ id: u.id, name: u.name, groups: u.groups || [], allow: u.allow || [], deny: u.deny || [], enabled: u.enabled !== false, createdAt: u.createdAt, createdBy: u.createdBy || null, lastLogin: u.lastLogin || null, lastIp: u.lastIp || null, perms: [...permsOf(u)] });
+const publicUser = (u) => ({ id: u.id, name: u.name, groups: u.groups || [], allow: u.allow || [], deny: u.deny || [], enabled: u.enabled !== false, trusted: !!u.trusted, createdAt: u.createdAt, createdBy: u.createdBy || null, lastLogin: u.lastLogin || null, lastIp: u.lastIp || null, perms: [...permsOf(u)] });
 
 function listUsers() { return Object.values(load().users).map(publicUser).sort((a, b) => a.name.localeCompare(b.name)); }
-function listGroups() { return Object.entries(load().groups).map(([id, g]) => ({ id, name: g.name, perms: g.perms || [], builtin: !!g.builtin, members: Object.values(load().users).filter(u => (u.groups || []).includes(id)).length })); }
+function listGroups() { return Object.entries(load().groups).map(([id, g]) => ({ id, name: g.name, perms: g.perms || [], approval: g.approval || {}, itemsPerDay: Number(g.itemsPerDay) || 0, builtin: !!g.builtin, members: Object.values(load().users).filter(u => (u.groups || []).includes(id)).length })); }
+// ---------- policy: what a user may do without asking, how much, and with which classes ----------
+// A category needs approval for a user when every group of theirs that allows it says so (a group that allows it
+// without approval wins); a trusted user never needs approval; the daily item limit is the most generous of the groups.
+function policyFor(u) {
+  const d = load(); const groups = (u.groups || []).map(g => d.groups[g]).filter(Boolean);
+  const needs = new Set();
+  for (const [cat] of CATEGORIES) if (groups.length && groups.every(g => (g.approval || {})[cat])) needs.add(cat);
+  let itemsPerDay = null; for (const g of groups) { const n = Number(g.itemsPerDay) || 0; if (n === 0) { itemsPerDay = 0; break; } itemsPerDay = itemsPerDay === null ? n : Math.max(itemsPerDay, n); }
+  return { needs: u.trusted ? new Set() : needs, trusted: !!u.trusted, itemsPerDay: itemsPerDay || 0, blockedClasses: d.policy.blockedClasses || [] };
+}
+const globToRe = (g) => new RegExp('^' + String(g).trim().replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
+// the classes an action would spawn (so blocked ones are refused before anything is sent to the game)
+function classesOf(action, args) {
+  const live = require('./live');
+  if (action === 'give' || (action === 'spawn' && args.item)) return String(args.item || '').split(';').map(x => x.trim()).filter(Boolean);
+  if (action === 'kit' || (action === 'spawn' && args.kit)) { try { const k = (settings.load().kits || []).find(x => x.name === args.kit); return k ? k.lines.flatMap(l => l.replace(/\s+x\s*\d+$/i, '').split(';').map(x => x.trim()).filter(Boolean)) : []; } catch { return []; } }
+  if (action === 'vehicle' || (action === 'spawn' && args.vehicle)) { try { const v = live.vehicles().find(x => x.name === args.vehicle); return v ? [v.name, ...v.parts] : [args.vehicle]; } catch { return [args.vehicle]; } }
+  return [];
+}
+function itemCount(action, args) {
+  if (action === 'give' || (action === 'spawn' && args.item)) return Math.max(1, Math.min(50, Number(args.count) || 1));
+  if (action === 'kit' || (action === 'spawn' && args.kit)) { try { const k = (settings.load().kits || []).find(x => x.name === args.kit); return k ? k.lines.reduce((n, l) => n + (Number((l.match(/x\s*(\d+)$/i) || [])[1]) || 1), 0) : 0; } catch { return 0; } }
+  if (action === 'vehicle' || (action === 'spawn' && args.vehicle)) return 1;
+  return 0;
+}
+function usedToday(userId) { const d = load(); const since = Date.now() - 86400000; d.usage[userId] = (d.usage[userId] || []).filter(x => x.ts > since); return d.usage[userId].reduce((n, x) => n + x.n, 0); }
+function recordUsage(userId, n) { if (!n) return; const d = load(); (d.usage[userId] = d.usage[userId] || []).push({ ts: Date.now(), n }); save(); }
+// Checks a user may do this now: blocked classes and the daily limit throw; a category under approval returns false.
+function allowedNow(user, action, args) {
+  const pol = policyFor(load().users[user.id]); const cat = CATEGORY[action];
+  const classes = classesOf(action, args);
+  const blocked = classes.filter(c => pol.blockedClasses.some(g => globToRe(g).test(c)));
+  if (blocked.length) throw new Error(`Not allowed through the portal: ${[...new Set(blocked)].join(', ')} (blocked class${blocked.length > 1 ? 'es' : ''}).`);
+  const n = itemCount(action, args);
+  if (n && pol.itemsPerDay && usedToday(user.id) + n > pol.itemsPerDay) throw new Error(`That would exceed your limit of ${pol.itemsPerDay} items per day (${usedToday(user.id)} used in the last 24 h).`);
+  return !(cat && pol.needs.has(cat));
+}
 function createUser({ name, password, groups = [], allow = [], deny = [] }, by = 'app') {
   const d = load(); const id = idOf(name); name = String(name || '').trim();
   if (!id || name.length < 2 || name.length > 32) throw new Error('Give a user name of 2 to 32 characters.');
@@ -93,6 +138,7 @@ function updateUser(id, patch, by = 'app') {
   if (patch.allow) next.allow = patch.allow.filter(p => ALL.includes(p));
   if (patch.deny) next.deny = patch.deny.filter(p => ALL.includes(p));
   if (patch.enabled !== undefined) next.enabled = !!patch.enabled;
+  if (patch.trusted !== undefined) next.trusted = !!patch.trusted;
   if (patch.password) { if (String(patch.password).length < 8) throw new Error('The password needs at least 8 characters.'); next.salt = crypto.randomBytes(16).toString('hex'); next.hash = hash(patch.password, next.salt); }
   // the last user who can manage the portal cannot lose that (by groups, permissions or being disabled)
   const stillManaged = (next.enabled !== false && permsOf(next).has('portal.users')) || Object.values(d.users).some(x => x.id !== id && x.enabled !== false && permsOf(x).has('portal.users'));
@@ -107,12 +153,59 @@ function deleteUser(id, by = 'app') {
   delete d.users[id]; for (const [t, s] of Object.entries(d.sessions)) if (s.user === id) delete d.sessions[t];
   save(); audit(by, 'portal: user deleted', u.name); return true;
 }
-function upsertGroup({ id, name, perms }, by = 'app') {
+function upsertGroup({ id, name, perms, approval, itemsPerDay }, by = 'app') {
   const d = load(); id = idOf(id || name); name = String(name || '').trim();
   if (!id || !name) throw new Error('Give the group a name.');
-  const g = d.groups[id] || {}; if (g.builtin && id === 'owner') perms = ALL;
-  d.groups[id] = { ...g, name, perms: (perms || []).filter(p => ALL.includes(p)) };
+  const g = d.groups[id] || {}; if (g.builtin && id === 'owner') { perms = ALL; approval = {}; itemsPerDay = 0; }
+  const ap = {}; for (const [cat] of CATEGORIES) if (approval && approval[cat]) ap[cat] = true;
+  d.groups[id] = { ...g, name, perms: (perms || []).filter(p => ALL.includes(p)), approval: approval === undefined ? (g.approval || {}) : ap, itemsPerDay: itemsPerDay === undefined ? (Number(g.itemsPerDay) || 0) : Math.max(0, Number(itemsPerDay) || 0) };
   save(); audit(by, 'portal: group saved', name); return listGroups();
+}
+function setPolicy({ blockedClasses }, by = 'app') { const d = load(); d.policy.blockedClasses = String(Array.isArray(blockedClasses) ? blockedClasses.join('\n') : blockedClasses || '').split(/[\n,;]+/).map(x => x.trim()).filter(Boolean).slice(0, 500); save(); audit(by, 'portal: policy saved', `${d.policy.blockedClasses.length} blocked class pattern(s)`); return d.policy; }
+
+// ---------- requests: actions that need another pair of eyes ----------
+// A request holds everything needed to run the action later; approving runs it under the requester's name and
+// records who approved. Requests expire after 24 hours.
+function newRequest(user, action, args, target) {
+  const d = load(); d.requestSeq = (d.requestSeq || 0) + 1;
+  const r = { id: String(d.requestSeq).padStart(4, '0'), action, category: CATEGORY[action] || action, args, target: target || null, by: user.id, byName: user.name, reason: String(args.reason || '').trim(), createdAt: new Date().toISOString(), status: 'pending' };
+  d.requests.push(r); if (d.requests.length > 500) d.requests.splice(0, d.requests.length - 500); save();
+  emitRef('console', { source: 'portal', line: `${user.name} asks for approval: ${describeRequest(r)}` });
+  audit(`${user.name} (portal)`, 'portal: request ' + r.id, describeRequest(r));
+  try { require('./discord').postApprovalRequest(r).catch(() => {}); } catch { /* bot not loaded */ }
+  return r;
+}
+function describeRequest(r) {
+  const a = r.args || {}; const t = r.target ? ` for ${r.target.name}` : '';
+  const what = r.action === 'give' ? `${a.count || 1} × ${a.item}` : r.action === 'kit' ? `kit ${a.kit}` : r.action === 'vehicle' ? `vehicle ${a.vehicle}` : r.action === 'spawn' ? `${a.vehicle || (a.kit ? 'kit ' + a.kit : `${a.count || 1} × ${a.item}`)} at ${Math.round(a.x)}, ${Math.round(a.z)}` : r.action === 'refund' ? `refund of death #${a.id}` : r.action;
+  return `${what}${t}${r.reason ? ` — ${r.reason}` : ''}`;
+}
+function listRequests(user) {
+  const d = load(); const cutoff = Date.now() - 7 * 86400000;
+  for (const r of d.requests) if (r.status === 'pending' && Date.parse(r.createdAt) < Date.now() - 86400000) { r.status = 'expired'; }
+  const all = d.requests.filter(r => Date.parse(r.createdAt) > cutoff);
+  return (permsOf(user).has('requests.approve') ? all : all.filter(r => r.by === user.id)).map(r => ({ ...r, text: describeRequest(r) })).reverse();
+}
+async function decide(id, approve, approverName, approverId = null, note = '') {
+  const d = load(); const r = d.requests.find(x => x.id === id); if (!r) throw new Error(`No request #${id}.`);
+  if (r.status !== 'pending') throw new Error(`Request #${id} is already ${r.status}.`);
+  if (approverId && approverId === r.by) throw new Error('You cannot approve your own request.');
+  r.decidedBy = approverName; r.decidedAt = new Date().toISOString(); r.note = String(note || '').slice(0, 300);
+  if (!approve) { r.status = 'denied'; save(); audit(`${approverName} (portal)`, 'portal: denied ' + r.id, describeRequest(r)); emitRef('console', { source: 'portal', line: `${approverName} denied ${r.byName}'s request #${r.id}: ${describeRequest(r)}` }); return r; }
+  r.status = 'approved'; save();
+  const by = `${r.byName} (portal, approved by ${approverName})`;
+  try {
+    r.result = await runAction(r.action, r.args, r.target, by);
+    recordUsage(r.by, itemCount(r.action, r.args));
+  } catch (e) { r.result = { status: 'error', error: e.message }; }
+  save(); audit(`${approverName} (portal)`, 'portal: approved ' + r.id, describeRequest(r));
+  return r;
+}
+async function runAction(action, args, target, by) {
+  const live = require('./live');
+  if (action === 'spawn') return live.spawnAt(args, by);
+  if (action === 'refund') { const dl = require('./deathlog'); const al = require('./adminlog'); const dd = dl.get(Number(args.id)); if (!dd) throw new Error('No such death record.'); const res = await dl.refund(dd.id, { by }); al.record({ action: 'refund', by, source: 'web', target: { name: dd.name, steam: dd.key }, details: `death #${dd.id}: ${res.items} item(s)`, reason: String(args.reason || '').trim(), result: res }); return res; }
+  return live.act(action, target.id, args, by);
 }
 function deleteGroup(id, by = 'app') {
   const d = load(); if (!d.groups[id]) throw new Error('No such group.'); if (d.groups[id].builtin) throw new Error('The Owner group cannot be deleted.');
@@ -224,9 +317,22 @@ async function api(route, b, url, user, need, by) {
     case 'players': { need('players.view'); const L = require('./live').players(); return L; }
     case 'act': {
       need(ACTION_PERM[b.action] || 'portal.none');
-      return require('./live').act(b.action, b.id, b.args || {}, by);
+      const args = b.args || {};
+      if (!allowedNow(user, b.action, args)) { const L = require('./live').players(); const target = L.available && L.players.find(p => p.id === b.id); if (!target) throw new Error('That player is not online.'); const r = newRequest(user, b.action, args, { id: target.id, name: target.name, steam: target.steam }); return { status: 'approval', request: r.id }; }
+      const r = await require('./live').act(b.action, b.id, args, by); recordUsage(user.id, itemCount(b.action, args)); return r;
     }
-    case 'spawnAt': need('admin.spawn'); return require('./live').spawnAt(b, by);
+    case 'spawnAt': {
+      need(b.vehicle ? 'admin.vehicles' : b.kit ? 'admin.kits' : 'admin.spawn');
+      if (!allowedNow(user, 'spawn', b)) { const r = newRequest(user, 'spawn', b, null); return { status: 'approval', request: r.id }; }
+      const r = await require('./live').spawnAt(b, by); recordUsage(user.id, itemCount('spawn', b)); return r;
+    }
+    case 'policy': need('portal.users'); return { ...load().policy, categories: CATEGORIES };
+    case 'setPolicy': need('portal.users'); return setPolicy(b, by);
+    case 'requests': return { requests: listRequests(user), canApprove: user.permSet.has('requests.approve'), policy: (() => { const p = policyFor(load().users[user.id]); return { needs: [...p.needs], itemsPerDay: p.itemsPerDay, usedToday: usedToday(user.id), trusted: p.trusted }; })() };
+    case 'requestOp': {
+      if (b.op === 'cancel') { const r = load().requests.find(x => x.id === b.id); if (!r || r.by !== user.id) throw new Error('Not your request.'); if (r.status !== 'pending') throw new Error('Already decided.'); r.status = 'cancelled'; save(); return r; }
+      need('requests.approve'); return decide(b.id, b.op === 'approve', user.name, user.id, b.note);
+    }
     case 'kits': need('admin.spawn'); return require('./live').kits();
     case 'vehicles': need('admin.spawn'); return require('./live').vehicles();
     case 'player': need('players.view'); return profile(q('key'));
@@ -250,9 +356,10 @@ async function api(route, b, url, user, need, by) {
     case 'deaths': { need('deaths.view'); const dl = require('./deathlog'); const tk = require('./tickets'); return dl.list({ q: q('q'), limit: Math.min(300, Number(q('limit')) || 100) }).map(r => ({ ...r, tickets: tk.forDeath(r.id) })); }
     case 'death': { need('deaths.view'); const r = require('./deathlog').get(Number(q('id'))); return r ? { ...r, tickets: require('./tickets').forDeath(r.id) } : null; }
     case 'refund': {
-      need('admin.refund'); const dl = require('./deathlog'); const al = require('./adminlog');
+      need('admin.refund'); const dl = require('./deathlog');
       const d = dl.get(Number(b.id)); if (!d) throw new Error('No such death record.');
-      const r = await dl.refund(d.id, { by }); al.record({ action: 'refund', by, source: 'web', target: { name: d.name, steam: d.key }, details: `death #${d.id}: ${r.items} item(s)`, reason: String(b.reason || '').trim(), result: r }); return r;
+      if (!allowedNow(user, 'refund', b)) { const r = newRequest(user, 'refund', { id: d.id, reason: b.reason }, { id: d.key, name: d.name, steam: d.key }); return { status: 'approval', request: r.id }; }
+      return runAction('refund', { id: d.id, reason: b.reason }, null, by);
     }
     case 'tickets': need('tickets.view'); return require('./tickets').list({ status: q('status'), q: q('q') });
     case 'ticket': need('tickets.view'); return require('./tickets').get(q('id'));
@@ -277,7 +384,7 @@ async function api(route, b, url, user, need, by) {
     case 'backup': { need('server.backup'); audit(by, 'backups:create', ''); return require('./backups').create('portal'); }
     case 'logs': { need('logs.view'); const kind = q('kind'); if (kind === 'console') return { name: 'console', lines: consoleLines.slice(-400) }; return newestLog(kind === 'adm' ? 'adm' : 'rpt'); }
     case 'audit': need('audit.view'); return require('./audit').list({ limit: 300, q: q('q') });
-    case 'users': need('portal.users'); return { users: listUsers(), groups: listGroups(), catalogue: PERMS };
+    case 'users': need('portal.users'); return { users: listUsers(), groups: listGroups(), catalogue: PERMS, categories: CATEGORIES, policy: load().policy };
     case 'user': {
       need('portal.users');
       if (b.op === 'create') return createUser(b, by);
@@ -309,4 +416,4 @@ function setOwner(name, password) {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, handle, notify, status, setEnabled, setOwner, listUsers, listGroups, createUser, updateUser, deleteUser, upsertGroup, deleteGroup, login, sessionUser, PERMS, ACTION_PERM, _load: load };
+module.exports = { init, handle, notify, status, setEnabled, setOwner, listUsers, listGroups, createUser, updateUser, deleteUser, upsertGroup, deleteGroup, setPolicy, login, sessionUser, decide, describeRequest, listRequests, PERMS, ACTION_PERM, CATEGORIES, _load: load };

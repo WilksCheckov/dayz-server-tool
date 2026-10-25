@@ -291,6 +291,16 @@ async function postAdminAction({ title, color, fields }) {
   const ch = await channel(id); if (!ch) throw new Error(`channel ${id} not found or not visible to the bot`);
   await ch.send({ embeds: [new EmbedBuilder().setTitle(title.slice(0, 250)).setColor(color).addFields(fields).setFooter({ text: myName() }).setTimestamp(new Date())] });
 }
+// A portal request that needs approval: posted to the admin action channel with Approve / Deny buttons (admins only).
+async function postApprovalRequest(r) {
+  const c = cfg(); const id = c.adminLogChannelId || c.logChannelId; if (!id) return;
+  if ((!client && !shared()) || !state.running) return;
+  const ch = await channel(id); if (!ch) return;
+  const portal = require('./portal');
+  const embed = new EmbedBuilder().setColor(0xf5b942).setTitle(`Approval needed · request #${r.id}`).setDescription(portal.describeRequest(r)).addFields({ name: 'Requested by', value: `${r.byName} (portal)`, inline: true }, { name: 'Category', value: r.category, inline: true }, { name: 'Reason', value: r.reason || '—' }).setFooter({ text: myName() }).setTimestamp(new Date());
+  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Success').setCustomId(`apr-${r.id}-ok`).setLabel('Approve'), new ButtonBuilder().setStyle('Danger').setCustomId(`apr-${r.id}-no`).setLabel('Deny'));
+  await ch.send({ embeds: [embed], components: [row] });
+}
 async function postLog(text) { const id = cfg().logChannelId; if (!id) return; const ch = await channel(id); if (!ch) return warnOnce('log' + id, `Action log channel ${id} not found or not visible to the bot.`); ch.send(text).catch(sendFailed('Action log', id)); }
 async function guild() { try { return client ? await client.guilds.fetch(cfg().guildId) : null; } catch { return null; } }
 async function member(discordId) { const g = await guild(); if (!g || !discordId) return null; return g.members.fetch(discordId).catch(() => null); }
@@ -942,6 +952,16 @@ async function onInteraction(interaction) {
     // ----- buttons -----
     if (interaction.isButton()) {
       const [req, a, b] = interaction.customId.split('-');
+      if (req === 'apr') {
+        if (!isAllowed(interaction)) return ephemeralErr('⛔ Only admins can approve or deny requests.');
+        try {
+          const r = await require('./portal').decide(a, b === 'ok', interaction.user.tag, null, 'via Discord');
+          const res = r.result ? (r.result.status === 'error' ? `failed: ${r.result.error}` : r.result.status === 'done' ? `done${r.result.ok !== undefined ? ` (${r.result.ok} ok${r.result.fail ? ', ' + r.result.fail + ' failed' : ''})` : ''}` : r.result.status) : '';
+          await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(r.status === 'approved' ? 0x3ddc84 : 0x8a94a6).addFields({ name: r.status === 'approved' ? 'Approved by' : 'Denied by', value: interaction.user.tag, inline: true }, ...(res ? [{ name: 'Result', value: res.slice(0, 200), inline: true }] : []))], components: [] }).catch(() => {});
+          addLog(`${interaction.user.tag} ${r.status} portal request #${r.id}: ${require('./portal').describeRequest(r)}${res ? ' → ' + res : ''}`);
+        } catch (e) { return ephemeralErr('❌ ' + e.message); }
+        return;
+      }
       if (req === 'application') {
         if (activeBanFor(interaction.user.id, null)) return ephemeralErr('You are currently banned and cannot apply.');
         const rec = store().applications[interaction.user.id];
@@ -1220,4 +1240,4 @@ function init(emit) {
   else if (mode() !== 'off' && cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000);
 }
 
-module.exports = { saveStore, closeTicket, postAdminAction, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } }, _onInteraction: onInteraction };
+module.exports = { saveStore, closeTicket, postAdminAction, postApprovalRequest, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } }, _onInteraction: onInteraction };

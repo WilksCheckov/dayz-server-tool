@@ -58,7 +58,9 @@ function modal(title, bodyHtml, buttons = [['OK', true, true], ['Cancel', false]
   return new Promise(resolve => {
     const bg = document.createElement('div'); bg.className = 'modalbg';
     bg.innerHTML = `<div class="modal"><h3>${esc(title)}</h3>${bodyHtml}<div class="row mt" style="justify-content:flex-end">${buttons.map((b, i) => `<button class="btn ${b[2] ? 'primary' : ''}" data-i="${i}">${esc(b[0])}</button>`).join('')}</div></div>`;
-    bg.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) { const v = buttons[Number(b.dataset.i)][1]; bg.remove(); resolve(v); } else if (e.target === bg) { bg.remove(); resolve(false); } });
+    bg.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) { const v = buttons[Number(b.dataset.i)][1]; close(v); } else if (e.target === bg) close(false); });
+    // callers read their inputs right after the promise settles, so hide now and take the DOM away a tick later
+    const close = (v) => { bg.style.display = 'none'; resolve(v); setTimeout(() => bg.remove(), 0); };
     document.body.appendChild(bg); const f = bg.querySelector('input, textarea, select'); if (f) f.focus();
     bg.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { const b = bg.querySelector('button.primary'); if (b) b.click(); } });
   });
@@ -68,7 +70,7 @@ async function askReason(title, extraHtml = '', required = true) {
   if (!ok) return null; const v = $('mWhy').value.trim(); if (required && !v) { toast('Give a reason.', true); return null; } return v;
 }
 // ---------- pages ----------
-const PAGES = [['dashboard', 'Dashboard', 'server.view'], ['players', 'Players', 'players.view'], ['map', 'Map', 'players.view'], ['lists', 'Lists', 'lists.view'], ['deaths', 'Deaths', 'deaths.view'], ['tickets', 'Tickets', 'tickets.view'], ['logs', 'Logs', 'logs.view'], ['audit', 'Audit', 'audit.view'], ['users', 'Users', 'portal.users']];
+const PAGES = [['dashboard', 'Dashboard', 'server.view'], ['players', 'Players', 'players.view'], ['map', 'Map', 'players.view'], ['lists', 'Lists', 'lists.view'], ['deaths', 'Deaths', 'deaths.view'], ['tickets', 'Tickets', 'tickets.view'], ['logs', 'Logs', 'logs.view'], ['audit', 'Audit', 'audit.view'], ['requests', 'Requests', '*'], ['users', 'Users', 'portal.users']];
 let timer = null;
 function render() {
   clearInterval(timer); timer = null; closeMenu();
@@ -79,11 +81,12 @@ function render() {
     const go = async () => { try { await api('login', { name: $('lgName').value, password: $('lgPass').value }); await loadMe(); } catch (e) { $('lgErr').textContent = e.message; } };
     $('lgGo').onclick = go; $('lgPass').onkeydown = e => { if (e.key === 'Enter') go(); }; $('lgName').focus(); return;
   }
-  const pages = PAGES.filter(p => can(p[2])); if (!pages.some(p => p[0] === page)) page = pages.length ? pages[0][0] : 'none';
+  const pages = PAGES.filter(p => p[2] === '*' || can(p[2])); if (!pages.some(p => p[0] === page)) page = pages.length ? pages[0][0] : 'none';
   $('nav').innerHTML = pages.map(p => `<button class="${p[0] === page ? 'on' : ''}" data-p="${p[0]}">${p[1]}</button>`).join('');
   $('nav').onclick = e => { const b = e.target.closest('button'); if (b) { page = b.dataset.p; render(); } };
+  if (can('requests.approve')) api('requests').then(r => { const n = r.requests.filter(x => x.status === 'pending').length; const b = $('nav').querySelector('[data-p="requests"]'); if (b && n) b.innerHTML = 'Requests <span class="badge warn">' + n + '</span>'; }).catch(() => {});
   $('hdUser').textContent = `${me.name} · ${me.groups.join(', ') || 'no group'}`; $('btnOut').hidden = false; $('btnPw').hidden = false; $('hdInst').textContent = me.instance; $('hdSearch').hidden = !can('players.view');
-  const fn = { dashboard: pageDashboard, players: pagePlayers, map: pageMap, lists: pageLists, deaths: pageDeaths, tickets: pageTickets, logs: pageLogs, audit: pageAudit, users: pageUsers }[page];
+  const fn = { dashboard: pageDashboard, players: pagePlayers, map: pageMap, lists: pageLists, deaths: pageDeaths, tickets: pageTickets, logs: pageLogs, audit: pageAudit, users: pageUsers, requests: pageRequests }[page];
   if (!fn) { main.innerHTML = '<div class="card">Your account has no permissions yet. Ask whoever manages the portal.</div>'; return; }
   fn(main).catch(e => { main.innerHTML = `<div class="card">${esc(e.message)}</div>`; });
 }
@@ -109,7 +112,7 @@ async function pageDashboard(main) {
 let live = null;
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
 async function act(action, p, args = {}) {
-  try { const r = await api('act', { action, id: p.id, args }); if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(`${p.name}: ${action} done${r && r.ok !== undefined && (r.ok || r.fail) ? ` (${r.ok} ok${r.fail ? ', ' + r.fail + ' failed' : ''})` : ''}${r && r.body === 'body' ? ' · body removed' : ''}`); }
+  try { const r = await api('act', { action, id: p.id, args }); if (r && r.status === 'approval') return toast(`Sent for approval as request #${r.request} — see the Requests page.`); if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(`${p.name}: ${action} done${r && r.ok !== undefined && (r.ok || r.fail) ? ` (${r.ok} ok${r.fail ? ', ' + r.fail + ' failed' : ''})` : ''}${r && r.body === 'body' ? ' · body removed' : ''}`); }
   catch (e) { toast(e.message, true); }
 }
 function closeMenu() { for (const m of document.querySelectorAll('.menu')) if (m.id !== 'hdHits') m.remove(); }
@@ -133,7 +136,11 @@ function playerMenu(p) {
   }
   if (can('admin.spawn')) {
     items.push({ label: 'Give item…', run: async () => { const ok = await modal(`Give ${p.name} an item`, '<label>Class name (Parent; Attachment fits attachments)</label><input id="gI" class="input" placeholder="e.g. BandageDressing"><label>How many</label><input id="gN" class="input" type="number" value="1" min="1" max="50"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('give', p, { item: $('gI').value.trim(), count: Number($('gN').value) || 1, reason: why }); } });
+  }
+  if (can('admin.kits')) {
     items.push({ label: 'Give kit…', run: async () => { const kits = await api('kits'); if (!kits.length) return toast('No kits yet (made in the app)', true); const ok = await modal(`Give ${p.name} a kit`, `<label>Kit</label><select id="gK" class="input">${kits.map(k => `<option value="${esc(k.name)}">${esc(k.name)} (${k.items})</option>`).join('')}</select><label>Reason</label><input id="mWhy" class="input">`); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('kit', p, { kit: $('gK').value, reason: why }); } });
+  }
+  if (can('admin.vehicles')) {
     items.push({ label: 'Spawn a vehicle next to them…', run: async () => { const v = await api('vehicles'); const ok = await modal(`Spawn a vehicle next to ${p.name}`, `<label>Vehicle (every part fitted, fluids full)</label><select id="gV" class="input">${v.map(x => `<option>${esc(x.name)}</option>`).join('')}</select><label>Reason</label><input id="mWhy" class="input">`); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); act('vehicle', p, { vehicle: $('gV').value, reason: why }); } });
   }
   if (can('admin.refund')) items.push({ label: 'Refund their last death…', run: withWhy(`Refund ${p.name}'s last death`, why => act('refund', p, { reason: why }), false, '<p class="muted small">Spawns the gear of their last recorded death at their feet; their body is removed.</p>') });
@@ -193,7 +200,7 @@ async function pageMap(main) {
   c.addEventListener('contextmenu', e => { e.preventDefault(); const r = c.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top; const p = at(px, py); if (p) { sel = p.id; draw(); return showMenu(playerMenu(p), e.clientX, e.clientY); } const w = toWorld(px, py); const items = [{ h: `${Math.round(w[0])}, ${Math.round(w[1])}` }];
     const s = sel && live && live.players.find(x => x.id === sel);
     if (can('admin.teleport')) { if (s) items.push({ label: `Teleport ${s.name} here`, run: async () => { const why = await askReason(`Teleport ${s.name} here`); if (why !== null) act('tp', s, { x: w[0], z: w[1], reason: why }); } }); for (const o of (live && live.players) || []) if (!s || o.id !== s.id) items.push({ label: `Teleport ${o.name} here`, run: async () => { const why = await askReason(`Teleport ${o.name} here`); if (why !== null) act('tp', o, { x: w[0], z: w[1], reason: why }); } }); }
-    if (can('admin.spawn')) items.push({ label: 'Spawn item here…', run: async () => { const ok = await modal(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, '<label>Class name</label><input id="gI" class="input"><label>How many</label><input id="gN" class="input" type="number" value="1" min="1" max="50"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); try { const r = await api('spawnAt', { x: w[0], z: w[1], item: $('gI').value.trim(), count: Number($('gN').value) || 1, reason: why }); toast(`Spawned ${r.ok} item(s)`); } catch (err) { toast(err.message, true); } } });
+    if (can('admin.spawn')) items.push({ label: 'Spawn item here…', run: async () => { const ok = await modal(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, '<label>Class name</label><input id="gI" class="input"><label>How many</label><input id="gN" class="input" type="number" value="1" min="1" max="50"><label>Reason</label><input id="mWhy" class="input">'); if (!ok) return; const why = $('mWhy').value.trim(); if (!why) return toast('Give a reason.', true); try { const r = await api('spawnAt', { x: w[0], z: w[1], item: $('gI').value.trim(), count: Number($('gN').value) || 1, reason: why }); toast(r.status === 'approval' ? `Sent for approval as request #${r.request}` : `Spawned ${r.ok} item(s)`); } catch (err) { toast(err.message, true); } } });
     items.push({ label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Copied'); } });
     showMenu(items, e.clientX, e.clientY); });
   const poll = async () => { try { live = await api('players'); $('mapWhen').textContent = live.available ? `${live.players.length} online · ${ago(live.at)}` : live.reason; } catch { /* keep the last */ } draw(); };
@@ -213,7 +220,7 @@ async function pageDeaths(main) {
       ${(r.refunds || []).length ? '<div class="muted mt">Refunds</div>' + r.refunds.map(f => `<div class="small">${esc(fmt(f.ts))} by ${esc(f.by)}: ${f.ok}/${f.items}${f.status !== 'done' ? ' (' + esc(f.status) + ')' : ''}</div>`).join('') : ''}
       <div class="muted mt">Tickets</div>${(r.tickets || []).map(t => `<div>#${esc(t.id)} ${esc(t.subject)} <span class="muted">${esc(t.status)}</span></div>`).join('') || '<div class="muted small">none</div>'}
       <div class="row mt">${can('admin.refund') && r.gear && r.gear.length ? '<button class="btn primary" id="dRefund">Refund</button>' : ''}${can('tickets.manage') ? '<button class="btn" id="dTicket">New ticket</button>' : ''}</div>`;
-    const rb = $('dRefund'); if (rb) rb.onclick = async () => { const why = await askReason(`Refund death #${r.id} of ${r.name}`, `<p class="muted small">Spawns ${r.gear.length} items pristine at their feet (they must be online); their body is removed.</p>`, false); if (why === null) return; try { const res = await api('refund', { id: r.id, reason: why }); toast(res.ok ? `Refunded ${res.ok} of ${res.items}${res.body === 'body' ? ' · body removed' : ''}` : res.status === 'offline' ? 'They are not in game' : 'Nothing spawned: ' + res.status, !res.ok); show(id); } catch (e) { toast(e.message, true); } };
+    const rb = $('dRefund'); if (rb) rb.onclick = async () => { const why = await askReason(`Refund death #${r.id} of ${r.name}`, `<p class="muted small">Spawns ${r.gear.length} items pristine at their feet (they must be online); their body is removed.</p>`, false); if (why === null) return; try { const res = await api('refund', { id: r.id, reason: why }); if (res.status === 'approval') return toast(`Sent for approval as request #${res.request}`); toast(res.ok ? `Refunded ${res.ok} of ${res.items}${res.body === 'body' ? ' · body removed' : ''}` : res.status === 'offline' ? 'They are not in game' : 'Nothing spawned: ' + res.status, !res.ok); show(id); } catch (e) { toast(e.message, true); } };
     const tb = $('dTicket'); if (tb) tb.onclick = async () => { const ok = await modal('New ticket', `<label>Subject</label><input id="tS" class="input"><label>Details</label><textarea id="tD" class="input"></textarea><p class="muted small">Death #${r.id} is linked to it.</p>`); if (!ok) return; try { const t = await api('ticketOp', { op: 'create', subject: $('tS').value, description: $('tD').value, player: r.name, deathId: r.id }); toast('Ticket #' + t.id + ' opened'); show(id); } catch (e) { toast(e.message, true); } };
   };
   main.querySelector('#dT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) show(Number(tr.dataset.id)); });
@@ -257,29 +264,48 @@ async function pageUsers(main) {
   const permList = (checked, prefix) => { let g = ''; return d.catalogue.map(([k, l, grp]) => (grp !== g ? ((g = grp), `<div class="g">${esc(grp)}</div>`) : '') + `<label><input type="checkbox" data-perm="${k}" ${checked.includes(k) ? 'checked' : ''}> ${esc(l)} <span class="muted small">${k}</span></label>`).join(''); };
   main.innerHTML = `<div class="two"><div><div class="card"><div class="row"><h3 class="grow" style="margin:0">Users</h3><button class="btn primary" id="uNew">New user</button></div><table id="uT"><thead><tr><th>User</th><th>Groups</th><th>Own permissions</th><th>Last login</th></tr></thead><tbody>${d.users.map(u => `<tr data-id="${esc(u.id)}"><td>${esc(u.name)}${u.enabled ? '' : ' <span class="badge bad">disabled</span>'}</td><td>${u.groups.map(g => `<span class="chip">${esc((d.groups.find(x => x.id === g) || { name: g }).name)}</span>`).join('') || '<span class="muted">—</span>'}</td><td class="muted small">${u.allow.length ? '+' + u.allow.length : ''}${u.deny.length ? ' −' + u.deny.length : ''}${!u.allow.length && !u.deny.length ? '—' : ''}</td><td class="muted small">${u.lastLogin ? esc(ago(u.lastLogin)) : 'never'}</td></tr>`).join('')}</tbody></table></div>
     <div class="card"><div class="row"><h3 class="grow" style="margin:0">Groups</h3><button class="btn" id="gNew">New group</button></div><table id="gT"><thead><tr><th>Group</th><th>Permissions</th><th>Members</th></tr></thead><tbody>${d.groups.map(g => `<tr data-id="${esc(g.id)}"><td>${esc(g.name)}${g.builtin ? ' <span class="badge">built in</span>' : ''}</td><td class="muted small">${g.perms.length === d.catalogue.length ? 'everything' : g.perms.length + ' of ' + d.catalogue.length}</td><td>${g.members}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="card" id="uD"><span class="muted">Select a user or a group. A user gets the permissions of their groups, plus their own granted ones, minus their own denied ones.</span></div></div>`;
+    <div class="card" id="uD"><span class="muted">Select a user or a group. A user gets the permissions of their groups, plus their own granted ones, minus their own denied ones.</span></div>
+    <div class="card"><h3>Blocked class names</h3><div class="muted small">Nobody can give or spawn these from the portal, whatever their permissions. One per line; * matches anything (e.g. <code>*_Gold</code>, <code>M4A1</code>).</div><textarea id="polBlocked" class="input mt" rows="4">${esc((d.policy && d.policy.blockedClasses || []).join('\n'))}</textarea><div class="row mt"><button class="btn" id="polSave">Save</button></div></div></div>`;
+  $('polSave').onclick = () => api('setPolicy', { blockedClasses: $('polBlocked').value }).then(() => toast('Saved')).catch(e => toast(e.message, true));
   const checked = (root, attr) => [...root.querySelectorAll(`input[data-${attr}]:checked`)].map(i => i.dataset[attr]);
   const showUser = (u) => {
     $('uD').innerHTML = `<h3>${esc(u.name)}</h3><div class="muted small">Effective: ${u.perms.length} of ${d.catalogue.length} permissions</div>
+      <label class="mt" style="display:block"><input type="checkbox" id="uTrust" ${u.trusted ? 'checked' : ''}> Trusted: skips approval and daily limits set on their groups</label>
       <div class="muted mt">Groups</div><div id="ug">${d.groups.map(g => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-group="${esc(g.id)}" ${u.groups.includes(g.id) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('')}</div>
       <div class="muted mt">Granted on top of the groups</div><div class="perm" id="ua">${permList(u.allow, 'a')}</div>
       <details class="mt"><summary class="muted">Denied even if a group grants it</summary><div class="perm" id="ud">${permList(u.deny, 'd')}</div></details>
       <div class="row mt"><button class="btn primary" id="uSave">Save</button><button class="btn" id="uPw">Set password</button><button class="btn" id="uTog">${u.enabled ? 'Disable' : 'Enable'}</button><button class="btn danger" id="uDel">Delete</button></div>`;
     const upd = (patch) => api('user', { op: 'update', id: u.id, patch }).then(() => { toast('Saved'); pageUsers(main); }).catch(e => toast(e.message, true));
-    $('uSave').onclick = () => upd({ groups: checked($('ug'), 'group'), allow: checked($('ua'), 'perm'), deny: checked($('ud'), 'perm') });
+    $('uSave').onclick = () => upd({ groups: checked($('ug'), 'group'), allow: checked($('ua'), 'perm'), deny: checked($('ud'), 'perm'), trusted: $('uTrust').checked });
     $('uPw').onclick = async () => { const ok = await modal(`Password for ${u.name}`, '<label>New password (8+ characters)</label><input id="np" class="input" type="password">'); if (ok) upd({ password: $('np').value }); };
     $('uTog').onclick = () => upd({ enabled: !u.enabled });
     $('uDel').onclick = async () => { if (await modal(`Delete ${u.name}?`, '<p class="muted">Their sessions end at once.</p>')) api('user', { op: 'delete', id: u.id }).then(() => pageUsers(main)).catch(e => toast(e.message, true)); };
   };
   const showGroup = (g) => {
-    $('uD').innerHTML = `<h3>${esc(g.name)}</h3><label>Name</label><input id="gn" class="input" value="${esc(g.name)}" ${g.builtin ? 'disabled' : ''}><div class="muted mt">Permissions${g.id === 'owner' ? ' (the Owner group always has everything)' : ''}</div><div class="perm" id="gp">${permList(g.perms, 'p')}</div><div class="row mt"><button class="btn primary" id="gSave">Save</button>${g.builtin ? '' : '<button class="btn danger" id="gDel">Delete</button>'}</div>`;
-    $('gSave').onclick = () => api('group', { op: 'upsert', id: g.id, name: $('gn').value, perms: checked($('gp'), 'perm') }).then(() => { toast('Saved'); pageUsers(main); }).catch(e => toast(e.message, true));
+    $('uD').innerHTML = `<h3>${esc(g.name)}</h3><label>Name</label><input id="gn" class="input" value="${esc(g.name)}" ${g.builtin ? 'disabled' : ''}><div class="muted mt">Permissions${g.id === 'owner' ? ' (the Owner group always has everything)' : ''}</div><div class="perm" id="gp">${permList(g.perms, 'p')}</div>
+      ${g.id === 'owner' ? '' : `<div class="muted mt">Needs approval from someone with <b>requests.approve</b> before it runs</div><div class="perm" id="ga">${(d.categories || []).map(([k, l]) => `<label><input type="checkbox" data-cat="${k}" ${g.approval && g.approval[k] ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
+      <label class="mt">Items per day (gives, kits and spawns; 0 = unlimited)</label><input id="gLimit" class="input" type="number" min="0" value="${Number(g.itemsPerDay) || 0}" style="width:120px">`}
+      <div class="row mt"><button class="btn primary" id="gSave">Save</button>${g.builtin ? '' : '<button class="btn danger" id="gDel">Delete</button>'}</div>`;
+    $('gSave').onclick = () => api('group', { op: 'upsert', id: g.id, name: $('gn').value, perms: checked($('gp'), 'perm'), approval: $('ga') ? Object.fromEntries(checked($('ga'), 'cat').map(c => [c, true])) : undefined, itemsPerDay: $('gLimit') ? Number($('gLimit').value) : undefined }).then(() => { toast('Saved'); pageUsers(main); }).catch(e => toast(e.message, true));
     const del = $('gDel'); if (del) del.onclick = async () => { if (await modal(`Delete the group ${g.name}?`, '<p class="muted">Its members keep their other groups.</p>')) api('group', { op: 'delete', id: g.id }).then(() => pageUsers(main)).catch(e => toast(e.message, true)); };
   };
   main.querySelector('#uT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) showUser(d.users.find(u => u.id === tr.dataset.id)); });
   main.querySelector('#gT').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) showGroup(d.groups.find(g => g.id === tr.dataset.id)); });
   $('uNew').onclick = async () => { const ok = await modal('New user', `<label>User name</label><input id="nn" class="input"><label>Password (8+ characters)</label><input id="np" class="input" type="password"><label>Groups</label><div>${d.groups.map(g => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-group="${esc(g.id)}"> ${esc(g.name)}</label>`).join('')}</div>`); if (!ok) return; try { await api('user', { op: 'create', name: $('nn').value, password: $('np').value, groups: checked(document.querySelector('.modalbg') || document, 'group') }); toast('User created'); pageUsers(main); } catch (e) { toast(e.message, true); } };
   $('gNew').onclick = async () => { const ok = await modal('New group', '<label>Name</label><input id="gn2" class="input">'); if (!ok) return; try { await api('group', { op: 'upsert', name: $('gn2').value, perms: [] }); pageUsers(main); } catch (e) { toast(e.message, true); } };
+}
+// ---------- requests ----------
+async function pageRequests(main) {
+  const draw = async () => {
+    const d = await api('requests'); const pol = d.policy || {};
+    const st = (r) => `<span class="badge ${r.status === 'pending' ? 'warn' : r.status === 'approved' ? 'ok' : r.status === 'denied' ? 'bad' : ''}">${esc(r.status)}</span>`;
+    const res = (r) => !r.result ? '' : r.result.status === 'error' ? ` <span class="bad small">${esc(r.result.error)}</span>` : r.result.status === 'done' ? ` <span class="muted small">done${r.result.ok !== undefined ? ` (${r.result.ok} ok${r.result.fail ? ', ' + r.result.fail + ' failed' : ''})` : ''}</span>` : ` <span class="muted small">${esc(r.result.status)}</span>`;
+    main.innerHTML = `<div class="card"><h3>${d.canApprove ? 'Requests from staff' : 'Your requests'}</h3>
+      <div class="muted small">${pol.trusted ? 'You are trusted: nothing you do needs approval.' : pol.needs && pol.needs.length ? 'Needs approval for you: ' + esc(pol.needs.join(', ')) + '.' : 'Nothing you do needs approval.'}${pol.itemsPerDay ? ` Daily item limit ${pol.usedToday} of ${pol.itemsPerDay} used.` : ''} Pending requests expire after 24 hours.</div>
+      <table class="mt"><thead><tr><th>#</th><th>When</th><th>Who</th><th>What</th><th>Status</th><th></th></tr></thead><tbody>${d.requests.map(r => `<tr><td>${r.id}</td><td class="muted small">${esc(ago(r.createdAt))}</td><td>${esc(r.byName)}</td><td>${esc(r.text)}${res(r)}</td><td>${st(r)}${r.decidedBy ? ` <span class="muted small">by ${esc(r.decidedBy)}${r.note ? ' · ' + esc(r.note) : ''}</span>` : ''}</td><td>${r.status !== 'pending' ? '' : d.canApprove && r.by !== me.id ? `<button class="btn small primary" data-op="approve" data-id="${r.id}">Approve</button> <button class="btn small danger" data-op="deny" data-id="${r.id}">Deny</button>` : r.by === me.id ? `<button class="btn small" data-op="cancel" data-id="${r.id}">Cancel</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No requests in the last 7 days.</td></tr>'}</tbody></table></div>`;
+    main.querySelectorAll('[data-op]').forEach(b => b.onclick = async () => { let note = ''; if (b.dataset.op === 'deny') { note = await askReason('Why deny it?', '', false); if (note === null) return; } b.disabled = true; try { const r = await api('requestOp', { op: b.dataset.op, id: b.dataset.id, note }); toast(`Request #${r.id} ${r.status}${r.result && r.result.status === 'error' ? ' but it failed: ' + r.result.error : ''}`, r.result && r.result.status === 'error'); } catch (e) { toast(e.message, true); } draw(); });
+  };
+  await draw(); timer = setInterval(() => draw().catch(() => {}), 10000);
 }
 // ---------- player profile drawer ----------
 const dur = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
