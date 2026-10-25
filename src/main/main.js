@@ -71,6 +71,7 @@ const modkeys = require('./modkeys');
 const instances = require('./instances');
 const control = require('./control');
 const cpu = require('./cpu');
+const live = require('./live');
 const scheduler = require('./scheduler');
 
 let win = null;
@@ -393,6 +394,8 @@ handle('maplink:setTarget', (t) => require('./maplink').setTarget(t || {}));
 handle('maplink:send', () => require('./maplink').send({ force: true, by: 'app' }));
 handle('heat:summary', (since) => heat.summary(null, Number(since) || 0));
 handle('lootmap:items', () => lootmap.items());
+handle('live:players', () => live.players());
+handle('live:act', (action, id, args) => live.act(action, id, args || {}, 'map'));
 handle('lootmap:spawns', (name) => lootmap.spawns(name));
 handle('lootmap:vehicleSpawns', () => lootmap.vehicleSpawns());
 handle('stats:overview', () => stats.overview());
@@ -628,6 +631,7 @@ app.whenReady().then(() => {
   timed('health', () => health.init(emit));
   if (!instance.isChild) initUpdater();
   cpu.init(emit);
+  live.init(emit);
   instances.init(emit);
   instances.setLocalStatus(localStatus);
   instances.setLocal({ open: () => showWindow(), call: (ch, ...args) => handlerMap.get(ch)(...args) });

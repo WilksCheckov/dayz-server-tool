@@ -136,7 +136,7 @@ const NAV = [
     { page: 'bans', label: 'Bans', sub: 'Game bans and BattlEye bans', icon: 'bans' },
     { page: 'whitelist', label: 'Whitelist', sub: 'Who may join when enableWhitelist is on (whitelist.txt)', icon: 'lists' },
     { page: 'priority', label: 'Priority queue', sub: 'Who skips the login queue (priority.txt)', icon: 'priority' },
-    { page: 'map', label: 'Map', sub: 'Last known player positions on the active mission\'s map', icon: 'map' }
+    { page: 'map', label: 'Map', sub: 'Live players with admin actions (right-click), loot, vehicles and heat', icon: 'map' }
   ] },
   { title: 'Integrations', items: [
     { page: 'discord', label: 'Discord Bot', sub: 'Slash commands, whitelist applications, bans, live logs', icon: 'discord' },

@@ -479,6 +479,13 @@
             <button class="btn small danger" id="btnHeatClear">Clear</button>
           </div>
           <div class="map-layout">
+            <div class="card admin-panel" id="adminPanel">
+              <div class="card-title">Players <span class="muted" id="admWhen"></span></div>
+              <input id="admSearch" class="input" placeholder="Search players…">
+              <div id="admList" class="ip-list"></div>
+              <div id="admSel" class="adm-sel" hidden></div>
+              <p class="muted small">Click to select, double-click to centre on them, right-click a player (here or on the map) or the map for actions.</p>
+            </div>
             <div class="card grow map-card"><div class="map-notice" id="mapNotice" hidden></div><canvas id="mapCanvas" class="map-canvas"></canvas><div class="muted" id="mapInfo"></div></div>
             <div class="card loot-panel" id="vehPanel" hidden>
               <div class="card-title">Vehicles <span class="muted" id="vehWhen"></span></div>

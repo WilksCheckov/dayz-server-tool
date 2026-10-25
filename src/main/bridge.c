@@ -1,7 +1,10 @@
 class DZAT_Bridge
 {
 	static float s_Acc = 0;
+	static float s_PosAcc = 0;
 	static bool s_DirReady = false;
+	// players an admin made invulnerable (by identity id); re-applied every tick so it survives a reconnect
+	static ref map<string, int> s_God = new map<string, int>();
 	static ref map<string, string> s_Last = new map<string, string>();
 	static ref map<string, int> s_Dead = new map<string, int>();
 	static const string DIR = "$profile:DayZAdminTools";
@@ -37,6 +40,40 @@ class DZAT_Bridge
 	{
 		if (b) return "true";
 		return "false";
+	}
+	static string Clean(string s)
+	{
+		s.Replace("|", "/");
+		return s;
+	}
+	// Live positions for the map: rewritten every 1.5 s, one line per player, framed by #begin / #end
+	// id|steam|name|x|y|z|heading|health01|blood|alive|vehicle|god
+	static void WritePlayers(array<Man> players)
+	{
+		FileHandle fh = OpenFile(DIR + "/players.txt", FileMode.WRITE);
+		if (fh == 0) return;
+		FPrintln(fh, "#begin|" + Stamp());
+		for (int i = 0; i < players.Count(); i++)
+		{
+			PlayerBase p = PlayerBase.Cast(players[i]);
+			if (!p || !p.GetIdentity()) continue;
+			string pid = p.GetIdentity().GetId();
+			bool god = s_God.Contains(pid);
+			if (god) p.SetAllowDamage(false);
+			vector pos = p.GetPosition();
+			vector ori = p.GetOrientation();
+			string veh = "-";
+			HumanCommandVehicle hcv = p.GetCommand_Vehicle();
+			if (hcv && hcv.GetTransport()) veh = hcv.GetTransport().GetType();
+			string line = pid + "|" + p.GetIdentity().GetPlainId() + "|" + Clean(p.GetIdentity().GetName());
+			line = line + "|" + pos[0].ToString() + "|" + pos[1].ToString() + "|" + pos[2].ToString();
+			line = line + "|" + ori[0].ToString() + "|" + p.GetHealth01("", "").ToString();
+			line = line + "|" + p.GetHealth("GlobalHealth", "Blood").ToString() + "|" + BoolStr(p.IsAlive());
+			line = line + "|" + veh + "|" + BoolStr(god);
+			FPrintln(fh, line);
+		}
+		FPrintln(fh, "#end");
+		CloseFile(fh);
 	}
 	// the engine's own persistent id of an entity ("" when it has none)
 	static string EngineId(EntityAI e)
@@ -227,6 +264,64 @@ class DZAT_Bridge
 			Append(DIR + "/results.log", nonce + "|done|" + ok.ToString() + "|" + fail.ToString());
 			return;
 		}
+		// to another player: f[3] = that player's id, placed next to them at their height (works on upper floors)
+		if (type == "tpto")
+		{
+			PlayerBase other = FindPlayer(players, f[3]);
+			if (!other)
+			{
+				Append(DIR + "/results.log", nonce + "|nodest|0|0");
+				return;
+			}
+			vector to = other.GetPosition();
+			to[0] = to[0] + 1.2;
+			target.SetPosition(to);
+			Append(DIR + "/results.log", nonce + "|done|1|0");
+			return;
+		}
+		if (type == "kill")
+		{
+			if (s_God.Contains(target.GetIdentity().GetId())) s_God.Remove(target.GetIdentity().GetId());
+			target.SetAllowDamage(true);
+			target.SetHealth("", "", 0);
+			Append(DIR + "/results.log", nonce + "|done|1|0");
+			return;
+		}
+		// f[3] = on | off
+		if (type == "god")
+		{
+			string gid = target.GetIdentity().GetId();
+			if (f[3] == "on")
+			{
+				s_God.Set(gid, 1);
+				target.SetAllowDamage(false);
+			}
+			else
+			{
+				if (s_God.Contains(gid)) s_God.Remove(gid);
+				target.SetAllowDamage(true);
+			}
+			Append(DIR + "/results.log", nonce + "|done|1|0");
+			return;
+		}
+		// into the inventory where it fits, otherwise at the feet; f[6] = class,class,...
+		if (type == "give")
+		{
+			array<string> gitems = new array<string>();
+			f[6].Split(",", gitems);
+			int gok = 0;
+			int gfail = 0;
+			for (int gi = 0; gi < gitems.Count(); gi++)
+			{
+				if (gitems[gi] == "" || gitems[gi] == "-") continue;
+				EntityAI gent = target.GetInventory().CreateInInventory(gitems[gi]);
+				if (!gent) gent = EntityAI.Cast(GetGame().CreateObjectEx(gitems[gi], target.GetPosition(), ECE_PLACE_ON_SURFACE));
+				if (gent) gok++;
+				else gfail++;
+			}
+			Append(DIR + "/results.log", nonce + "|done|" + gok.ToString() + "|" + gfail.ToString());
+			return;
+		}
 		Append(DIR + "/results.log", nonce + "|unknown|0|0");
 	}
 	static void ProcessCommands(array<Man> players)
@@ -247,10 +342,12 @@ class DZAT_Bridge
 	}
 	static void Tick(float dt)
 	{
-		s_Acc += dt;
-		if (s_Acc < 3) return;
-		s_Acc = 0;
 		if (!GetGame().IsServer()) return;
+		s_Acc += dt;
+		s_PosAcc += dt;
+		// positions and admin commands every 1.5 s; gear snapshots and the dupe check every 3 s
+		if (s_PosAcc < 1.5) return;
+		s_PosAcc = 0;
 		if (!s_DirReady)
 		{
 			MakeDirectory(DIR);
@@ -258,6 +355,10 @@ class DZAT_Bridge
 		}
 		array<Man> players = new array<Man>();
 		GetGame().GetPlayers(players);
+		WritePlayers(players);
+		ProcessCommands(players);
+		if (s_Acc < 3) return;
+		s_Acc = 0;
 		for (int i = 0; i < players.Count(); i++)
 		{
 			PlayerBase p = PlayerBase.Cast(players[i]);
@@ -278,6 +379,5 @@ class DZAT_Bridge
 			}
 		}
 		CheckEngineIds(players);
-		ProcessCommands(players);
 	}
 }

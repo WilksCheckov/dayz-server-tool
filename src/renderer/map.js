@@ -66,22 +66,25 @@ async function drawMap() {
   drawLoot(ctx, c);
   drawLiveLoot(ctx, c);
   drawVehicles(ctx, c);
-  // players
-  if (!mapState.players.at || Date.now() - mapState.players.at > 4000) { try { const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 }); mapState.players = Object.assign(rows.filter(r => r.lastPos), { at: Date.now() }); } catch { /* ignore */ } }
-  const pts = mapState.players.filter(r => !$('mapOnlineOnly').checked || r.online);
+  // players: live positions (bridge script) for those online, the last logged position for everyone else
+  if (!mapState.players.at || Date.now() - mapState.players.at > 15000) { try { const rows = await ipc.invoke('players:all', { sort: 'lastSeen', limit: 500 }); mapState.players = Object.assign(rows.filter(r => r.lastPos), { at: Date.now() }); } catch { mapState.players = Object.assign([], { at: Date.now() }); } }
+  const L = adm.live; const liveOn = !!(L && L.available);
+  const liveNames = new Set(liveOn ? L.players.map(p => p.name) : []);
+  const pts = mapState.players.filter(r => !(liveOn && (r.online || liveNames.has(r.name))) && (!$('mapOnlineOnly').checked || r.online));
   ctx.font = '11px Segoe UI';
   for (const r of pts) {
     const [x, y] = toScreen(c, r.lastPos.x, r.lastPos.z);
     ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = r.online ? '#7cc47f' : '#e0b04e'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
     const tw = ctx.measureText(r.name).width; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x + 7, y - 7, tw + 6, 14); ctx.fillStyle = '#fff'; ctx.fillText(r.name, x + 10, y + 4);
   }
+  if (liveOn) for (const p of L.players) drawLivePlayer(ctx, c, p);
   // measure line
   if (mapState.measure && mapState.measure.a) {
     const m = mapState.measure; const [ax, ay] = toScreen(c, m.a[0], m.a[1]); const b = m.b || m.cursor; if (b) { const [bx, by] = toScreen(c, b[0], b[1]); ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]); const dist = Math.hypot(b[0] - m.a[0], b[1] - m.a[1]); const label = dist >= 1000 ? (dist / 1000).toFixed(2) + ' km' : Math.round(dist) + ' m'; ctx.fillStyle = 'rgba(0,0,0,.7)'; const tw = ctx.measureText(label).width; ctx.fillRect((ax + bx) / 2 - tw / 2 - 4, (ay + by) / 2 - 9, tw + 8, 16); ctx.fillStyle = '#ffe14d'; ctx.fillText(label, (ax + bx) / 2 - tw / 2, (ay + by) / 2 + 4); }
   }
   // cursor coordinates
   const cur = mapState.hover; const coords = cur ? `${Math.round(cur[0])}, ${Math.round(cur[1])}` : '';
-  $('mapInfo').textContent = `${pts.length} player position(s) · green = online, amber = last seen · scroll to zoom, drag to pan, click a dot for details, Shift+click twice to measure · zoom ${v.scale.toFixed(1)}x${coords ? ' · cursor ' + coords : ''}`;
+  $('mapInfo').textContent = `${adm.live && adm.live.available ? adm.live.players.length + ' online (live) · ' : ''}${pts.length} last seen · green = live, blue = god mode, amber = last seen · scroll to zoom, drag to pan, click a dot for details, Shift+click twice to measure · zoom ${v.scale.toFixed(1)}x${coords ? ' · cursor ' + coords : ''}`;
 }
 
 // ----- heat overlays -----
@@ -243,6 +246,8 @@ function mapInit() {
     if (d.moved) return;
     const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const w = toWorld(c, px, py);
     if (e.shiftKey) { const m = mapState.measure; if (!m || m.b) mapState.measure = { a: w, b: null, cursor: w }; else m.b = w; scheduleDraw(); return; }
+    if (adm.pickTp) { const p = livePlayer(adm.pickTp); adm.pickTp = null; c.style.cursor = ''; if (p) admAct('tp', p, { x: w[0], z: w[1] }); return; }
+    { const hit = liveAt(c, px, py); if (hit) { admSelect(hit.id); return; } }
     // click a player dot
     for (const r of mapState.players) { const [x, y] = toScreen(c, r.lastPos.x, r.lastPos.z); if (Math.hypot(px - x, py - y) <= 7) { showPlayerPopup(r); return; } }
     // click a loot spot
@@ -284,7 +289,7 @@ async function ensureMapImage(force) {
   catch (e) { if (/placeholder tiles|no map to build from/i.test(e.message)) { showMapNotice(mapState.info && mapState.info.noClientText || e.message); if (force) toast('This PC has no DayZ client to build the map from; see the note on the map.', true); } else toast(e.message, true); }
   if (mapState.info && mapState.info.image) showMapNotice('');
 }
-function mapLive(on) { clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) { mapState.players.at = 0; scheduleDraw(); } else mapLive(false); }, 5000); }
+function mapLive(on) { clearInterval(adm.timer); adm.timer = on ? setInterval(pollLive, 1500) : null; if (on) pollLive(); clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) { mapState.players.at = 0; scheduleDraw(); } else mapLive(false); }, 5000); }
 function showPlayerPopup(r) {
   const body = `<div class="muted mono">${esc(r.id || '')}${r.steamId ? '<br>Steam64 ' + esc(r.steamId) : ''}</div>
     <div class="grid-2 tight pdb-kv"><div><span class="muted">Status</span><br>${r.online ? 'online' : 'last seen ' + fmtDate(r.lastSeen)}</div><div><span class="muted">Position</span><br>${Math.round(r.lastPos.x)}, ${Math.round(r.lastPos.z)}</div>
@@ -292,4 +297,134 @@ function showPlayerPopup(r) {
     ${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.account && r.account.suspicious ? '<span class="badge warn">⚠ suspicious</span>' : ''}`;
   showModal(r.name, body, [{ label: 'Open in Database', value: 'db', primary: true }, { label: 'Close', value: false }]).then(v => { if (v === 'db') { pdbSelected = r.key; showPage('database'); } });
 }
+// ----- live admin: players online now, their actions -----
+const adm = { live: null, sel: null, pickTp: null, follow: false, timer: null };
+const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
+const livePlayer = (id) => adm.live && adm.live.available ? adm.live.players.find(p => p.id === id) : null;
+function liveAt(c, px, py) { if (!adm.live || !adm.live.available) return null; let best = null, bd = 9; for (const p of adm.live.players) { const [x, y] = toScreen(c, p.x, p.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = p; } } return best; }
+function drawLivePlayer(ctx, c, p) {
+  const [x, y] = toScreen(c, p.x, p.z); const sel = p.id === adm.sel;
+  const color = !p.alive ? '#8a8f98' : p.god ? '#6fa8ff' : '#46d36a';
+  // heading: a wedge pointing where they face (0 = north, clockwise)
+  const h = (p.heading || 0) * Math.PI / 180; ctx.beginPath(); ctx.moveTo(x + Math.sin(h) * 13, y - Math.cos(h) * 13); ctx.lineTo(x + Math.sin(h + 2.5) * 6, y - Math.cos(h + 2.5) * 6); ctx.lineTo(x + Math.sin(h - 2.5) * 6, y - Math.cos(h - 2.5) * 6); ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1.2; ctx.stroke();
+  if (sel) { ctx.beginPath(); ctx.arc(x, y, 11, 0, Math.PI * 2); ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2; ctx.stroke(); }
+  const label = p.name + (p.vehicle ? ' · ' + p.vehicle : '') + (!p.alive ? ' · dead' : '');
+  const tw = ctx.measureText(label).width; ctx.fillStyle = sel ? 'rgba(60,50,0,.8)' : 'rgba(0,0,0,.6)'; ctx.fillRect(x + 9, y - 8, tw + 6, 15); ctx.fillStyle = '#fff'; ctx.fillText(label, x + 12, y + 3);
+}
+function centreOn(p) {
+  const c = $('mapCanvas'); const v = mapState.view;
+  if (v.scale < 4) { v.scale = 4; v.ox = 0; v.oy = 0; }
+  const [x, y] = toScreen(c, p.x, p.z); v.ox += c.width / 2 - x; v.oy += c.height / 2 - y; scheduleDraw();
+}
+function admSelect(id) { adm.sel = id; renderAdmin(); scheduleDraw(); }
+async function pollLive() {
+  if (!document.querySelector('#page-map.active')) return;
+  try { adm.live = await ipc.invoke('live:players'); } catch (e) { adm.live = { available: false, reason: e.message, players: [] }; }
+  const p = livePlayer(adm.sel); if (adm.follow && p) centreOn(p);
+  renderAdmin(); scheduleDraw();
+}
+function renderAdmin() {
+  const L = adm.live; const box = $('admList'); const q = $('admSearch').value.trim().toLowerCase();
+  if (!L || !L.available) { box.innerHTML = `<div class="muted" style="padding:6px">${esc((L && L.reason) || 'Loading…')}</div>`; $('admWhen').textContent = ''; $('admSel').hidden = true; return; }
+  $('admWhen').textContent = `${L.players.length} online · live`;
+  const rows = L.players.filter(p => !q || p.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  box.innerHTML = rows.map(p => `<div class="ip-item ${p.id === adm.sel ? 'on' : ''}" data-id="${esc(p.id)}"><span>${esc(p.name)}${p.god ? ' <span class="badge">god</span>' : ''}</span><span class="muted">${!p.alive ? 'dead' : Math.round(p.health * 100) + '%'}${p.vehicle ? ' · 🚗' : ''}</span></div>`).join('') || '<div class="muted" style="padding:6px">No players online.</div>';
+  const s = livePlayer(adm.sel); const el = $('admSel');
+  if (!s) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<b>${esc(s.name)}</b><div class="muted">${Math.round(s.x)}, ${Math.round(s.z)} · health ${Math.round(s.health * 100)}% · blood ${Math.round(s.blood)}${s.vehicle ? ' · in ' + esc(s.vehicle) : ''}${s.god ? ' · god mode' : ''}</div>
+    <div class="row gap"><button class="btn small" data-a="heal">Heal</button><button class="btn small" data-a="tpmap" title="Then click the map where they should go">Teleport…</button><button class="btn small" data-a="refund">Refund</button><button class="btn small" data-a="give">Give…</button><button class="btn small" data-a="menu">More ▾</button></div>
+    <label class="check"><input type="checkbox" id="admFollow" ${adm.follow ? 'checked' : ''}> Follow on the map</label>`;
+}
+async function admAct(action, p, args = {}) {
+  try {
+    const r = await ipc.invoke('live:act', action, p.id, args);
+    if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet; it finishes in a moment.');
+    const msg = { heal: 'healed', tp: 'teleported', tpto: 'teleported', bring: 'brought over', kill: 'killed', god: args.on ? 'is in god mode' : 'is no longer in god mode', tpdeath: 'teleported to their last death', message: 'messaged', kick: 'kicked', ban: 'banned' }[action];
+    if (action === 'give') toast(`Gave ${p.name} ${r.ok} × ${args.item}${r.fail ? ` (${r.fail} failed: is the class name right?)` : ''}`, !r.ok);
+    else if (action === 'refund') toast(r.ok ? `Refunded ${r.ok} of ${r.items} items to ${p.name} (death #${r.deathId})` : `Nothing could be spawned for ${p.name}`, !r.ok);
+    else toast(`${p.name} ${msg}`);
+    pollLive();
+  } catch (e) { toast(e.message, true); }
+}
+function closeCtx() { const m = document.getElementById('ctxMenu'); if (m) m.remove(); }
+function ctxBuild(items) {
+  const m = document.createElement('div');
+  for (const it of items) {
+    if (it.sep) { const d = document.createElement('div'); d.className = 'ctx-sep'; m.appendChild(d); continue; }
+    if (it.header) { const d = document.createElement('div'); d.className = 'ctx-head'; d.textContent = it.header; m.appendChild(d); continue; }
+    const d = document.createElement('div'); d.className = 'ctx-item' + (it.danger ? ' danger' : '') + (it.disabled ? ' disabled' : '');
+    const t = document.createElement('span'); t.textContent = it.label; d.appendChild(t);
+    if (it.sub) { const ar = document.createElement('span'); ar.className = 'muted'; ar.textContent = '▸'; d.appendChild(ar); const sub = ctxBuild(it.sub.length ? it.sub : [{ label: 'nobody else online', disabled: true }]); sub.className = 'ctx-sub'; d.appendChild(sub); }
+    else if (!it.disabled) d.addEventListener('click', (e) => { e.stopPropagation(); closeCtx(); it.run(); });
+    m.appendChild(d);
+  }
+  return m;
+}
+function showCtx(items, x, y) {
+  closeCtx(); const m = ctxBuild(items); m.id = 'ctxMenu'; m.className = 'ctx-menu'; document.body.appendChild(m);
+  const r = m.getBoundingClientRect(); m.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px'; m.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
+}
+const ask = (title, body, label = 'OK', danger = false) => showModal(title, body, [{ label, value: true, primary: true }, { label: 'Cancel', value: false }]);
+function playerMenu(p) {
+  const others = (adm.live.players || []).filter(o => o.id !== p.id);
+  return [
+    { header: p.name + (p.god ? ' (god mode)' : '') + (!p.alive ? ' (dead)' : '') },
+    { label: 'Heal', sub: HEALS.map(([k, l]) => ({ label: l, run: () => admAct('heal', p, { what: k }) })) },
+    { label: 'Teleport to player', sub: others.map(o => ({ label: o.name, run: () => admAct('tpto', p, { to: o.id }) })) },
+    { label: 'Bring a player to them', sub: others.map(o => ({ label: o.name, run: () => admAct('bring', p, { to: o.id }) })) },
+    { label: 'Teleport by clicking the map', run: () => { adm.sel = p.id; adm.pickTp = p.id; $('mapCanvas').style.cursor = 'crosshair'; renderAdmin(); toast(`Click the map where ${p.name} should go (Esc cancels)`); } },
+    { label: 'Teleport to their last death', run: () => admAct('tpdeath', p) },
+    { sep: true },
+    { label: 'Refund their last death…', run: async () => { if (await ask('Refund last death', `<p>Spawn the gear ${esc(p.name)} had at their last recorded death, pristine, at their feet?</p>`, 'Refund')) admAct('refund', p); } },
+    { label: 'Give item…', run: () => giveDialog(p) },
+    { label: p.god ? 'Turn god mode off' : 'Turn god mode on', run: () => admAct('god', p, { on: !p.god }) },
+    { sep: true },
+    { label: 'Message…', run: async () => { if (await ask(`Message ${p.name}`, '<input id="admMsg" class="input" placeholder="Only they see it">', 'Send')) admAct('message', p, { text: $('admMsg').value }); } },
+    { label: 'Kick…', danger: true, run: async () => { if (await ask(`Kick ${p.name}?`, '<input id="admReason" class="input" placeholder="Reason (shown to them)">', 'Kick', true)) admAct('kick', p, { reason: $('admReason').value }); } },
+    { label: 'Ban…', danger: true, run: async () => { if (await ask(`Ban ${p.name}?`, `<p>Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them now.</p><input id="admReason" class="input" placeholder="Reason">`, 'Ban', true)) admAct('ban', p, { reason: $('admReason').value }); } },
+    { label: 'Kill…', danger: true, run: async () => { if (await ask(`Kill ${p.name}?`, '<p>Their character dies where it stands.</p>', 'Kill', true)) admAct('kill', p); } },
+    { sep: true },
+    { label: 'Centre the map on them', run: () => centreOn(p) },
+    { label: 'Open in the database', run: () => { pdbSelected = p.id; showPage('database'); } }
+  ];
+}
+async function giveDialog(p) {
+  await loadLootItems();
+  const ok = await ask(`Give ${p.name} an item`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. BandageDressing"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label><p class="muted small">Goes into their inventory where it fits, otherwise at their feet.</p>`, 'Give');
+  if (ok) admAct('give', p, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1 });
+}
+function pointMenu(w) {
+  const s = livePlayer(adm.sel); const all = adm.live && adm.live.available ? adm.live.players : [];
+  return [
+    { header: `${Math.round(w[0])}, ${Math.round(w[1])}` },
+    ...(s ? [{ label: `Teleport ${s.name} here`, run: () => admAct('tp', s, { x: w[0], z: w[1] }) }] : []),
+    { label: 'Teleport a player here', sub: all.map(o => ({ label: o.name, run: () => admAct('tp', o, { x: w[0], z: w[1] }) })) },
+    { label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Position copied'); } }
+  ];
+}
+$('admSearch').addEventListener('input', renderAdmin);
+$('admList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (it && it.dataset.id) admSelect(it.dataset.id); });
+$('admList').addEventListener('dblclick', e => { const it = e.target.closest('.ip-item'); const p = it && livePlayer(it.dataset.id); if (p) { admSelect(p.id); centreOn(p); } });
+$('admList').addEventListener('contextmenu', e => { const it = e.target.closest('.ip-item'); const p = it && livePlayer(it.dataset.id); if (!p) return; e.preventDefault(); admSelect(p.id); showCtx(playerMenu(p), e.clientX, e.clientY); });
+$('admSel').addEventListener('click', e => {
+  const b = e.target.closest('button'); const p = livePlayer(adm.sel); if (!b || !p) return;
+  const a = b.dataset.a; const r = b.getBoundingClientRect();
+  if (a === 'heal') showCtx(HEALS.map(([k, l]) => ({ label: l, run: () => admAct('heal', p, { what: k }) })), r.left, r.bottom + 2);
+  if (a === 'tpmap') showCtx(playerMenu(p).filter(x => x.label && /^Teleport/.test(x.label)), r.left, r.bottom + 2);
+  if (a === 'refund') playerMenu(p).find(x => x.label === 'Refund their last death…').run();
+  if (a === 'give') giveDialog(p);
+  if (a === 'menu') showCtx(playerMenu(p), r.left, r.bottom + 2);
+});
+$('admSel').addEventListener('change', e => { if (e.target.id === 'admFollow') { adm.follow = e.target.checked; const p = livePlayer(adm.sel); if (adm.follow && p) centreOn(p); } });
+$('mapCanvas').addEventListener('contextmenu', e => {
+  e.preventDefault(); const c = $('mapCanvas'); const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  const hit = liveAt(c, px, py);
+  if (hit) { admSelect(hit.id); showCtx(playerMenu(hit), e.clientX, e.clientY); }
+  else showCtx(pointMenu(toWorld(c, px, py)), e.clientX, e.clientY);
+});
+document.addEventListener('click', e => { if (!e.target.closest('#ctxMenu')) closeCtx(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCtx(); if (adm.pickTp) { adm.pickTp = null; $('mapCanvas').style.cursor = ''; toast('Teleport cancelled'); } } });
+
 mapInit();

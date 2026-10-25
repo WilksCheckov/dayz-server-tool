@@ -280,7 +280,7 @@ function forPlayer(key, limit = 20) { return load().deaths.filter(r => r.key ===
 function stats() { const d = load(); const causes = {}; for (const r of d.deaths) causes[r.cause] = (causes[r.cause] || 0) + 1; return { deaths: d.deaths.length, causes, snapshots: Object.values(d.gear).filter(Array.isArray).reduce((n, l) => n + l.length, 0), players: Object.keys(d.gear).filter(k => !k.startsWith('steam:')).length }; }
 
 // ---------- bridge script in the mission's init.c ----------
-const BRIDGE_VERSION = 1;
+const BRIDGE_VERSION = 2;
 const MARK_BEGIN = '// >>> DayZ Admin Tools bridge v' + BRIDGE_VERSION + ' (managed by the tool: do not edit between the markers)';
 const MARK_END = '// <<< DayZ Admin Tools bridge';
 const HOOK = 'DZAT_Bridge.Tick(timeslice); // DayZ Admin Tools hook';
@@ -356,4 +356,4 @@ function housekeeping() {
 }
 
 function init(emit) { emitRef = emit; load(); }
-module.exports = { init, sourceKind, sourceLabel, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };
+module.exports = { sendCommand, init, sourceKind, sourceLabel, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };
