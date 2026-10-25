@@ -128,18 +128,23 @@ async function loadLiveLoot(force) {
 function liveLootFiltered() {
   const L = liveLoot; if (!L || !L.available) return [];
   const q = $('liveLootSearch').value.trim().toLowerCase(); const cat = $('liveLootCat').value; const ground = $('liveLootGround').checked;
-  return L.items.filter(it => (!liveLootPick || L.classes[it[0]] === liveLootPick) && (!q || L.classes[it[0]].toLowerCase().includes(q)) && (!cat || L.classCat[it[0]] === cat) && (!ground || it[3] === 0));
+  const pick = liveLootPick.toLowerCase();
+  return L.items.filter(it => (!pick || L.classes[it[0]].toLowerCase() === pick) && (!q || L.classes[it[0]].toLowerCase().includes(q)) && (!cat || L.classCat[it[0]] === cat) && (!ground || it[3] === 0));
 }
 function renderLiveLootList() {
   const L = liveLoot; const box = $('liveLootList');
   if (!L || !L.available) { box.innerHTML = `<div class="muted" style="padding:6px">${esc((L && L.reason) || 'No data yet.')}</div>`; $('liveLootWhen').textContent = ''; return; }
   $('liveLootWhen').textContent = 'as of ' + new Date(L.at).toLocaleTimeString();
-  const cats = [...new Set(L.classCat.filter(Boolean))].sort(); const sel = $('liveLootCat');
+  const cats = [...new Set([...L.classCat, ...(lootItems || []).map(i => i.category[0] || '')].filter(Boolean))].sort(); const sel = $('liveLootCat');
   if (sel.options.length !== cats.length + 1) { const cur = sel.value; sel.innerHTML = '<option value="">All types</option>' + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join(''); sel.value = cur; }
   const q = $('liveLootSearch').value.trim().toLowerCase(); const cat = $('liveLootCat').value; const ground = $('liveLootGround').checked;
-  const counts = new Map(); for (const it of L.items) { if (ground && it[3] !== 0) continue; const n = L.classes[it[0]]; if (q && !n.toLowerCase().includes(q)) continue; if (cat && L.classCat[it[0]] !== cat) continue; counts.set(n, (counts.get(n) || 0) + 1); }
-  const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 300);
-  box.innerHTML = `<div class="ip-item ${liveLootPick ? '' : 'on'}" data-name=""><span>All matching items</span><span class="muted">${[...counts.values()].reduce((a, b) => a + b, 0).toLocaleString()}</span></div>` + rows.map(([n, k]) => `<div class="ip-item ${liveLootPick === n ? 'on' : ''}" data-name="${esc(n)}"><span>${esc(n)}</span><span class="muted">${k.toLocaleString()}</span></div>`).join('');
+  // counts of what is in the world now, keyed without case; then every economy item, with 0 when none is out
+  const counts = new Map(), shown = new Map();
+  for (const it of L.items) { if (ground && it[3] !== 0) continue; const n = L.classes[it[0]]; if (q && !n.toLowerCase().includes(q)) continue; if (cat && L.classCat[it[0]] !== cat) continue; const k = n.toLowerCase(); counts.set(k, (counts.get(k) || 0) + 1); if (!shown.has(k)) shown.set(k, n); }
+  for (const i of lootItems || []) { const k = i.name.toLowerCase(); if (shown.has(k)) { shown.set(k, i.name); continue; } if (q && !k.includes(q)) continue; if (cat && (i.category[0] || '') !== cat) continue; shown.set(k, i.name); }
+  const rows = [...shown.entries()].map(([k, n]) => [n, counts.get(k) || 0]).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+  const total = [...counts.values()].reduce((x, y) => x + y, 0);
+  box.innerHTML = `<div class="ip-item ${liveLootPick ? '' : 'on'}" data-name=""><span>All matching items (${rows.length.toLocaleString()} types)</span><span class="muted">${total.toLocaleString()}</span></div>` + rows.map(([n, k]) => `<div class="ip-item ${liveLootPick.toLowerCase() === n.toLowerCase() ? 'on' : ''}" data-name="${esc(n)}"><span>${esc(n)}</span><span class="muted">${k ? k.toLocaleString() : 'none in the world'}</span></div>`).join('');
 }
 function drawLiveLoot(ctx, c) {
   if ($('mapOverlay').value !== 'liveloot') return;
@@ -218,7 +223,7 @@ async function pickLootItem(name) {
 }
 function renderLootList() {
   const q = $('lootSearch').value.trim().toLowerCase(); const box = $('lootList');
-  const rows = (lootItems || []).filter(i => !q || i.name.toLowerCase().includes(q)).slice(0, 200);
+  const rows = (lootItems || []).filter(i => !q || i.name.toLowerCase().includes(q));
   box.innerHTML = rows.map(i => `<div class="ip-item ${mapState.lootItem === i.name ? 'on' : ''}" data-name="${esc(i.name)}"><span>${esc(i.name)}</span><span class="muted">${esc(i.category[0] || '')}${i.value.length ? ' · ' + esc(i.value.join('/')) : ''}</span></div>`).join('') || '<div class="muted" style="padding:6px">No items match.</div>';
 }
 
@@ -245,7 +250,7 @@ function mapInit() {
     if (mapState.measure) { mapState.measure = null; scheduleDraw(); }
   });
   c.addEventListener('dblclick', () => { mapState.view = { scale: 1, ox: 0, oy: 0 }; scheduleDraw(); });
-  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; const live = $('mapOverlay').value === 'liveloot'; const veh = $('mapOverlay').value === 'vehicles'; $('lootPanel').hidden = !loot; $('liveLootPanel').hidden = !live; $('vehPanel').hidden = !veh; if (veh) { await loadVehicles(); renderVehList(); } if (loot) { await loadLootItems(); renderLootList(); } if (live) { await loadLiveLoot(true); renderLiveLootList(); } scheduleDraw(); };
+  $('mapOverlay').onchange = async () => { const loot = $('mapOverlay').value === 'loot'; const live = $('mapOverlay').value === 'liveloot'; const veh = $('mapOverlay').value === 'vehicles'; $('lootPanel').hidden = !loot; $('liveLootPanel').hidden = !live; $('vehPanel').hidden = !veh; if (veh) { await loadVehicles(); renderVehList(); } if (loot) { await loadLootItems(); renderLootList(); } if (live) { await Promise.all([loadLiveLoot(true), loadLootItems()]); renderLiveLootList(); } scheduleDraw(); };
   const liveRefresh = () => { renderLiveLootList(); scheduleDraw(); };
   $('liveLootSearch').addEventListener('input', () => { liveLootPick = ''; liveRefresh(); }); $('liveLootCat').onchange = () => { liveLootPick = ''; liveRefresh(); }; $('liveLootGround').onchange = liveRefresh;
   $('liveLootList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (!it) return; liveLootPick = it.dataset.name || ''; liveRefresh(); });
