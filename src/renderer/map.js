@@ -369,6 +369,12 @@ function showCtx(items, x, y) {
   const r = m.getBoundingClientRect(); m.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px'; m.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
 }
 const ask = (title, body, label = 'OK', danger = false) => showModal(title, body, [{ label, value: true, primary: true }, { label: 'Cancel', value: false }]);
+// the reason box every accountable action carries; required when the setting says so
+let reasonRequired = true;
+ipc.invoke('adminlog:cfg').then(c => { reasonRequired = c.requireReason !== false; }).catch(() => {});
+const reasonField = (ph = 'Reason or ticket number') => `<label class="field">Reason / ticket${reasonRequired ? '' : ' (optional)'} <input id="admWhy" class="input" placeholder="${ph}"></label>`;
+const reason = () => ($('admWhy') ? $('admWhy').value.trim() : '');
+const withReason = async (title, body, label, run) => { const ok = await ask(title, body + reasonField(), label); if (!ok) return; if (reasonRequired && !reason()) return toast('Give a reason or ticket number.', true); run(reason()); };
 function playerMenu(p) {
   const others = (adm.live.players || []).filter(o => o.id !== p.id);
   return [
@@ -379,16 +385,16 @@ function playerMenu(p) {
     { label: 'Teleport by clicking the map', run: () => { adm.sel = p.id; adm.pickTp = p.id; $('mapCanvas').style.cursor = 'crosshair'; renderAdmin(); toast(`Click the map where ${p.name} should go (Esc cancels)`); } },
     { label: 'Teleport to their last death', run: () => admAct('tpdeath', p) },
     { sep: true },
-    { label: 'Refund their last death…', run: async () => { if (await ask('Refund last death', `<p>Spawn the gear ${esc(p.name)} had at their last recorded death, pristine, at their feet?</p>`, 'Refund')) admAct('refund', p); } },
+    { label: 'Refund their last death…', run: () => withReason('Refund last death', `<p>Spawn the gear ${esc(p.name)} had at their last recorded death, pristine, at their feet?</p>`, 'Refund', (why) => admAct('refund', p, { reason: why })) },
     { label: 'Give item…', run: () => giveDialog(p) },
-    { label: 'Give kit', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => admAct('kit', p, { kit: k.name }) })), { label: 'Manage kits…', run: () => kitManager() }] },
-    { label: 'Spawn a vehicle next to them', sub: adm.vehicles.map(v => ({ label: v.name, run: () => admAct('vehicle', p, { vehicle: v.name }) })) },
+    { label: 'Give kit', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => withReason(`Give ${p.name} the kit ${k.name}`, '', 'Give', (why) => admAct('kit', p, { kit: k.name, reason: why })) })), { label: 'Manage kits…', run: () => kitManager() }] },
+    { label: 'Spawn a vehicle next to them', sub: adm.vehicles.map(v => ({ label: v.name, run: () => withReason(`Spawn ${v.name} next to ${p.name}`, '<p class="muted">Every part fitted, every fluid full.</p>', 'Spawn', (why) => admAct('vehicle', p, { vehicle: v.name, reason: why })) })) },
     { label: p.god ? 'Turn god mode off' : 'Turn god mode on', run: () => admAct('god', p, { on: !p.god }) },
     { sep: true },
     { label: 'Message…', run: async () => { if (await ask(`Message ${p.name}`, '<input id="admMsg" class="input" placeholder="Only they see it">', 'Send')) admAct('message', p, { text: $('admMsg').value }); } },
-    { label: 'Kick…', danger: true, run: async () => { if (await ask(`Kick ${p.name}?`, '<input id="admReason" class="input" placeholder="Reason (shown to them)">', 'Kick', true)) admAct('kick', p, { reason: $('admReason').value }); } },
-    { label: 'Ban…', danger: true, run: async () => { if (await ask(`Ban ${p.name}?`, `<p>Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them now.</p><input id="admReason" class="input" placeholder="Reason">`, 'Ban', true)) admAct('ban', p, { reason: $('admReason').value }); } },
-    { label: 'Kill…', danger: true, run: async () => { if (await ask(`Kill ${p.name}?`, '<p>Their character dies where it stands.</p>', 'Kill', true)) admAct('kill', p); } },
+    { label: 'Kick…', danger: true, run: async () => { if (await ask(`Kick ${p.name}?`, '<label class="field">Reason (shown to them) <input id="admWhy" class="input"></label>', 'Kick', true)) admAct('kick', p, { reason: reason() }); } },
+    { label: 'Ban…', danger: true, run: () => withReason(`Ban ${p.name}?`, `<p>Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them now.</p>`, 'Ban', (why) => admAct('ban', p, { reason: why })) },
+    { label: 'Kill…', danger: true, run: () => withReason(`Kill ${p.name}?`, '<p>Their character dies where it stands.</p>', 'Kill', (why) => admAct('kill', p, { reason: why })) },
     { sep: true },
     { label: 'Centre the map on them', run: () => centreOn(p) },
     { label: 'Open in the database', run: () => { pdbSelected = p.id; showPage('database'); } }
@@ -396,8 +402,9 @@ function playerMenu(p) {
 }
 async function giveDialog(p) {
   await loadLootItems();
-  const ok = await ask(`Give ${p.name} an item`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. BandageDressing"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label><p class="muted small">Goes into their inventory where it fits, otherwise at their feet.</p>`, 'Give');
-  if (ok) admAct('give', p, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1 });
+  const ok = await ask(`Give ${p.name} an item`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. BandageDressing"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label><p class="muted small">Goes into their inventory where it fits, otherwise at their feet.</p>` + reasonField(), 'Give');
+  if (!ok) return; if (reasonRequired && !reason()) return toast('Give a reason or ticket number.', true);
+  admAct('give', p, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1, reason: reason() });
 }
 async function spawnHere(w, args, what) {
   try { const r = await ipc.invoke('live:spawnAt', { x: w[0], z: w[1], ...args }); if (r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(r.ok ? `${what}: spawned ${r.ok} item(s) at ${Math.round(w[0])}, ${Math.round(w[1])}${r.fail ? ` (${r.fail} failed)` : ''}` : `${what} could not be spawned (is the class name right?)`, !r.ok); }
@@ -405,8 +412,9 @@ async function spawnHere(w, args, what) {
 }
 async function spawnItemDialog(w) {
   await loadLootItems();
-  const ok = await ask(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. AKM; AK_WoodBttstck"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label>`, 'Spawn');
-  if (ok) spawnHere(w, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1 }, $('admItem').value.trim());
+  const ok = await ask(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. AKM; AK_WoodBttstck"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label>` + reasonField(), 'Spawn');
+  if (!ok) return; if (reasonRequired && !reason()) return toast('Give a reason or ticket number.', true);
+  spawnHere(w, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1, reason: reason() }, $('admItem').value.trim());
 }
 // Kits: saved item lists, one item per line
 async function kitManager(edit = null) {
@@ -434,8 +442,8 @@ function pointMenu(w) {
     { label: 'Teleport a player here', sub: all.map(o => ({ label: o.name, run: () => admAct('tp', o, { x: w[0], z: w[1] }) })) },
     { sep: true },
     { label: 'Spawn item here…', run: () => spawnItemDialog(w) },
-    { label: 'Spawn kit here', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => spawnHere(w, { kit: k.name }, 'Kit ' + k.name) })), { label: 'Manage kits…', run: () => kitManager() }] },
-    { label: 'Spawn vehicle here', sub: adm.vehicles.map(v => ({ label: v.name, run: () => spawnHere(w, { vehicle: v.name }, v.name) })) },
+    { label: 'Spawn kit here', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => withReason(`Spawn the kit ${k.name} here`, '', 'Spawn', (why) => spawnHere(w, { kit: k.name, reason: why }, 'Kit ' + k.name)) })), { label: 'Manage kits…', run: () => kitManager() }] },
+    { label: 'Spawn vehicle here', sub: adm.vehicles.map(v => ({ label: v.name, run: () => withReason(`Spawn ${v.name} here`, '<p class="muted">Every part fitted, every fluid full.</p>', 'Spawn', (why) => spawnHere(w, { vehicle: v.name, reason: why }, v.name)) })) },
     { sep: true },
     { label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Position copied'); } }
   ];
@@ -452,7 +460,7 @@ $('admSel').addEventListener('click', e => {
   if (a === 'tpmap') showCtx(playerMenu(p).filter(x => x.label && /^Teleport/.test(x.label)), r.left, r.bottom + 2);
   if (a === 'refund') playerMenu(p).find(x => x.label === 'Refund their last death…').run();
   if (a === 'give') giveDialog(p);
-  if (a === 'kit') showCtx([...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => admAct('kit', p, { kit: k.name }) })), { sep: true }, { label: 'Manage kits…', run: () => kitManager() }], r.left, r.bottom + 2);
+  if (a === 'kit') showCtx([...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => withReason(`Give ${p.name} the kit ${k.name}`, '', 'Give', (why) => admAct('kit', p, { kit: k.name, reason: why })) })), { sep: true }, { label: 'Manage kits…', run: () => kitManager() }], r.left, r.bottom + 2);
   if (a === 'menu') showCtx(playerMenu(p), r.left, r.bottom + 2);
 });
 $('admSel').addEventListener('change', e => { if (e.target.id === 'admFollow') { adm.follow = e.target.checked; const p = livePlayer(adm.sel); if (adm.follow && p) centreOn(p); } });

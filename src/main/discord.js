@@ -101,7 +101,7 @@ function mirror(op, kind, ...args) {
 function listsAdd(kind, ...args) { const r = lists.add(kind, ...args); mirror('add', kind, ...args); return r; }
 function listsRemove(kind, ...args) { const r = lists.remove(kind, ...args); mirror('remove', kind, ...args); return r; }
 // commands that act on one server get a "server" option when other instances share this bot
-const SCOPED = ['status', 'players', 'kick', 'say', 'server', 'backup', 'deaths', 'death', 'refund', 'heal', 'teleport', 'search'];
+const SCOPED = ['status', 'players', 'kick', 'say', 'server', 'backup', 'deaths', 'death', 'refund', 'heal', 'teleport', 'search', 'give', 'kit', 'vehicle'];
 function serverChoices() { const t = sharedTargets(); return t.length ? [myName(), ...t.map(e => e.name)].slice(0, 25) : null; }
 function addServerOption(cmds) {
   const choices = serverChoices(); if (!choices) return cmds;
@@ -124,7 +124,7 @@ function cfg() {
     token: '', guildId: '', adminRoleIds: [], adminChannelId: '', whitelistRoleId: '', priorityRoleId: '', bannedRoleId: '', mutedRoleId: '', steamApiKey: '',
     statusFormat: 'Server Online | {count}/{max} Players', offlineStatus: 'Server Offline',
     logChannelId: '', autoStart: false, liveLogChannelId: '', liveLogKinds: ['adm'], liveLogErrorsOnly: false,
-    ticketCategoryId: '', ticketLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '', deathLogChannelId: '', summaryChannelId: '', summaryTime: '09:00',
+    ticketCategoryId: '', ticketLogChannelId: '', adminLogChannelId: '', killFeedChannelId: '', joinFeedChannelId: '', deathLogChannelId: '', summaryChannelId: '', summaryTime: '09:00',
     ...(shared() ? hostChannels() : {}),
     ...(shared() ? Object.fromEntries(Object.entries(s.discord || {}).filter(([, v]) => v !== '' && v !== null && !(Array.isArray(v) && !v.length))) : (s.discord || {}))
   };
@@ -223,9 +223,12 @@ function buildCommands() {
     new SlashCommandBuilder().setName('backup').setDescription('Take a backup now'),
     new SlashCommandBuilder().setName('deaths').setDescription('Recent deaths from the death log').addStringOption(o => o.setName('player').setDescription('Player name, or part of it')).addIntegerOption(o => o.setName('count').setDescription('How many (default 10, max 25)')),
     new SlashCommandBuilder().setName('death').setDescription('Full detail of one death: hits, body parts, gear').addIntegerOption(o => o.setName('id').setDescription('Death record number (see /deaths)').setRequired(true)),
-    new SlashCommandBuilder().setName('heal').setDescription('Heal an online player: health, bleeding, broken bones, diseases, food and water').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('what').setDescription('What to fix (default: everything)').addChoices({ name: 'everything', value: 'all' }, { name: 'health, blood and shock', value: 'health' }, { name: 'bleeding and cuts', value: 'bleeding' }, { name: 'broken bones', value: 'bones' }, { name: 'diseases and infections', value: 'cure' }, { name: 'food and water', value: 'food' })),
-    new SlashCommandBuilder().setName('teleport').setDescription('Teleport an online player back to where they died, or to coordinates').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addIntegerOption(o => o.setName('death_id').setDescription('Death record number (see /deaths); default: their latest death')).addNumberOption(o => o.setName('x').setDescription('X coordinate (with z: go there instead of the death position)')).addNumberOption(o => o.setName('z').setDescription('Z coordinate')),
-    new SlashCommandBuilder().setName('refund').setDescription('Spawn the gear a player had when they died at their feet (they must be online)').addIntegerOption(o => o.setName('id').setDescription('Death record number (see /deaths); default: the player\'s latest death')).addStringOption(o => o.setName('player').setDescription('Player name, used when no id is given'))
+    new SlashCommandBuilder().setName('heal').setDescription('Heal an online player: health, bleeding, broken bones, diseases, food and water').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('what').setDescription('What to fix (default: everything)').addChoices({ name: 'everything', value: 'all' }, { name: 'health, blood and shock', value: 'health' }, { name: 'bleeding and cuts', value: 'bleeding' }, { name: 'broken bones', value: 'bones' }, { name: 'diseases and infections', value: 'cure' }, { name: 'food and water', value: 'food' })).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
+    new SlashCommandBuilder().setName('teleport').setDescription('Teleport an online player back to where they died, or to coordinates').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addIntegerOption(o => o.setName('death_id').setDescription('Death record number (see /deaths); default: their latest death')).addNumberOption(o => o.setName('x').setDescription('X coordinate (with z: go there instead of the death position)')).addNumberOption(o => o.setName('z').setDescription('Z coordinate')).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
+    new SlashCommandBuilder().setName('refund').setDescription('Spawn the gear a player had when they died at their feet (they must be online)').addIntegerOption(o => o.setName('id').setDescription('Death record number (see /deaths); default: the player\'s latest death')).addStringOption(o => o.setName('player').setDescription('Player name, used when no id is given')).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
+    new SlashCommandBuilder().setName('give').setDescription('Give an online player an item (pristine, full); "Parent; Attachment" fits attachments').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('item').setDescription('Class name, e.g. AKM or AKM; AK_WoodBttstck; Mag_AKM_30Rnd').setRequired(true)).addIntegerOption(o => o.setName('count').setDescription('How many (default 1, max 50)').setMinValue(1).setMaxValue(50)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
+    new SlashCommandBuilder().setName('kit').setDescription('Give an online player a saved kit (Map page → Kits)').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('kit').setDescription('Kit name').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)')),
+    new SlashCommandBuilder().setName('vehicle').setDescription('Spawn a vehicle next to an online player, every part fitted and every fluid full').addStringOption(o => o.setName('player').setDescription('Player name').setRequired(true)).addStringOption(o => o.setName('vehicle').setDescription('Vehicle class').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('reason').setDescription('Reason or ticket number (logged in the admin action channel)'))
   ].map(c => { const j = c.setDMPermission(false).toJSON(); if (j.default_member_permissions === undefined) j.default_member_permissions = String(PermissionFlagsBits.Administrator); return j; });
 }
 
@@ -268,6 +271,13 @@ async function postAlert({ title, description, color, channelId }) {
 const warned = {};
 function warnOnce(key, msg) { const now = Date.now(); if (warned[key] && now - warned[key] < 600000) return; warned[key] = now; addLog(msg); }
 const sendFailed = (what, id) => e => warnOnce(what + id, `${what} not posted to channel ${id}: ${e && e.message || e}`);
+// Admin actions for accountability: to the admin action channel, else the action log channel; nothing when neither is set.
+async function postAdminAction({ title, color, fields }) {
+  const c = cfg(); const id = c.adminLogChannelId || c.logChannelId; if (!id) return;
+  if ((!client && !shared()) || !state.running) throw new Error('the bot is not running');
+  const ch = await channel(id); if (!ch) throw new Error(`channel ${id} not found or not visible to the bot`);
+  await ch.send({ embeds: [new EmbedBuilder().setTitle(title.slice(0, 250)).setColor(color).addFields(fields).setFooter({ text: myName() }).setTimestamp(new Date())] });
+}
 async function postLog(text) { const id = cfg().logChannelId; if (!id) return; const ch = await channel(id); if (!ch) return warnOnce('log' + id, `Action log channel ${id} not found or not visible to the bot.`); ch.send(text).catch(sendFailed('Action log', id)); }
 async function guild() { try { return client ? await client.guilds.fetch(cfg().guildId) : null; } catch { return null; } }
 async function member(discordId) { const g = await guild(); if (!g || !discordId) return null; return g.members.fetch(discordId).catch(() => null); }
@@ -600,6 +610,7 @@ async function execute(name, sub, opt, user) {
       '**/ban permanent|temporary** — Ban a player (game + Discord), with a reason prompt. **/ban battleye** for GUID/IP bans, **/ban remove** to lift, **/ban list**. *(Admin)*',
       '**/search** — Player dossier: application, whitelist, bans, notes. *(Admin)*',
       '**/heal player [what]** — Heal an online player: everything, or just health, bleeding, broken bones, diseases or food. **/teleport player [death_id | x z]** — send them back to where they died, or to coordinates. *(Admin)*',
+      '**/give player item [count]**, **/kit player kit**, **/vehicle player vehicle** — Spawn items, saved kits (Map page → Kits) or a ready-to-drive vehicle for an online player; every admin action is posted to the admin action channel with its reason. *(Admin)*',
       '**/deaths**, **/death id**, **/refund** — Death log: recent deaths, the full detail of one (every hit, damage per body part, gear carried) and spawning a player\'s lost gear at their feet while they are online. *(Admin)*',
       '**/players**, **/kick**, **/say** — Live via RCon. *(Admin)*',
       '**/server start|stop|restart**, **/backup** — Control the server. *(Admin)*',
@@ -716,14 +727,29 @@ async function execute(name, sub, opt, user) {
     const dl = require('./deathlog');
     const p = dl.findPlayer(opt.player); if (!p) return { content: `No player called "${opt.player}" in the player database.` };
     if (!p.online) return { content: `${p.name} is not online.` };
+    const al = require('./adminlog');
     try {
       let res, what;
       if (name === 'heal') { what = opt.what || 'all'; res = await dl.heal(p.key, what, { by: who }); }
       else if (opt.x !== undefined && opt.x !== null && opt.z !== undefined && opt.z !== null) { res = await dl.teleport(p.key, [opt.x, opt.z], { by: who }); res.pos = [opt.x, opt.z]; }
       else { let r = opt.death_id ? dl.get(opt.death_id) : null; if (!r) { const s0 = dl.forPlayer(p.key, 1)[0]; if (s0) r = dl.get(s0.id); } if (!r) return { content: `No recorded death for ${p.name}.` }; if (r.key !== p.key) return { content: `Death #${r.id} belongs to ${r.name}, not ${p.name}.` }; res = await dl.teleportToDeath(r.id, { by: who }); }
+      al.record({ action: name === 'heal' ? 'heal' : 'tp', by: who, source: 'discord', target: { name: p.name, steam: p.steamId }, details: name === 'heal' ? dl.HEAL_KINDS[what] : (res.pos ? `to ${Math.round(res.pos[0])}, ${Math.round(res.pos[1])}` : ''), reason: opt.reason || '', result: res });
       if (res.status === 'done') { const msg = name === 'heal' ? `💚 Healed **${p.name}** (${dl.HEAL_KINDS[what]})` : `📍 Teleported **${p.name}** to ${Math.round(res.pos[0])}, ${Math.round(res.pos[1])}`; await postLog(`${msg} by ${who}`); return { content: msg }; }
       if (res.status === 'offline') return { content: `${p.name} is not in game right now (they must be online and alive).` };
       return { content: 'The server did not answer in time. Is the bridge script installed (Death log page) and the server running?' };
+    } catch (e) { return { content: '⚠️ ' + e.message }; }
+  }
+  if (name === 'give' || name === 'kit' || name === 'vehicle') {
+    const live = require('./live'); const L = live.players();
+    if (!L.available) return { content: '⚠️ ' + L.reason };
+    const q = String(opt.player || '').toLowerCase(); const p = L.players.find(x => x.name.toLowerCase() === q) || L.players.find(x => x.name.toLowerCase().includes(q));
+    if (!p) return { content: `Nobody called "${opt.player}" is online.` };
+    try {
+      const args = name === 'give' ? { item: opt.item, count: opt.count || 1 } : name === 'kit' ? { kit: opt.kit } : { vehicle: opt.vehicle };
+      const r = await live.act(name, p.id, { ...args, reason: opt.reason || '' }, who);
+      if (r.status === 'pending') return { content: 'The game picked it up but has not answered yet.' };
+      const what = name === 'give' ? `${opt.count || 1} × ${opt.item}` : name === 'kit' ? `kit **${opt.kit}**` : `a ready-to-drive **${opt.vehicle}**`;
+      return { content: r.ok ? `✅ ${name === 'vehicle' ? 'Spawned' : 'Gave'} ${what} ${name === 'vehicle' ? 'next to' : 'to'} **${p.name}** (${r.ok} item(s)${r.fail ? `, ${r.fail} failed` : ''}).` : `❌ Nothing could be spawned for ${p.name} (is every class name right?).` };
     } catch (e) { return { content: '⚠️ ' + e.message }; }
   }
   if (name === 'refund') {
@@ -733,7 +759,9 @@ async function execute(name, sub, opt, user) {
     if (!r) return { content: 'Give a death record number (see /deaths) or the name of a player with a recorded death.' };
     if (!r.gear || !r.gear.length) return { content: `Death #${r.id} of ${r.name} has no gear snapshot (the bridge script was not running).` };
     try {
+      require('./adminlog').check('refund', opt.reason);
       const res = await dl.refund(r.id, { by: who });
+      require('./adminlog').record({ action: 'refund', by: who, source: 'discord', target: { name: r.name, steam: r.steamId || r.key }, details: `death #${r.id}: ${res.items} item(s)`, reason: opt.reason || '', result: res });
       if (res.status === 'done' && res.ok > 0) { await postLog(`↩️ ${who} refunded ${res.ok}/${res.items} items to ${r.name} (death #${r.id})`); return { content: `✅ Refunded ${res.ok} of ${res.items} items to **${r.name}** at their feet${res.fail ? ` (${res.fail} could not be spawned)` : ''}.` }; }
       if (res.status === 'done') return { content: `❌ Nothing could be spawned for **${r.name}**: all ${res.fail} item(s) failed (classes from a removed mod?).` };
       if (res.status === 'pending') return { content: 'The game picked the refund up but has not answered yet; its result is recorded on the death when it does. Check with /death before trying again.' };
@@ -798,6 +826,12 @@ async function onInteraction(interaction) {
   const c = cfg();
   const ephemeralErr = (content) => (interaction.deferred || interaction.replied ? interaction.editReply({ content }) : interaction.reply({ content, ephemeral: true })).catch(() => {});
   try {
+    // ----- autocomplete: kit and vehicle names -----
+    if (interaction.isAutocomplete()) {
+      const f = interaction.options.getFocused(true); const q = String(f.value || '').toLowerCase(); const live = require('./live');
+      let names = []; try { names = f.name === 'kit' ? live.kits().map(k => k.name) : f.name === 'vehicle' ? live.vehicles().map(v => v.name) : []; } catch { names = []; }
+      return interaction.respond(names.filter(n => n.toLowerCase().includes(q)).slice(0, 25).map(n => ({ name: n, value: n }))).catch(() => {});
+    }
     // ----- slash commands -----
     if (interaction.isChatInputCommand()) {
       const name = interaction.commandName;
@@ -1122,4 +1156,4 @@ function init(emit) {
   else if (mode() !== 'off' && cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000);
 }
 
-module.exports = { createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };
+module.exports = { postAdminAction, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } } };

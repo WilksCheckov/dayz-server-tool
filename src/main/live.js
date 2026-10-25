@@ -85,13 +85,13 @@ async function sendItems(cmd, items, by) {
 // a vehicle spawned for a player stands a few metres away, not on top of them
 const beside = (p) => { const h = (p.heading || 0) * Math.PI / 180; return { x: p.x + Math.sin(h) * 6, z: p.z + Math.cos(h) * 6 }; };
 // spawn at a map point (nobody needed): an item, a kit or a vehicle
-async function spawnAt({ x, z, item, count, kit, vehicle }, by = 'app') {
+async function spawnAt({ x, z, item, count, kit, vehicle, reason }, by = 'app', record = true) {
   if (!isFinite(x) || !isFinite(z)) throw new Error('No position.');
+  if (record) require('./adminlog').check('spawn', reason);
   const items = vehicle ? [vehicleSpec(vehicle)] : kit ? kitItems(kit) : expand([`${String(item || '').trim()} x${Number(count) || 1}`]);
   const r = said(await sendItems({ type: 'spawn', id: '-', pos: [Number(x), Number(z)] }, items, by), 'spawn');
   const what = vehicle || (kit ? 'kit ' + kit : `${Number(count) || 1} × ${item}`);
-  emitRef('console', { source: 'admin', line: `Spawned ${what} at ${Math.round(x)}, ${Math.round(z)}: ${r.ok} item(s)${r.fail ? `, ${r.fail} failed` : ''}` });
-  try { require('./audit').log('app', by, 'admin:spawn', `${what} at ${Math.round(x)}, ${Math.round(z)}`); } catch { /* ignore */ }
+  if (record) require('./adminlog').record({ action: 'spawn', by, source: by === 'app' || by === 'map' ? 'app' : 'discord', details: `${what} at ${Math.round(x)}, ${Math.round(z)}`, reason: String(reason || '').trim(), result: r });
   return r;
 }
 
@@ -120,36 +120,38 @@ const said = (res, what) => {
 async function act(action, id, args = {}, by = 'app') {
   const dl = require('./deathlog');
   const p = find(id);
-  const log = (line) => { emitRef('console', { source: 'admin', line: `${p.name}: ${line}` }); try { require('./audit').log('app', by, 'admin:' + action, `${p.name} (${p.steam}) ${line}`); } catch { /* ignore */ } };
+  const reason = String(args.reason || '').trim();
+  const adminlog = require('./adminlog'); adminlog.check(action, reason);
+  const log = (line, r) => adminlog.record({ action, by, source: by === 'app' || by === 'map' ? 'app' : 'discord', target: { name: p.name, steam: p.steam }, details: line, reason, result: r });
   switch (action) {
-    case 'heal': { const what = args.what || 'all'; const r = said(await dl.heal(p.id, what, { by }), 'heal'); log(`healed (${dl.HEAL_KINDS[what] || what})`); return r; }
-    case 'tp': { const r = said(await dl.teleport(p.id, [Number(args.x), Number(args.z)], { by }), 'teleport'); log(`teleported to ${Math.round(args.x)}, ${Math.round(args.z)}`); return r; }
-    case 'tpto': { const o = find(args.to); const r = said(await dl.sendCommand({ type: 'tpto', id: p.id, what: o.id }, { by }), 'teleport'); log(`teleported to ${o.name}`); return r; }
-    case 'bring': { const o = find(args.to); const r = said(await dl.sendCommand({ type: 'tpto', id: o.id, what: p.id }, { by }), 'teleport'); log(`brought ${o.name} to them`); return r; }
-    case 'kill': { const r = said(await dl.sendCommand({ type: 'kill', id: p.id }, { by }), 'kill'); log('killed'); return r; }
-    case 'god': { const on = !!args.on; const r = said(await dl.sendCommand({ type: 'god', id: p.id, what: on ? 'on' : 'off' }, { by }), 'god mode'); log(`god mode ${on ? 'on' : 'off'}`); return r; }
+    case 'heal': { const what = args.what || 'all'; const r = said(await dl.heal(p.id, what, { by }), 'heal'); log(`healed (${dl.HEAL_KINDS[what] || what})`, r); return r; }
+    case 'tp': { const r = said(await dl.teleport(p.id, [Number(args.x), Number(args.z)], { by }), 'teleport'); log(`teleported to ${Math.round(args.x)}, ${Math.round(args.z)}`, r); return r; }
+    case 'tpto': { const o = find(args.to); const r = said(await dl.sendCommand({ type: 'tpto', id: p.id, what: o.id }, { by }), 'teleport'); log(`teleported to ${o.name}`, r); return r; }
+    case 'bring': { const o = find(args.to); const r = said(await dl.sendCommand({ type: 'tpto', id: o.id, what: p.id }, { by }), 'teleport'); log(`brought ${o.name} to them`, r); return r; }
+    case 'kill': { const r = said(await dl.sendCommand({ type: 'kill', id: p.id }, { by }), 'kill'); log('killed', r); return r; }
+    case 'god': { const on = !!args.on; const r = said(await dl.sendCommand({ type: 'god', id: p.id, what: on ? 'on' : 'off' }, { by }), 'god mode'); log(`god mode ${on ? 'on' : 'off'}`, r); return r; }
     case 'give': {
       const items = expand([`${String(args.item || '').trim()} x${Math.max(1, Math.min(50, Number(args.count) || 1))}`]);
       const r = said(await sendItems({ type: 'give', id: p.id }, items, by), 'give');
-      log(`given ${r.ok} item(s) of ${args.item}${r.fail ? ` (${r.fail} failed: is the class name right?)` : ''}`); return r;
+      log(`${args.item} × ${Math.max(1, Math.min(50, Number(args.count) || 1))}`, r); return r;
     }
-    case 'kit': { const r = said(await sendItems({ type: 'give', id: p.id }, kitItems(args.kit), by), 'kit'); log(`given kit ${args.kit}: ${r.ok} item(s)${r.fail ? `, ${r.fail} failed` : ''}`); return r; }
-    case 'vehicle': { const at = beside(p); const r = await spawnAt({ ...at, vehicle: args.vehicle }, by); log(`spawned ${args.vehicle} next to them`); return r; }
+    case 'kit': { const r = said(await sendItems({ type: 'give', id: p.id }, kitItems(args.kit), by), 'kit'); log(`kit ${args.kit}`, r); return r; }
+    case 'vehicle': { const at = beside(p); const r = await spawnAt({ ...at, vehicle: args.vehicle }, by, false); log(`${args.vehicle} next to them`, r); return r; }
     case 'refund': {
       const d = dl.forPlayer(p.id, 1)[0] || dl.forPlayer(p.steam, 1)[0]; if (!d) throw new Error(`No recorded death for ${p.name}.`);
-      const r = await dl.refund(d.id, { by }); if (r.status === 'done' && r.ok > 0) log(`refunded ${r.ok}/${r.items} items from death #${d.id}`); return { ...said(r, 'refund'), deathId: d.id };
+      const r = await dl.refund(d.id, { by }); log(`death #${d.id}: ${r.items} item(s)`, r); return { ...said(r, 'refund'), deathId: d.id };
     }
     case 'tpdeath': {
       const d = dl.forPlayer(p.id, 1)[0] || dl.forPlayer(p.steam, 1)[0]; if (!d) throw new Error(`No recorded death for ${p.name}.`);
-      const r = said(await dl.teleportToDeath(d.id, { by }), 'teleport'); log(`teleported to their death #${d.id}`); return r;
+      const r = said(await dl.teleportToDeath(d.id, { by }), 'teleport'); log(`teleported to their death #${d.id}`, r); return r;
     }
-    case 'message': { const msg = String(args.text || '').trim(); if (!msg) throw new Error('Write a message.'); const m = await rconNum(p); await require('./rcon').say(msg, m.num); log(`messaged: ${msg}`); return { status: 'done' }; }
-    case 'kick': { const m = await rconNum(p); await require('./rcon').kick(m.num, args.reason || 'Kicked by an admin'); log(`kicked${args.reason ? ': ' + args.reason : ''}`); return { status: 'done' }; }
+    case 'message': { const msg = String(args.text || '').trim(); if (!msg) throw new Error('Write a message.'); const m = await rconNum(p); await require('./rcon').say(msg, m.num); log(`messaged: ${msg}`, { status: 'done' }); return { status: 'done' }; }
+    case 'kick': { const m = await rconNum(p); await require('./rcon').kick(m.num, args.reason || 'Kicked by an admin'); log(`kicked${args.reason ? ': ' + args.reason : ''}`, { status: 'done' }); return { status: 'done' }; }
     case 'ban': {
       // game ban (ban.txt by Steam64, survives restarts) and a kick now
       require('./lists').add('ban', { id: p.steam, name: p.name, reason: args.reason || '' }, { name: p.name, note: args.reason || 'banned from the map' });
       try { const m = await rconNum(p); await require('./rcon').kick(m.num, args.reason || 'Banned'); } catch (e) { emitRef('console', { source: 'admin', line: `${p.name} is banned but could not be kicked now (${e.message}); the ban applies at their next join.` }); }
-      log(`banned${args.reason ? ': ' + args.reason : ''}`); return { status: 'done' };
+      log(`banned${args.reason ? ': ' + args.reason : ''}`, { status: 'done' }); return { status: 'done' };
     }
     default: throw new Error('Unknown action.');
   }

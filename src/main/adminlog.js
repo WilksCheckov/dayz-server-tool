@@ -1,0 +1,47 @@
+'use strict';
+// Accountability for admin actions on players and the world (refunds, spawns, kits, vehicles, heals, teleports, god
+// mode, kills, messages, kicks, bans), whether done from the map, the Death log page or a Discord command: one record
+// each in the audit log and the console, and an embed in the admin action channel on Discord saying who did what to
+// whom, why, and what came of it. Refunds, spawns, kills and bans can be made to need a reason or ticket number.
+const os = require('os');
+const settings = require('./settings');
+
+let emitRef = () => {};
+function cfg() {
+  let user = 'admin'; try { user = os.userInfo().username; } catch { /* ignore */ }
+  return { requireReason: true, adminName: user, ...(settings.load().adminLog || {}) };
+}
+const NEEDS_REASON = ['refund', 'give', 'kit', 'vehicle', 'spawn', 'kill', 'ban'];
+const LABEL = { heal: '💚 Heal', tp: '📍 Teleport', tpto: '📍 Teleport to a player', bring: '📍 Bring a player', tpdeath: '📍 Teleport to their death', kill: '☠️ Kill', god: '🛡️ God mode', give: '🎁 Give item', kit: '🎒 Give kit', vehicle: '🚗 Spawn vehicle', spawn: '📦 Spawn at a point', refund: '↩️ Refund', message: '💬 Message', kick: '👢 Kick', ban: '⛔ Ban' };
+const COLOR = { kill: 0xff5f5f, ban: 0xff5f5f, kick: 0xf5b942, refund: 0x4f8cff, give: 0x3ddc84, kit: 0x3ddc84, vehicle: 0x3ddc84, spawn: 0x3ddc84, god: 0xa970ff };
+
+// Throws when this action needs a reason and none was given (checked before anything happens in game).
+function check(action, reason) {
+  if (cfg().requireReason && NEEDS_REASON.includes(action) && !String(reason || '').trim()) throw new Error('Give a reason or ticket number for this (required: Discord Bot page → Admin action log).');
+}
+const resultText = (r) => !r ? '' : r.status === 'done' ? (r.ok !== undefined && (r.ok || r.fail) ? `${r.ok} ok${r.fail ? `, ${r.fail} failed` : ''}` : 'done') : r.status === 'pending' ? 'picked up by the game, result pending' : r.withdrawn ? 'not picked up by the game: nothing done' : (r.status || '');
+
+// { action, by ('app'/'map' = the admin at this PC, else a Discord user), source ('app' | 'discord'), target {name, steam}, details, reason, result }
+function record({ action, by = 'app', source = 'app', target = null, details = '', reason = '', result = null }) {
+  const c = cfg();
+  const who = by === 'app' || by === 'map' ? c.adminName : by;
+  const res = resultText(result);
+  const text = `${LABEL[action] || action}${target ? ` · ${target.name}` : ''}${details ? ` · ${details}` : ''}${reason ? ` · reason: ${reason}` : ''}${res ? ` · ${res}` : ''}`;
+  emitRef('console', { source: 'admin', line: `${who}: ${text}` });
+  try { require('./audit').log(source, who, 'admin:' + action, `${target ? `${target.name} (${target.steam || '?'}) ` : ''}${details}${reason ? ` — reason: ${reason}` : ''}${res ? ` — ${res}` : ''}`); } catch { /* ignore */ }
+  try {
+    const d = require('./discord');
+    d.postAdminAction({ title: `${LABEL[action] || action}${target ? ` · ${target.name}` : ''}`, color: COLOR[action] || 0x8a94a6,
+      fields: [
+        { name: 'Admin', value: String(who).slice(0, 200), inline: true },
+        ...(target ? [{ name: 'Player', value: `${target.name}${target.steam ? `\n${target.steam}` : ''}`.slice(0, 200), inline: true }] : []),
+        ...(res ? [{ name: 'Result', value: res.slice(0, 200), inline: true }] : []),
+        ...(details ? [{ name: 'Details', value: String(details).slice(0, 1000) }] : []),
+        { name: 'Reason / ticket', value: reason ? String(reason).slice(0, 1000) : '—' }
+      ] }).catch(e => emitRef('console', { source: 'admin', line: `Admin action not posted to Discord: ${e.message}` }));
+  } catch { /* bot not loaded */ }
+}
+
+function init(emit) { emitRef = emit; }
+
+module.exports = { init, cfg, check, record, NEEDS_REASON };
