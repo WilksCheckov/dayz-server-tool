@@ -34,6 +34,67 @@ function players() {
   return data;
 }
 
+// ---------- kits and vehicles ----------
+// A kit is a named list of lines: "Class", "Class x3", or "Parent; Attachment; Attachment" (fitted onto the parent).
+const CLASS_RE = /^[A-Za-z0-9_]+$/;
+function parseLine(line) {
+  const t = String(line || '').trim(); if (!t || t.startsWith('#')) return null;
+  const m = t.match(/^(.*?)(?:\s+x\s*(\d+))?$/i); const count = Math.max(1, Math.min(100, Number(m[2]) || 1));
+  const parts = m[1].split(';').map(x => x.trim()).filter(Boolean);
+  if (!parts.length || !parts.every(x => CLASS_RE.test(x))) throw new Error(`Not a class name: "${t}"`);
+  return { spec: parts.join(';'), count };
+}
+const expand = (lines) => lines.map(parseLine).filter(Boolean).flatMap(l => Array(l.count).fill(l.spec));
+function kits() { return (settings.load().kits || []).map(k => ({ ...k, items: (k.lines || []).length })); }
+function kitItems(name) { const k = (settings.load().kits || []).find(x => x.name === name); if (!k) throw new Error(`No kit called ${name}.`); return expand(k.lines || []); }
+// class names the economy knows; others are allowed (mod items not in types.xml) but reported
+function knownClasses() { const set = new Set(); try { for (const i of require('./lootmap').items()) set.add(i.name.toLowerCase()); } catch { /* no mission */ } try { for (const v of vehicles()) set.add(v.name.toLowerCase()); } catch { /* none */ } return set; }
+function saveKit({ name, lines, oldName }) {
+  name = String(name || '').trim(); if (!name || name.length > 40) throw new Error('Give the kit a name (up to 40 characters).');
+  const clean = String(Array.isArray(lines) ? lines.join('\n') : lines || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const parsed = clean.map(parseLine).filter(Boolean); if (!parsed.length) throw new Error('Add at least one item.');
+  const known = knownClasses(); const unknown = [...new Set(parsed.flatMap(l => l.spec.split(';')).filter(c => known.size && !known.has(c.toLowerCase())))];
+  const list = (settings.load().kits || []).filter(k => k.name !== name && k.name !== oldName);
+  list.push({ name, lines: clean }); list.sort((a, b) => a.name.localeCompare(b.name));
+  settings.save({ kits: list });
+  return { kits: kits(), unknown };
+}
+function deleteKit(name) { settings.save({ kits: (settings.load().kits || []).filter(k => k.name !== name) }); return kits(); }
+// Vehicles: every type in the mission's spawnable types whose parts include wheels, with all its parts (first item of
+// each attachment slot, whatever its chance), so it spawns complete; the bridge fills every fluid.
+function vehicles() {
+  const eco = require('./economy'); const out = new Map();
+  for (const f of eco.files().spawnable.filter(x => x.exists)) {
+    let rows = []; try { rows = eco.loadSpawnable(f.abs); } catch { continue; }
+    for (const r of rows) {
+      const parts = r.attachments.filter(g => !g.preset && g.items.length).map(g => g.items[0].name).filter(n => CLASS_RE.test(n));
+      if (!parts.some(n => /wheel/i.test(n)) || out.has(r.name)) continue;
+      out.set(r.name, { name: r.name, parts });
+    }
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+function vehicleSpec(name) { const v = vehicles().find(x => x.name === name); if (!v) throw new Error(`${name} is not a vehicle in cfgspawnabletypes.xml.`); return [v.name, ...v.parts].join(';'); }
+// the bridge reads one command per line: long lists go in several commands
+function chunks(items, max = 700) { const out = []; let cur = []; let len = 0; for (const it of items) { if (cur.length && len + it.length > max) { out.push(cur); cur = []; len = 0; } cur.push(it); len += it.length + 1; } if (cur.length) out.push(cur); return out; }
+async function sendItems(cmd, items, by) {
+  const dl = require('./deathlog'); let ok = 0, fail = 0, last = null;
+  for (const part of chunks(items)) { last = await dl.sendCommand({ ...cmd, items: part }, { by }); if (last.status !== 'done') break; ok += last.ok; fail += last.fail; }
+  return last && last.status === 'done' ? { status: 'done', ok, fail } : { ...(last || {}), ok, fail };
+}
+// a vehicle spawned for a player stands a few metres away, not on top of them
+const beside = (p) => { const h = (p.heading || 0) * Math.PI / 180; return { x: p.x + Math.sin(h) * 6, z: p.z + Math.cos(h) * 6 }; };
+// spawn at a map point (nobody needed): an item, a kit or a vehicle
+async function spawnAt({ x, z, item, count, kit, vehicle }, by = 'app') {
+  if (!isFinite(x) || !isFinite(z)) throw new Error('No position.');
+  const items = vehicle ? [vehicleSpec(vehicle)] : kit ? kitItems(kit) : expand([`${String(item || '').trim()} x${Number(count) || 1}`]);
+  const r = said(await sendItems({ type: 'spawn', id: '-', pos: [Number(x), Number(z)] }, items, by), 'spawn');
+  const what = vehicle || (kit ? 'kit ' + kit : `${Number(count) || 1} × ${item}`);
+  emitRef('console', { source: 'admin', line: `Spawned ${what} at ${Math.round(x)}, ${Math.round(z)}: ${r.ok} item(s)${r.fail ? `, ${r.fail} failed` : ''}` });
+  try { require('./audit').log('app', by, 'admin:spawn', `${what} at ${Math.round(x)}, ${Math.round(z)}`); } catch { /* ignore */ }
+  return r;
+}
+
 function find(id) { const p = players().players.find(x => x.id === id || x.steam === id); if (!p) throw new Error('That player is not online.'); return p; }
 
 // RCon's player number for a live player (by name; BattlEye knows no Steam or DayZ ids)
@@ -68,11 +129,12 @@ async function act(action, id, args = {}, by = 'app') {
     case 'kill': { const r = said(await dl.sendCommand({ type: 'kill', id: p.id }, { by }), 'kill'); log('killed'); return r; }
     case 'god': { const on = !!args.on; const r = said(await dl.sendCommand({ type: 'god', id: p.id, what: on ? 'on' : 'off' }, { by }), 'god mode'); log(`god mode ${on ? 'on' : 'off'}`); return r; }
     case 'give': {
-      const cls = String(args.item || '').trim(); const n = Math.max(1, Math.min(50, Number(args.count) || 1));
-      if (!/^[A-Za-z0-9_]+$/.test(cls)) throw new Error('Give a class name, for example AKM or BandageDressing.');
-      const r = said(await dl.sendCommand({ type: 'give', id: p.id, items: Array(n).fill(cls) }, { by }), 'give');
-      log(`given ${r.ok} × ${cls}${r.fail ? ` (${r.fail} failed: is the class name right?)` : ''}`); return r;
+      const items = expand([`${String(args.item || '').trim()} x${Math.max(1, Math.min(50, Number(args.count) || 1))}`]);
+      const r = said(await sendItems({ type: 'give', id: p.id }, items, by), 'give');
+      log(`given ${r.ok} item(s) of ${args.item}${r.fail ? ` (${r.fail} failed: is the class name right?)` : ''}`); return r;
     }
+    case 'kit': { const r = said(await sendItems({ type: 'give', id: p.id }, kitItems(args.kit), by), 'kit'); log(`given kit ${args.kit}: ${r.ok} item(s)${r.fail ? `, ${r.fail} failed` : ''}`); return r; }
+    case 'vehicle': { const at = beside(p); const r = await spawnAt({ ...at, vehicle: args.vehicle }, by); log(`spawned ${args.vehicle} next to them`); return r; }
     case 'refund': {
       const d = dl.forPlayer(p.id, 1)[0] || dl.forPlayer(p.steam, 1)[0]; if (!d) throw new Error(`No recorded death for ${p.name}.`);
       const r = await dl.refund(d.id, { by }); if (r.status === 'done' && r.ok > 0) log(`refunded ${r.ok}/${r.items} items from death #${d.id}`); return { ...said(r, 'refund'), deathId: d.id };
@@ -95,4 +157,4 @@ async function act(action, id, args = {}, by = 'app') {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, players, act };
+module.exports = { init, players, act, kits, saveKit, deleteKit, vehicles, spawnAt };

@@ -192,6 +192,44 @@ class DZAT_Bridge
 			p.GetStatEnergy().Set(p.GetStatEnergy().GetMax());
 		}
 	}
+	// a spawned item at its best: full health, full quantity, full magazine
+	static void Fill(EntityAI e)
+	{
+		e.SetHealth01("", "", 1.0);
+		ItemBase fib = ItemBase.Cast(e);
+		if (fib && fib.HasQuantity()) fib.SetQuantityMax();
+		Magazine fmag = Magazine.Cast(e);
+		if (fmag) fmag.ServerSetAmmoCount(fmag.GetAmmoMax());
+		// a vehicle ready to drive: every fluid full (its parts are attached by AttachParts)
+		CarScript fcar = CarScript.Cast(e);
+		if (fcar)
+		{
+			fcar.Fill(CarFluid.FUEL, fcar.GetFluidCapacity(CarFluid.FUEL));
+			fcar.Fill(CarFluid.OIL, fcar.GetFluidCapacity(CarFluid.OIL));
+			fcar.Fill(CarFluid.BRAKE, fcar.GetFluidCapacity(CarFluid.BRAKE));
+			fcar.Fill(CarFluid.COOLANT, fcar.GetFluidCapacity(CarFluid.COOLANT));
+		}
+	}
+	// "Parent;Attachment;Attachment": the rest go onto the parent (attached, else into it), else next to it.
+	// Returns how many of the parts exist afterwards; parent is spawned by the caller.
+	static int AttachParts(EntityAI parent, array<string> parts, PlayerBase holder)
+	{
+		int made = 0;
+		for (int a = 1; a < parts.Count(); a++)
+		{
+			if (parts[a] == "") continue;
+			EntityAI att = parent.GetInventory().CreateAttachment(parts[a]);
+			if (!att) att = parent.GetInventory().CreateInInventory(parts[a]);
+			if (!att && holder) att = holder.GetInventory().CreateInInventory(parts[a]);
+			if (!att) att = EntityAI.Cast(GetGame().CreateObjectEx(parts[a], parent.GetPosition(), ECE_PLACE_ON_SURFACE));
+			if (att)
+			{
+				Fill(att);
+				made++;
+			}
+		}
+		return made;
+	}
 	static PlayerBase FindPlayer(array<Man> players, string id)
 	{
 		for (int j = 0; j < players.Count(); j++)
@@ -210,6 +248,39 @@ class DZAT_Bridge
 		if (f.Count() < 7) return;
 		string nonce = f[0];
 		string type = f[1];
+		// at a map point, nobody needed: x = f[4], z = f[5], items = f[6] (each "Parent;Attachment;…")
+		if (type == "spawn")
+		{
+			if (f[4] == "-" || f[5] == "-")
+			{
+				Append(DIR + "/results.log", nonce + "|badpos|0|0");
+				return;
+			}
+			array<string> sitems = new array<string>();
+			f[6].Split(",", sitems);
+			int sok = 0;
+			int sfail = 0;
+			for (int si = 0; si < sitems.Count(); si++)
+			{
+				array<string> sparts = new array<string>();
+				sitems[si].Split(";", sparts);
+				if (sparts.Count() == 0 || sparts[0] == "" || sparts[0] == "-") continue;
+				vector sp = Vector(f[4].ToFloat() + Math.RandomFloat(-1.0, 1.0), 0, f[5].ToFloat() + Math.RandomFloat(-1.0, 1.0));
+				sp[1] = GetGame().SurfaceY(sp[0], sp[2]);
+				EntityAI sent = EntityAI.Cast(GetGame().CreateObjectEx(sparts[0], sp, ECE_PLACE_ON_SURFACE));
+				if (!sent)
+				{
+					sfail = sfail + sparts.Count();
+					continue;
+				}
+				Fill(sent);
+				int sat = AttachParts(sent, sparts, null);
+				sok = sok + 1 + sat;
+				sfail = sfail + sparts.Count() - 1 - sat;
+			}
+			Append(DIR + "/results.log", nonce + "|done|" + sok.ToString() + "|" + sfail.ToString());
+			return;
+		}
 		PlayerBase target = FindPlayer(players, f[2]);
 		if (!target || !target.IsAlive())
 		{
@@ -304,7 +375,7 @@ class DZAT_Bridge
 			Append(DIR + "/results.log", nonce + "|done|1|0");
 			return;
 		}
-		// into the inventory where it fits, otherwise at the feet; f[6] = class,class,...
+		// into the inventory where it fits, otherwise at the feet; f[6] = item,item,... each "Parent;Attachment;…"
 		if (type == "give")
 		{
 			array<string> gitems = new array<string>();
@@ -313,11 +384,20 @@ class DZAT_Bridge
 			int gfail = 0;
 			for (int gi = 0; gi < gitems.Count(); gi++)
 			{
-				if (gitems[gi] == "" || gitems[gi] == "-") continue;
-				EntityAI gent = target.GetInventory().CreateInInventory(gitems[gi]);
-				if (!gent) gent = EntityAI.Cast(GetGame().CreateObjectEx(gitems[gi], target.GetPosition(), ECE_PLACE_ON_SURFACE));
-				if (gent) gok++;
-				else gfail++;
+				array<string> gparts = new array<string>();
+				gitems[gi].Split(";", gparts);
+				if (gparts.Count() == 0 || gparts[0] == "" || gparts[0] == "-") continue;
+				EntityAI gent = target.GetInventory().CreateInInventory(gparts[0]);
+				if (!gent) gent = EntityAI.Cast(GetGame().CreateObjectEx(gparts[0], target.GetPosition(), ECE_PLACE_ON_SURFACE));
+				if (!gent)
+				{
+					gfail = gfail + gparts.Count();
+					continue;
+				}
+				Fill(gent);
+				int gat = AttachParts(gent, gparts, target);
+				gok = gok + 1 + gat;
+				gfail = gfail + gparts.Count() - 1 - gat;
 			}
 			Append(DIR + "/results.log", nonce + "|done|" + gok.ToString() + "|" + gfail.ToString());
 			return;

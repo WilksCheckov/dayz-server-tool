@@ -289,7 +289,7 @@ async function ensureMapImage(force) {
   catch (e) { if (/placeholder tiles|no map to build from/i.test(e.message)) { showMapNotice(mapState.info && mapState.info.noClientText || e.message); if (force) toast('This PC has no DayZ client to build the map from; see the note on the map.', true); } else toast(e.message, true); }
   if (mapState.info && mapState.info.image) showMapNotice('');
 }
-function mapLive(on) { clearInterval(adm.timer); adm.timer = on ? setInterval(pollLive, 1500) : null; if (on) pollLive(); clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) { mapState.players.at = 0; scheduleDraw(); } else mapLive(false); }, 5000); }
+function mapLive(on) { if (on) loadKits(); clearInterval(adm.timer); adm.timer = on ? setInterval(pollLive, 1500) : null; if (on) pollLive(); clearInterval(mapLiveTimer); mapLiveTimer = null; if (on) mapLiveTimer = setInterval(() => { if (document.querySelector('#page-map.active')) { mapState.players.at = 0; scheduleDraw(); } else mapLive(false); }, 5000); }
 function showPlayerPopup(r) {
   const body = `<div class="muted mono">${esc(r.id || '')}${r.steamId ? '<br>Steam64 ' + esc(r.steamId) : ''}</div>
     <div class="grid-2 tight pdb-kv"><div><span class="muted">Status</span><br>${r.online ? 'online' : 'last seen ' + fmtDate(r.lastSeen)}</div><div><span class="muted">Position</span><br>${Math.round(r.lastPos.x)}, ${Math.round(r.lastPos.z)}</div>
@@ -298,7 +298,8 @@ function showPlayerPopup(r) {
   showModal(r.name, body, [{ label: 'Open in Database', value: 'db', primary: true }, { label: 'Close', value: false }]).then(v => { if (v === 'db') { pdbSelected = r.key; showPage('database'); } });
 }
 // ----- live admin: players online now, their actions -----
-const adm = { live: null, sel: null, pickTp: null, follow: false, timer: null };
+const adm = { live: null, sel: null, pickTp: null, follow: false, timer: null, kits: [], vehicles: [] };
+async function loadKits() { try { [adm.kits, adm.vehicles] = await Promise.all([ipc.invoke('live:kits'), ipc.invoke('live:vehicles')]); } catch { /* no mission yet */ } }
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
 const livePlayer = (id) => adm.live && adm.live.available ? adm.live.players.find(p => p.id === id) : null;
 function liveAt(c, px, py) { if (!adm.live || !adm.live.available) return null; let best = null, bd = 9; for (const p of adm.live.players) { const [x, y] = toScreen(c, p.x, p.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = p; } } return best; }
@@ -334,7 +335,7 @@ function renderAdmin() {
   if (!s) { el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = `<b>${esc(s.name)}</b><div class="muted">${Math.round(s.x)}, ${Math.round(s.z)} · health ${Math.round(s.health * 100)}% · blood ${Math.round(s.blood)}${s.vehicle ? ' · in ' + esc(s.vehicle) : ''}${s.god ? ' · god mode' : ''}</div>
-    <div class="row gap"><button class="btn small" data-a="heal">Heal</button><button class="btn small" data-a="tpmap" title="Then click the map where they should go">Teleport…</button><button class="btn small" data-a="refund">Refund</button><button class="btn small" data-a="give">Give…</button><button class="btn small" data-a="menu">More ▾</button></div>
+    <div class="row gap"><button class="btn small" data-a="heal">Heal</button><button class="btn small" data-a="tpmap" title="Then click the map where they should go">Teleport…</button><button class="btn small" data-a="refund">Refund</button><button class="btn small" data-a="give">Give…</button><button class="btn small" data-a="kit">Kit ▾</button><button class="btn small" data-a="menu">More ▾</button></div>
     <label class="check"><input type="checkbox" id="admFollow" ${adm.follow ? 'checked' : ''}> Follow on the map</label>`;
 }
 async function admAct(action, p, args = {}) {
@@ -342,7 +343,8 @@ async function admAct(action, p, args = {}) {
     const r = await ipc.invoke('live:act', action, p.id, args);
     if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet; it finishes in a moment.');
     const msg = { heal: 'healed', tp: 'teleported', tpto: 'teleported', bring: 'brought over', kill: 'killed', god: args.on ? 'is in god mode' : 'is no longer in god mode', tpdeath: 'teleported to their last death', message: 'messaged', kick: 'kicked', ban: 'banned' }[action];
-    if (action === 'give') toast(`Gave ${p.name} ${r.ok} × ${args.item}${r.fail ? ` (${r.fail} failed: is the class name right?)` : ''}`, !r.ok);
+    if (action === 'give' || action === 'kit') toast(`Gave ${p.name} ${r.ok} item(s)${action === 'kit' ? ' from kit ' + args.kit : ' of ' + args.item}${r.fail ? ` (${r.fail} failed: is every class name right?)` : ''}`, !r.ok);
+    else if (action === 'vehicle') toast(r.ok ? `${args.vehicle} is ready next to ${p.name} (${r.ok} part(s)${r.fail ? `, ${r.fail} failed` : ''})` : `${args.vehicle} could not be spawned`, !r.ok);
     else if (action === 'refund') toast(r.ok ? `Refunded ${r.ok} of ${r.items} items to ${p.name} (death #${r.deathId})` : `Nothing could be spawned for ${p.name}`, !r.ok);
     else toast(`${p.name} ${msg}`);
     pollLive();
@@ -379,6 +381,8 @@ function playerMenu(p) {
     { sep: true },
     { label: 'Refund their last death…', run: async () => { if (await ask('Refund last death', `<p>Spawn the gear ${esc(p.name)} had at their last recorded death, pristine, at their feet?</p>`, 'Refund')) admAct('refund', p); } },
     { label: 'Give item…', run: () => giveDialog(p) },
+    { label: 'Give kit', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => admAct('kit', p, { kit: k.name }) })), { label: 'Manage kits…', run: () => kitManager() }] },
+    { label: 'Spawn a vehicle next to them', sub: adm.vehicles.map(v => ({ label: v.name, run: () => admAct('vehicle', p, { vehicle: v.name }) })) },
     { label: p.god ? 'Turn god mode off' : 'Turn god mode on', run: () => admAct('god', p, { on: !p.god }) },
     { sep: true },
     { label: 'Message…', run: async () => { if (await ask(`Message ${p.name}`, '<input id="admMsg" class="input" placeholder="Only they see it">', 'Send')) admAct('message', p, { text: $('admMsg').value }); } },
@@ -395,16 +399,49 @@ async function giveDialog(p) {
   const ok = await ask(`Give ${p.name} an item`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. BandageDressing"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label><p class="muted small">Goes into their inventory where it fits, otherwise at their feet.</p>`, 'Give');
   if (ok) admAct('give', p, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1 });
 }
+async function spawnHere(w, args, what) {
+  try { const r = await ipc.invoke('live:spawnAt', { x: w[0], z: w[1], ...args }); if (r.status === 'pending') return toast('The game picked it up but has not answered yet.'); toast(r.ok ? `${what}: spawned ${r.ok} item(s) at ${Math.round(w[0])}, ${Math.round(w[1])}${r.fail ? ` (${r.fail} failed)` : ''}` : `${what} could not be spawned (is the class name right?)`, !r.ok); }
+  catch (e) { toast(e.message, true); }
+}
+async function spawnItemDialog(w) {
+  await loadLootItems();
+  const ok = await ask(`Spawn at ${Math.round(w[0])}, ${Math.round(w[1])}`, `<label class="field">Item class <input id="admItem" class="input" list="admItems" placeholder="e.g. AKM; AK_WoodBttstck"></label><datalist id="admItems">${(lootItems || []).map(i => `<option value="${esc(i.name)}">`).join('')}</datalist><label class="field">How many <input id="admCount" class="input short" type="number" min="1" max="50" value="1"></label>`, 'Spawn');
+  if (ok) spawnHere(w, { item: $('admItem').value.trim(), count: Number($('admCount').value) || 1 }, $('admItem').value.trim());
+}
+// Kits: saved item lists, one item per line
+async function kitManager(edit = null) {
+  await loadKits(); await loadLootItems();
+  const k = edit ? adm.kits.find(x => x.name === edit) : null;
+  const list = adm.kits.map(x => `<div class="row gap"><span class="grow">${esc(x.name)} <span class="muted">(${x.items} line${x.items === 1 ? '' : 's'})</span></span><button class="btn small kit-edit" data-name="${esc(x.name)}">Edit</button><button class="btn small danger kit-del" data-name="${esc(x.name)}">Delete</button></div>`).join('') || '<p class="muted">No kits yet.</p>';
+  const body = `<div class="kit-list">${list}</div><div class="card-title mt">${k ? 'Edit ' + esc(k.name) : 'New kit'}</div>
+    <label class="field">Name <input id="kitName" class="input" value="${esc(k ? k.name : '')}" placeholder="e.g. Starter, Sniper, Medic"></label>
+    <label class="field">Items, one per line <textarea id="kitLines" class="input mono" rows="8" placeholder="BandageDressing x4&#10;AKM; AK_WoodBttstck; AK_WoodHndgrd; Mag_AKM_30Rnd&#10;Mag_AKM_30Rnd x3&#10;TacticalBaconCan x2">${esc(k ? (k.lines || []).join('\n') : '')}</textarea></label>
+    <p class="muted small">"Class x3" gives three. "Parent; Attachment; …" fits the attachments onto the item (stock, handguard, optic, magazine…). Everything spawns pristine and full.</p>`;
+  const p = showModal('Kits', body, [{ label: 'Save kit', value: 'save', primary: true }, { label: 'Close', value: null }]);
+  setTimeout(() => {
+    for (const b of document.querySelectorAll('.kit-edit')) b.onclick = () => { $('modalActions').lastElementChild.click(); kitManager(b.dataset.name); };
+    for (const b of document.querySelectorAll('.kit-del')) b.onclick = async () => { await ipc.invoke('live:deleteKit', b.dataset.name); toast(`Kit ${b.dataset.name} deleted`); $('modalActions').lastElementChild.click(); kitManager(); };
+  }, 0);
+  if ((await p) !== 'save') return;
+  try { const r = await ipc.invoke('live:saveKit', { name: $('kitName').value, lines: $('kitLines').value, oldName: k ? k.name : null }); adm.kits = r.kits; toast(r.unknown.length ? `Saved. Not in your economy files (fine for mod items, otherwise check the spelling): ${r.unknown.join(', ')}` : 'Kit saved', !!r.unknown.length); }
+  catch (e) { toast(e.message, true); }
+}
 function pointMenu(w) {
   const s = livePlayer(adm.sel); const all = adm.live && adm.live.available ? adm.live.players : [];
   return [
     { header: `${Math.round(w[0])}, ${Math.round(w[1])}` },
     ...(s ? [{ label: `Teleport ${s.name} here`, run: () => admAct('tp', s, { x: w[0], z: w[1] }) }] : []),
     { label: 'Teleport a player here', sub: all.map(o => ({ label: o.name, run: () => admAct('tp', o, { x: w[0], z: w[1] }) })) },
+    { sep: true },
+    { label: 'Spawn item here…', run: () => spawnItemDialog(w) },
+    { label: 'Spawn kit here', sub: [...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => spawnHere(w, { kit: k.name }, 'Kit ' + k.name) })), { label: 'Manage kits…', run: () => kitManager() }] },
+    { label: 'Spawn vehicle here', sub: adm.vehicles.map(v => ({ label: v.name, run: () => spawnHere(w, { vehicle: v.name }, v.name) })) },
+    { sep: true },
     { label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Position copied'); } }
   ];
 }
 $('admSearch').addEventListener('input', renderAdmin);
+$('btnKits').onclick = () => kitManager();
 $('admList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (it && it.dataset.id) admSelect(it.dataset.id); });
 $('admList').addEventListener('dblclick', e => { const it = e.target.closest('.ip-item'); const p = it && livePlayer(it.dataset.id); if (p) { admSelect(p.id); centreOn(p); } });
 $('admList').addEventListener('contextmenu', e => { const it = e.target.closest('.ip-item'); const p = it && livePlayer(it.dataset.id); if (!p) return; e.preventDefault(); admSelect(p.id); showCtx(playerMenu(p), e.clientX, e.clientY); });
@@ -415,6 +452,7 @@ $('admSel').addEventListener('click', e => {
   if (a === 'tpmap') showCtx(playerMenu(p).filter(x => x.label && /^Teleport/.test(x.label)), r.left, r.bottom + 2);
   if (a === 'refund') playerMenu(p).find(x => x.label === 'Refund their last death…').run();
   if (a === 'give') giveDialog(p);
+  if (a === 'kit') showCtx([...adm.kits.map(k => ({ label: `${k.name} (${k.items})`, run: () => admAct('kit', p, { kit: k.name }) })), { sep: true }, { label: 'Manage kits…', run: () => kitManager() }], r.left, r.bottom + 2);
   if (a === 'menu') showCtx(playerMenu(p), r.left, r.bottom + 2);
 });
 $('admSel').addEventListener('change', e => { if (e.target.id === 'admFollow') { adm.follow = e.target.checked; const p = livePlayer(adm.sel); if (adm.follow && p) centreOn(p); } });
