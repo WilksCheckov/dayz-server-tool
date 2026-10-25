@@ -27,7 +27,7 @@ function players() {
   for (const l of text.split(/\r?\n/)) {
     if (!l || l[0] === '#') continue;
     const f = l.split('|'); if (f.length < 12) continue;
-    out.push({ id: f[0], steam: f[1], name: f[2], x: +f[3], y: +f[4], z: +f[5], heading: +f[6], health: +f[7], blood: +f[8], alive: f[9] === 'true', vehicle: f[10] === '-' ? null : f[10], god: f[11] === 'true' });
+    out.push({ id: f[0], steam: f[1], name: f[2], x: +f[3], y: +f[4], z: +f[5], heading: +f[6], health: +f[7], blood: +f[8], alive: f[9] === 'true', vehicle: f[10] === '-' ? null : f[10], god: f[11] === 'true', frozen: f[12] === 'true', invisible: f[13] === 'true' });
   }
   const data = { available: true, at: st.mtimeMs, players: out };
   last = { mtime: st.mtimeMs, data };
@@ -195,6 +195,17 @@ async function act(action, id, args = {}, by = 'app') {
       const d = dl.forPlayer(p.id, 1)[0] || dl.forPlayer(p.steam, 1)[0]; if (!d) throw new Error(`No recorded death for ${p.name}.`);
       const r = said(await dl.teleportToDeath(d.id, { by }), 'teleport'); log(`teleported to their death #${d.id}`, r); return r;
     }
+    case 'afflict': {
+      const { afflictionLabel } = require('./admin-actions'); const what = String(args.what || '').trim().toLowerCase(); const label = afflictionLabel(what);
+      if (!label) throw new Error('Unknown affliction: ' + what);
+      const res = await dl.sendCommand({ type: 'afflict', id: p.id, what }, { by });
+      if (res.status === 'nobleed') throw new Error('The game could not add a wound to them right now.');
+      const r = said(res, 'affliction'); log(label.toLowerCase(), r); return r;
+    }
+    case 'freeze': { const on = !!args.on; const r = said(await dl.sendCommand({ type: 'freeze', id: p.id, what: on ? 'on' : 'off' }, { by }), 'freeze'); log(on ? 'frozen in place' : 'unfrozen', r); return r; }
+    case 'invisible': { const on = !!args.on; const r = said(await dl.sendCommand({ type: 'invisible', id: p.id, what: on ? 'on' : 'off' }, { by }), 'invisible'); log(on ? 'made invisible' : 'visible again', r); return r; }
+    case 'strip': { const r = said(await dl.sendCommand({ type: 'strip', id: p.id }, { by }), 'strip'); log(`stripped: ${r.ok} item(s) dropped`, r); return r; }
+    case 'respawn': { const r = said(await dl.sendCommand({ type: 'respawn', id: p.id }, { by }), 'respawn'); log('respawned (killed, body removed)', r); return r; }
     case 'message': { const msg = String(args.text || '').trim(); if (!msg) throw new Error('Write a message.'); const m = await rconNum(p); await require('./rcon').say(msg, m.num); log(`messaged: ${msg}`, { status: 'done' }); return { status: 'done' }; }
     case 'kick': { const m = await rconNum(p); await require('./rcon').kick(m.num, args.reason || 'Kicked by an admin'); log(`kicked${args.reason ? ': ' + args.reason : ''}`, { status: 'done' }); return { status: 'done' }; }
     case 'ban': {

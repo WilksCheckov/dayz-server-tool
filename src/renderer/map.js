@@ -301,9 +301,9 @@ function showPlayerPopup(r) {
   showModal(r.name, body, [{ label: 'Open in Database', value: 'db', primary: true }, { label: 'Close', value: false }]).then(v => { if (v === 'db') { pdbSelected = r.key; showPage('database'); } });
 }
 // ----- live admin: players online now, their actions -----
-const adm = { live: null, world: null, sel: null, selVeh: null, pickTp: null, pickVtp: null, follow: false, timer: null, kits: [], vehicles: [] };
+const adm = { live: null, world: null, sel: null, selVeh: null, pickTp: null, pickVtp: null, follow: false, timer: null, kits: [], vehicles: [], afflictions: [] };
 const BREAK_KINDS = [['tyres', 'Flat tyres'], ['fuel', 'Drain the fuel'], ['engine', 'Ruin the engine'], ['battery', 'Ruin the battery'], ['all', 'Everything']];
-async function loadKits() { try { [adm.kits, adm.vehicles] = await Promise.all([ipc.invoke('live:kits'), ipc.invoke('live:vehicles')]); } catch { /* no mission yet */ } }
+async function loadKits() { try { [adm.kits, adm.vehicles] = await Promise.all([ipc.invoke('live:kits'), ipc.invoke('live:vehicles')]); } catch { /* no mission yet */ } if (!adm.afflictions.length) try { adm.afflictions = (await ipc.invoke('live:actions')).AFFLICTIONS || []; } catch { /* older main */ } }
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
 const livePlayer = (id) => adm.live && adm.live.available ? adm.live.players.find(p => p.id === id) : null;
 function liveAt(c, px, py) { if (!adm.live || !adm.live.available) return null; let best = null, bd = 9; for (const p of adm.live.players) { const [x, y] = toScreen(c, p.x, p.z); const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = p; } } return best; }
@@ -347,7 +347,8 @@ async function admAct(action, p, args = {}) {
   try {
     const r = await ipc.invoke('live:act', action, p.id, args);
     if (r && r.status === 'pending') return toast('The game picked it up but has not answered yet; it finishes in a moment.');
-    const msg = { heal: 'healed', tp: 'teleported', tpto: 'teleported', bring: 'brought over', kill: 'killed', god: args.on ? 'is in god mode' : 'is no longer in god mode', tpdeath: 'teleported to their last death', message: 'messaged', kick: 'kicked', ban: 'banned' }[action];
+    if (action === 'strip') { toast(`${p.name} stripped: ${r.ok} item(s) dropped at their feet`); pollLive(); return; }
+    const msg = { heal: 'healed', tp: 'teleported', tpto: 'teleported', bring: 'brought over', kill: 'killed', god: args.on ? 'is in god mode' : 'is no longer in god mode', tpdeath: 'teleported to their last death', message: 'messaged', kick: 'kicked', ban: 'banned', afflict: 'afflicted: ' + ((adm.afflictions.find(a => a[0] === args.what) || [, args.what])[1]).toLowerCase(), freeze: args.on ? 'is frozen in place' : 'can move again', invisible: args.on ? 'is invisible' : 'is visible again', respawn: 'killed and their body removed' }[action];
     if (action === 'give' || action === 'kit') toast(`Gave ${p.name} ${r.ok} item(s)${action === 'kit' ? ' from kit ' + args.kit : ' of ' + args.item}${r.fail ? ` (${r.fail} failed: is every class name right?)` : ''}`, !r.ok);
     else if (action === 'vehicle') toast(r.ok ? `${args.vehicle} is ready next to ${p.name} (${r.ok} part(s)${r.fail ? `, ${r.fail} failed` : ''})` : `${args.vehicle} could not be spawned`, !r.ok);
     else if (action === 'refund') toast(r.ok ? `Refunded ${r.ok} of ${r.items} items to ${p.name} (death #${r.deathId})${r.body === 'body' ? ' · body removed' : r.body === 'nobody' ? ' · no body found to remove' : ''}` : `Nothing could be spawned for ${p.name}`, !r.ok);
@@ -400,11 +401,23 @@ function playerMenu(p) {
     { label: 'Message…', run: async () => { if (await ask(`Message ${p.name}`, '<input id="admMsg" class="input" placeholder="Only they see it">', 'Send')) admAct('message', p, { text: $('admMsg').value }); } },
     { label: 'Kick…', danger: true, run: () => withReason(`Kick ${p.name}?`, '<p class="muted">The reason is shown to them.</p>', 'Kick', (why) => admAct('kick', p, { reason: why })) },
     { label: 'Ban…', danger: true, run: () => withReason(`Ban ${p.name}?`, `<p>Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them now.</p>`, 'Ban', (why) => admAct('ban', p, { reason: why })) },
+    { label: 'Afflict', sub: afflictMenu(p) },
+    { label: p.frozen ? 'Unfreeze' : 'Freeze in place', run: () => withReason(`${p.frozen ? 'Unfreeze' : 'Freeze'} ${p.name}`, p.frozen ? '' : '<p class="muted">They cannot move until unfrozen (survives a reconnect).</p>', 'OK', (why) => admAct('freeze', p, { on: !p.frozen, reason: why })) },
+    { label: p.invisible ? 'Make visible again' : 'Make invisible', run: () => withReason(`${p.invisible ? 'Show' : 'Hide'} ${p.name}`, '', 'OK', (why) => admAct('invisible', p, { on: !p.invisible, reason: why })) },
+    { label: 'Strip all gear…', danger: true, run: () => withReason(`Strip ${p.name}?`, '<p>Everything they carry drops at their feet.</p>', 'Strip', (why) => admAct('strip', p, { reason: why })) },
+    { label: 'Respawn (kill, body removed)…', danger: true, run: () => withReason(`Respawn ${p.name}?`, '<p>Their character dies and the body with all its gear is removed a moment later, so they start fresh.</p>', 'Respawn', (why) => admAct('respawn', p, { reason: why })) },
     { label: 'Kill…', danger: true, run: () => withReason(`Kill ${p.name}?`, '<p>Their character dies where it stands.</p>', 'Kill', (why) => admAct('kill', p, { reason: why })) },
     { sep: true },
     { label: 'Centre the map on them', run: () => centreOn(p) },
     { label: 'Open in the database', run: () => { pdbSelected = p.id; showPage('database'); } }
   ];
+}
+function afflictMenu(p) {
+  const items = []; let group = '';
+  for (const [what, label, grp] of adm.afflictions) { if (grp !== group) { group = grp; items.push({ header: grp }); } items.push({ label, run: () => withReason(`${label} · ${p.name}`, '', 'Apply', (why) => admAct('afflict', p, { what, reason: why })) }); }
+  items.push({ sep: true });
+  for (const [kind, label] of [['health', 'Health to a percentage…'], ['blood', 'Blood to a percentage…'], ['bleed', 'Bleeding wounds, how many…']]) items.push({ label, run: () => withReason(`${label.replace('…', '')} · ${p.name}`, `<label class="field">${kind === 'bleed' ? 'Wounds (1–8)' : 'Percent (5–100)'} <input id="admAmt" class="input short" type="number" value="${kind === 'bleed' ? 3 : 25}" min="${kind === 'bleed' ? 1 : 5}" max="${kind === 'bleed' ? 8 : 100}"></label>`, 'Apply', (why) => admAct('afflict', p, { what: `${kind}:${Math.round(Number($('admAmt').value) || 0)}`, reason: why })) });
+  return items;
 }
 async function giveDialog(p) {
   await loadLootItems();

@@ -86,6 +86,7 @@ function render() {
   $('nav').onclick = e => { const b = e.target.closest('button'); if (b) { page = b.dataset.p; render(); } };
   if (can('requests.approve')) api('requests').then(r => { const n = r.requests.filter(x => x.status === 'pending').length; const b = $('nav').querySelector('[data-p="requests"]'); if (b && n) b.innerHTML = 'Requests <span class="badge warn">' + n + '</span>'; }).catch(() => {});
   $('hdUser').textContent = `${me.name} · ${me.groups.join(', ') || 'no group'}`; $('btnOut').hidden = false; $('btnPw').hidden = false; $('hdInst').textContent = me.instance; $('hdSearch').hidden = !can('players.view');
+  if (can('admin.afflict') && !AFFLICT.length) api('map').then(i => { AFFLICT = i.afflictions || []; }).catch(() => {});
   const fn = { dashboard: pageDashboard, players: pagePlayers, map: pageMap, lists: pageLists, deaths: pageDeaths, tickets: pageTickets, logs: pageLogs, audit: pageAudit, users: pageUsers, requests: pageRequests }[page];
   if (!fn) { main.innerHTML = '<div class="card">Your account has no permissions yet. Ask whoever manages the portal.</div>'; return; }
   fn(main).catch(e => { main.innerHTML = `<div class="card">${esc(e.message)}</div>`; });
@@ -109,7 +110,7 @@ async function pageDashboard(main) {
   await draw(); timer = setInterval(() => draw().catch(() => {}), 5000);
 }
 // ---------- players ----------
-let live = null, world = null;
+let live = null, world = null, AFFLICT = [];
 const BREAK_KINDS = [['tyres', 'Flat tyres'], ['fuel', 'Drain the fuel'], ['engine', 'Ruin the engine'], ['battery', 'Ruin the battery'], ['all', 'Everything']];
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
 async function act(action, p, args = {}) {
@@ -149,6 +150,13 @@ function playerMenu(p) {
   if (can('players.message')) items.push({ label: 'Message…', run: async () => { const ok = await modal(`Message ${p.name}`, '<label>Message (only they see it)</label><input id="mT" class="input">'); if (ok && $('mT').value.trim()) act('message', p, { text: $('mT').value.trim() }); } });
   if (can('players.kick')) items.push({ label: 'Kick…', danger: true, run: withWhy(`Kick ${p.name}?`, why => act('kick', p, { reason: why }), true, '<p class="muted small">The reason is shown to them.</p>') });
   if (can('players.ban')) items.push({ label: 'Ban…', danger: true, run: withWhy(`Ban ${p.name}?`, why => act('ban', p, { reason: why }), true, `<p class="muted small">Adds Steam64 ${esc(p.steam)} to ban.txt and kicks them.</p>`) });
+  if (can('admin.afflict')) {
+    for (const [what, label, grp] of AFFLICT) items.push({ label: `${grp}: ${label}`, run: withWhy(`${label} · ${p.name}`, why => act('afflict', p, { what, reason: why })) });
+    items.push({ label: p.frozen ? 'Unfreeze' : 'Freeze in place', run: withWhy(`${p.frozen ? 'Unfreeze' : 'Freeze'} ${p.name}`, why => act('freeze', p, { on: !p.frozen, reason: why })) });
+    items.push({ label: p.invisible ? 'Make visible again' : 'Make invisible', run: withWhy(`${p.invisible ? 'Show' : 'Hide'} ${p.name}`, why => act('invisible', p, { on: !p.invisible, reason: why })) });
+    items.push({ label: 'Strip all gear…', danger: true, run: withWhy(`Strip ${p.name}?`, why => act('strip', p, { reason: why }), true, '<p class="muted small">Everything they carry drops at their feet.</p>') });
+  }
+  if (can('admin.kill')) items.push({ label: 'Respawn (kill, body removed)…', danger: true, run: withWhy(`Respawn ${p.name}?`, why => act('respawn', p, { reason: why }), true, '<p class="muted small">They die and the body with its gear is removed a moment later.</p>') });
   if (can('admin.kill')) items.push({ label: 'Kill…', danger: true, run: withWhy(`Kill ${p.name}?`, why => act('kill', p, { reason: why })) });
   return items;
 }

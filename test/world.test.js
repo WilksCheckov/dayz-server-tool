@@ -13,7 +13,7 @@ const write = (name, lines) => fs.writeFileSync(path.join(dir, name), ['#begin|2
 function game(answer = 'done|1|0') { const tm = setInterval(() => { if (!fs.existsSync(q)) return; const line = fs.readFileSync(q, 'utf8').trim(); if (!line) return; fs.unlinkSync(q); const f = line.split('|'); game.last = f; fs.appendFileSync(res, `${f[0]}|${answer}\r\n`); clearInterval(tm); }, 100); }
 (async () => {
   const initc = fs.readFileSync(path.join(require('path').dirname(dl.bridgeStatus().file), 'init.c'), 'utf8');
-  t.ok('bridge v5 installed with the world size filled in', /bridge v5/.test(initc) && /static const float WORLD = 15360;/.test(initc) && !initc.includes('__DZAT_WORLD__') && /RunVehicle/.test(initc));
+  t.ok('bridge installed with the world size filled in', /bridge v\d+/.test(initc) && /static const float WORLD = 15360;/.test(initc) && !initc.includes('__DZAT_WORLD__') && /RunVehicle/.test(initc));
   write('players.txt', ['P1|7656P1|Bob|1000|10|2000|90|1|5000|true|-|false']);
   let W = live.world(); t.ok('no vehicles file: says the bridge is needed', !W.available && /bridge script v5/.test(W.reason), W.reason);
   write('vehicles.txt', ['1-2-3-4|OffroadHatchback|4500.5|200|10200.25|45|0.8|0.5|true|Bob|2|false', 't1|CivilianSedan|100|5|200|0|0.1|-|false|-|0|true']);

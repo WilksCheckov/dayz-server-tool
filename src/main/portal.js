@@ -29,7 +29,8 @@ const PERMS = [
   ['admin.kits', 'Give or spawn saved kits', 'In-game admin'],
   ['admin.vehicles', 'Spawn vehicles', 'In-game admin'],
   ['admin.god', 'God mode', 'In-game admin'],
-  ['admin.kill', 'Kill a player', 'In-game admin'],
+  ['admin.kill', 'Kill a player (and respawn: kill with the body removed)', 'In-game admin'],
+  ['admin.afflict', 'Afflictions and punishments: sickness, injuries, freeze, strip gear, invisible', 'In-game admin'],
   ['admin.refund', 'Refund a death', 'In-game admin'],
   ['deaths.view', 'Death log', 'Records'],
   ['tickets.view', 'See tickets', 'Records'],
@@ -41,7 +42,7 @@ const PERMS = [
 ];
 // what an action counts as for approval rules, blocked classes and daily limits
 const { CATEGORY, PERM: ACTION_PERM, VEHICLE_ACTIONS, LABEL: ACTION_LABEL } = require('./admin-actions');
-const CATEGORIES = [['refund', 'Refunds'], ['spawn', 'Items by class name'], ['kits', 'Kits'], ['vehicles', 'Vehicles'], ['teleport', 'Teleports'], ['heal', 'Heals'], ['god', 'God mode'], ['kill', 'Kills']];
+const CATEGORIES = [['refund', 'Refunds'], ['spawn', 'Items by class name'], ['kits', 'Kits'], ['vehicles', 'Vehicles'], ['teleport', 'Teleports'], ['heal', 'Heals'], ['afflict', 'Afflictions'], ['god', 'God mode'], ['kill', 'Kills']];
 const ALL = PERMS.map(p => p[0]);
 const DEFAULT_GROUPS = {
   owner: { name: 'Owner', perms: ALL, builtin: true },
@@ -59,11 +60,12 @@ function load() {
   db = { enabled: false, users: {}, groups: {}, sessions: {}, ...(jsonstore.readOr(file(), {}) || {}) };
   for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (!db.groups[id]) db.groups[id] = { ...g, perms: g.perms.slice() };
   // permissions added in a later version join the built-in groups that had them by default (your own groups are left alone)
-  const PERMS_VERSION = 3;
+  const PERMS_VERSION = 4;
   const was = db.permsVersion || 1;
   if (was < 2) for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
   // v3 split "give items, kits and vehicles" into three: whoever had it keeps all three; Owner and Admin may approve
   if (was < 3) { for (const g of Object.values(db.groups)) if ((g.perms || []).includes('admin.spawn')) g.perms = [...new Set([...g.perms, 'admin.kits', 'admin.vehicles'])]; for (const u of Object.values(db.users)) if ((u.allow || []).includes('admin.spawn')) u.allow = [...new Set([...u.allow, 'admin.kits', 'admin.vehicles'])]; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'requests.approve'])]; }
+  if (was < 4) { for (const g of Object.values(db.groups)) if ((g.perms || []).includes('admin.kill') && !g.builtin) g.perms = [...new Set([...g.perms, 'admin.afflict'])]; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.afflict'])]; }
   if (was < PERMS_VERSION) { db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save(); }
   db.requests = db.requests || []; db.usage = db.usage || {}; db.policy = { blockedClasses: [], ...(db.policy || {}) };
   return db;
@@ -359,7 +361,7 @@ async function api(route, b, url, user, need, by) {
       if (b.op === 'remove') { lists.remove(kind, b.id); al.record({ action: kind === 'ban' || kind === 'bebans' ? 'unban' : 'unlist', by, source: 'web', target: { name: b.name || b.id, steam: b.id }, details: `removed from ${lists.KINDS[kind].label}`, reason: String(b.reason || '').trim(), result: { status: 'done' } }); return lists.read(kind); }
       throw new Error('Unknown list operation.');
     }
-    case 'map': { need('players.view'); const i = require('./mission').mapInfo(); return { key: i.map, label: i.label, size: i.size, image: !!i.image, tiles: i.tiles ? { tile: i.tiles.tile, width: i.tiles.width, maxZ: i.tiles.maxZ, minZ: i.tiles.minZ } : null }; }
+    case 'map': { need('players.view'); const i = require('./mission').mapInfo(); return { afflictions: require('./admin-actions').AFFLICTIONS, key: i.map, label: i.label, size: i.size, image: !!i.image, tiles: i.tiles ? { tile: i.tiles.tile, width: i.tiles.width, maxZ: i.tiles.maxZ, minZ: i.tiles.minZ } : null }; }
     case 'deaths': { need('deaths.view'); const dl = require('./deathlog'); const tk = require('./tickets'); return dl.list({ q: q('q'), limit: Math.min(300, Number(q('limit')) || 100) }).map(r => ({ ...r, tickets: tk.forDeath(r.id) })); }
     case 'death': { need('deaths.view'); const r = require('./deathlog').get(Number(q('id'))); return r ? { ...r, tickets: require('./tickets').forDeath(r.id) } : null; }
     case 'refund': {

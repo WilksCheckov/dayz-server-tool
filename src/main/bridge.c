@@ -7,6 +7,11 @@ class DZAT_Bridge
 	static ref map<string, int> s_God = new map<string, int>();
 	static ref map<string, string> s_Last = new map<string, string>();
 	static ref map<string, int> s_Dead = new map<string, int>();
+	// players an admin froze or hid (by identity id), re-applied every tick so it survives a reconnect
+	static ref map<string, int> s_Frozen = new map<string, int>();
+	static ref map<string, int> s_Invisible = new map<string, int>();
+	// respawns: the body is removed a moment after the kill (by identity id → tick time of the kill)
+	static ref map<string, float> s_RespawnAt = new map<string, float>();
 	// the body of each player who died this session (by identity id), so a refund can remove it with its gear
 	static ref map<string, PlayerBase> s_Corpses = new map<string, PlayerBase>();
 	static const string DIR = "$profile:DayZAdminTools";
@@ -57,7 +62,7 @@ class DZAT_Bridge
 		return s;
 	}
 	// Live positions for the map: rewritten every 1.5 s, one line per player, framed by #begin / #end
-	// id|steam|name|x|y|z|heading|health01|blood|alive|vehicle|god
+	// id|steam|name|x|y|z|heading|health01|blood|alive|vehicle|god|frozen|invisible
 	static void WritePlayers(array<Man> players)
 	{
 		FileHandle fh = OpenFile(DIR + "/players.txt", FileMode.WRITE);
@@ -70,6 +75,9 @@ class DZAT_Bridge
 			string pid = p.GetIdentity().GetId();
 			bool god = s_God.Contains(pid);
 			if (god) p.SetAllowDamage(false);
+			bool frozen = s_Frozen.Contains(pid);
+			if (frozen && p.GetInputController()) p.GetInputController().OverrideMovementSpeed(true, 0);
+			bool invisible = s_Invisible.Contains(pid);
 			vector pos = p.GetPosition();
 			vector ori = p.GetOrientation();
 			string veh = "-";
@@ -84,6 +92,7 @@ class DZAT_Bridge
 			line = line + "|" + ori[0].ToString() + "|" + p.GetHealth01("", "").ToString();
 			line = line + "|" + p.GetHealth("GlobalHealth", "Blood").ToString() + "|" + BoolStr(p.IsAlive());
 			line = line + "|" + veh + "|" + BoolStr(god);
+			line = line + "|" + BoolStr(frozen) + "|" + BoolStr(invisible);
 			FPrintln(fh, line);
 		}
 		FPrintln(fh, "#end");
@@ -432,6 +441,103 @@ class DZAT_Bridge
 			p.GetStatEnergy().Set(p.GetStatEnergy().GetMax());
 		}
 	}
+	// disease agents by name (the eAgents bit values; the enum is not reachable from a mission script)
+	static int AgentOf(string name)
+	{
+		if (name == "cholera") return 1;
+		if (name == "influenza") return 2;
+		if (name == "salmonella") return 4;
+		if (name == "brain") return 8;
+		if (name == "food") return 16;
+		if (name == "chemical") return 32;
+		if (name == "wound") return 64;
+		if (name == "nerve") return 128;
+		if (name == "heavymetal") return 256;
+		return 0;
+	}
+	// what: bleed:n | legs | unconscious | health:pct | blood:pct | cold | hot | starve | dehydrate | wet | sick:name | clearsick
+	static string Afflict(PlayerBase p, string what)
+	{
+		array<string> kv = new array<string>();
+		what.Split(":", kv);
+		if (kv.Count() == 0) return "unknown";
+		string kind = kv[0];
+		string arg = "";
+		if (kv.Count() > 1) arg = kv[1];
+		if (kind == "bleed")
+		{
+			int n = arg.ToInt();
+			if (n < 1) n = 3;
+			if (n > 8) n = 8;
+			array<string> sel = new array<string>();
+			sel.Insert("LeftArm");
+			sel.Insert("RightArm");
+			sel.Insert("LeftLeg");
+			sel.Insert("RightLeg");
+			sel.Insert("Torso");
+			sel.Insert("Head");
+			if (!p.GetBleedingManagerServer()) return "nobleed";
+			for (int i = 0; i < n; i++) p.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection(sel[i % 6]);
+			return "done";
+		}
+		if (kind == "legs")
+		{
+			p.SetBrokenLegs(1);
+			return "done";
+		}
+		if (kind == "unconscious")
+		{
+			p.SetHealth("GlobalHealth", "Shock", 0);
+			return "done";
+		}
+		if (kind == "health" || kind == "blood")
+		{
+			float pct = arg.ToFloat() / 100.0;
+			if (pct < 0.05) pct = 0.05;
+			if (pct > 1.0) pct = 1.0;
+			if (kind == "health") p.SetHealth("", "", p.GetMaxHealth("", "") * pct);
+			else p.SetHealth("GlobalHealth", "Blood", p.GetMaxHealth("GlobalHealth", "Blood") * pct);
+			return "done";
+		}
+		if (kind == "cold")
+		{
+			p.GetStatHeatComfort().Set(p.GetStatHeatComfort().GetMin());
+			return "done";
+		}
+		if (kind == "hot")
+		{
+			p.GetStatHeatComfort().Set(p.GetStatHeatComfort().GetMax());
+			return "done";
+		}
+		if (kind == "starve")
+		{
+			p.GetStatEnergy().Set(0);
+			return "done";
+		}
+		if (kind == "dehydrate")
+		{
+			p.GetStatWater().Set(0);
+			return "done";
+		}
+		if (kind == "wet")
+		{
+			p.GetStatWet().Set(p.GetStatWet().GetMax());
+			return "done";
+		}
+		if (kind == "sick")
+		{
+			int agent = AgentOf(arg);
+			if (agent == 0) return "unknown";
+			p.InsertAgent(agent, 1000);
+			return "done";
+		}
+		if (kind == "clearsick")
+		{
+			p.RemoveAllAgents();
+			return "done";
+		}
+		return "unknown";
+	}
 	// a spawned item at its best: full health, full quantity, full magazine
 	static void Fill(EntityAI e)
 	{
@@ -560,6 +666,73 @@ class DZAT_Bridge
 		if (type == "heal")
 		{
 			Heal(target, f[3]);
+			Append(DIR + "/results.log", nonce + "|done|1|0");
+			return;
+		}
+		if (type == "afflict")
+		{
+			string ares = Afflict(target, f[3]);
+			if (ares == "done") Append(DIR + "/results.log", nonce + "|done|1|0");
+			else Append(DIR + "/results.log", nonce + "|" + ares + "|0|0");
+			return;
+		}
+		// f[3] = on | off: no movement (re-applied every tick), survives a reconnect until turned off
+		if (type == "freeze")
+		{
+			string fid = target.GetIdentity().GetId();
+			if (f[3] == "on")
+			{
+				s_Frozen.Set(fid, 1);
+				if (target.GetInputController()) target.GetInputController().OverrideMovementSpeed(true, 0);
+			}
+			else
+			{
+				if (s_Frozen.Contains(fid)) s_Frozen.Remove(fid);
+				if (target.GetInputController()) target.GetInputController().OverrideMovementSpeed(false, 1);
+			}
+			Append(DIR + "/results.log", nonce + "|done|1|0");
+			return;
+		}
+		if (type == "invisible")
+		{
+			string iid = target.GetIdentity().GetId();
+			if (f[3] == "on")
+			{
+				s_Invisible.Set(iid, 1);
+				target.SetInvisible(true);
+			}
+			else
+			{
+				if (s_Invisible.Contains(iid)) s_Invisible.Remove(iid);
+				target.SetInvisible(false);
+			}
+			Append(DIR + "/results.log", nonce + "|done|1|0");
+			return;
+		}
+		// everything they carry drops at their feet
+		if (type == "strip")
+		{
+			array<EntityAI> worn = new array<EntityAI>();
+			target.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, worn);
+			int dropped = 0;
+			for (int wi = 0; wi < worn.Count(); wi++)
+			{
+				EntityAI w = worn[wi];
+				if (!w || w == target || w.GetHierarchyParent() != target) continue;
+				target.ServerDropEntity(w);
+				dropped++;
+			}
+			Append(DIR + "/results.log", nonce + "|done|" + dropped.ToString() + "|0");
+			return;
+		}
+		// kill now; the body goes a few seconds later (see Tick) so they respawn fresh
+		if (type == "respawn")
+		{
+			string rid = target.GetIdentity().GetId();
+			if (s_God.Contains(rid)) s_God.Remove(rid);
+			target.SetAllowDamage(true);
+			target.SetHealth("", "", 0);
+			s_RespawnAt.Set(rid, GetGame().GetTickTime());
 			Append(DIR + "/results.log", nonce + "|done|1|0");
 			return;
 		}
@@ -714,6 +887,20 @@ class DZAT_Bridge
 		if (s_Acc < 3) return;
 		s_Acc = 0;
 		WriteWorld();
+		if (s_RespawnAt.Count() > 0)
+		{
+			array<string> doneIds = new array<string>();
+			float tnow = GetGame().GetTickTime();
+			for (int ri = 0; ri < s_RespawnAt.Count(); ri++)
+			{
+				if (tnow - s_RespawnAt.GetElement(ri) >= 2.0) doneIds.Insert(s_RespawnAt.GetKey(ri));
+			}
+			for (int di = 0; di < doneIds.Count(); di++)
+			{
+				DeleteCorpse(doneIds[di], "-", "-");
+				s_RespawnAt.Remove(doneIds[di]);
+			}
+		}
 		for (int i = 0; i < players.Count(); i++)
 		{
 			PlayerBase p = PlayerBase.Cast(players[i]);
