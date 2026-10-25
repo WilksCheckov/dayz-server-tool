@@ -519,6 +519,13 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .inst .inst-name { font-size: 14px; }
 .inst-grid { display: grid; grid-template-columns: 70px 1fr; gap: 4px 12px; margin-top: 8px; font-size: 12.5px; align-items: center; }
 .inst-grid code { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-box:has(#kitPicker) { width: 940px; }
+.kit-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
+.kit-left, .kit-right { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.kit-rows, .kit-items { height: 300px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px; }
+.kit-rows .ip-item b { min-width: 18px; text-align: center; }
+.kit-items .ki-attach { visibility: hidden; }
+.kit-items .ip-item:hover .ki-attach { visibility: visible; }
 .cpu-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .cpu-core { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; min-width: 64px; }
 .cpu-core .check { margin: 0; }

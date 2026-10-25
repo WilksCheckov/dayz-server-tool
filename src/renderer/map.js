@@ -421,14 +421,50 @@ async function kitManager(edit = null) {
   await loadKits(); await loadLootItems();
   const k = edit ? adm.kits.find(x => x.name === edit) : null;
   const list = adm.kits.map(x => `<div class="row gap"><span class="grow">${esc(x.name)} <span class="muted">(${x.items} line${x.items === 1 ? '' : 's'})</span></span><button class="btn small kit-edit" data-name="${esc(x.name)}">Edit</button><button class="btn small danger kit-del" data-name="${esc(x.name)}">Delete</button></div>`).join('') || '<p class="muted">No kits yet.</p>';
+  const cats = [...new Set((lootItems || []).map(i => i.category[0] || '').filter(Boolean))].sort();
   const body = `<div class="kit-list">${list}</div><div class="card-title mt">${k ? 'Edit ' + esc(k.name) : 'New kit'}</div>
     <label class="field">Name <input id="kitName" class="input" value="${esc(k ? k.name : '')}" placeholder="e.g. Starter, Sniper, Medic"></label>
-    <label class="field">Items, one per line <textarea id="kitLines" class="input mono" rows="8" placeholder="BandageDressing x4&#10;AKM; AK_WoodBttstck; AK_WoodHndgrd; Mag_AKM_30Rnd&#10;Mag_AKM_30Rnd x3&#10;TacticalBaconCan x2">${esc(k ? (k.lines || []).join('\n') : '')}</textarea></label>
-    <p class="muted small">"Class x3" gives three. "Parent; Attachment; …" fits the attachments onto the item (stock, handguard, optic, magazine…). Everything spawns pristine and full.</p>`;
+    <div class="kit-editor" id="kitPicker">
+      <div class="kit-left">
+        <div class="muted small">In the kit <span id="kitCount"></span></div>
+        <div id="kitRows" class="ip-list kit-rows"></div>
+        <details><summary class="muted small">As text (one item per line; "Class x3" gives three; "Parent; Attachment; …" fits attachments)</summary><textarea id="kitLines" class="input mono" rows="6">${esc(k ? (k.lines || []).join('\n') : '')}</textarea></details>
+      </div>
+      <div class="kit-right">
+        <div class="row gap"><input id="kitSearch" class="input" placeholder="Search every item in the economy…"><select id="kitCat" class="input" style="width:120px"><option value="">All types</option>${cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></div>
+        <div class="muted small">Click an item to add it (again for one more); <b>attach</b> fits it onto the last item (stock, magazine, optic…).</div>
+        <div id="kitItems" class="ip-list kit-items"></div>
+      </div>
+    </div>
+    <p class="muted small">Everything spawns pristine and full.</p>`;
   const p = showModal('Kits', body, [{ label: 'Save kit', value: 'save', primary: true }, { label: 'Close', value: null }]);
   setTimeout(() => {
     for (const b of document.querySelectorAll('.kit-edit')) b.onclick = () => { $('modalActions').lastElementChild.click(); kitManager(b.dataset.name); };
     for (const b of document.querySelectorAll('.kit-del')) b.onclick = async () => { await ipc.invoke('live:deleteKit', b.dataset.name); toast(`Kit ${b.dataset.name} deleted`); $('modalActions').lastElementChild.click(); kitManager(); };
+    // the text box is the kit; the rows and the picker edit it
+    const parse = (l) => { const m = l.trim().match(/^(.*?)(?:\s+x\s*(\d+))?$/i); return { spec: m[1].trim(), count: Math.max(1, Number(m[2]) || 1) }; };
+    const lines = () => $('kitLines').value.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const write = (rows) => { $('kitLines').value = rows.map(r => r.count > 1 ? `${r.spec} x${r.count}` : r.spec).join('\n'); renderRows(); };
+    const renderRows = () => {
+      const rows = lines().map(parse); const total = rows.reduce((n, r) => n + r.count * r.spec.split(';').length, 0);
+      $('kitCount').textContent = rows.length ? `· ${rows.length} line${rows.length === 1 ? '' : 's'}, ${total} item${total === 1 ? '' : 's'}` : '· empty';
+      $('kitRows').innerHTML = rows.map((r, i) => `<div class="ip-item" data-i="${i}"><span>${esc(r.spec.split(';').map(x => x.trim()).join(' + '))}</span><span class="row gap"><button class="btn small kr-minus" title="One fewer">−</button><b>${r.count}</b><button class="btn small kr-plus" title="One more">+</button><button class="btn small danger kr-del" title="Remove">✕</button></span></div>`).join('') || '<div class="muted" style="padding:6px">Nothing yet: click items on the right.</div>';
+    };
+    const add = (cls, attach) => {
+      const rows = lines().map(parse);
+      if (attach) { if (!rows.length) return toast('Add the item it goes on first', true); rows[rows.length - 1].spec += '; ' + cls; }
+      else { const same = rows.find(r => r.spec === cls); if (same) same.count++; else rows.push({ spec: cls, count: 1 }); }
+      write(rows);
+    };
+    const renderItems = () => {
+      const q = $('kitSearch').value.trim().toLowerCase(); const cat = $('kitCat').value;
+      const rows = (lootItems || []).filter(i => (!q || i.name.toLowerCase().includes(q)) && (!cat || (i.category[0] || '') === cat));
+      $('kitItems').innerHTML = rows.slice(0, 400).map(i => `<div class="ip-item ki" data-name="${esc(i.name)}"><span>${esc(i.name)} <span class="muted">${esc(i.category[0] || '')}</span></span><button class="btn small ki-attach" title="Fit onto the last item">attach</button></div>`).join('') + (rows.length > 400 ? `<div class="muted" style="padding:6px">${rows.length - 400} more: narrow the search</div>` : '') || '<div class="muted" style="padding:6px">No items match.</div>';
+    };
+    $('kitItems').onclick = (e) => { const it = e.target.closest('.ki'); if (!it) return; add(it.dataset.name, e.target.classList.contains('ki-attach')); };
+    $('kitRows').onclick = (e) => { const it = e.target.closest('.ip-item'); if (!it) return; const rows = lines().map(parse); const i = Number(it.dataset.i); if (e.target.classList.contains('kr-plus')) rows[i].count++; else if (e.target.classList.contains('kr-minus')) { if (--rows[i].count < 1) rows.splice(i, 1); } else if (e.target.classList.contains('kr-del')) rows.splice(i, 1); else return; write(rows); };
+    $('kitSearch').oninput = renderItems; $('kitCat').onchange = renderItems; $('kitLines').oninput = renderRows;
+    renderRows(); renderItems();
   }, 0);
   if ((await p) !== 'save') return;
   try { const r = await ipc.invoke('live:saveKit', { name: $('kitName').value, lines: $('kitLines').value, oldName: k ? k.name : null }); adm.kits = r.kits; toast(r.unknown.length ? `Saved. Not in your economy files (fine for mod items, otherwise check the spelling): ${r.unknown.join(', ')}` : 'Kit saved', !!r.unknown.length); }
