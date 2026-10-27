@@ -50,16 +50,29 @@ function install() {
     { name: 'scripts\\4_World\\dzat_dupe.c', data: Buffer.from(fs.readFileSync(path.join(srcDir(), 'dzat_dupe.c'), 'utf8').replace(/\r\n/g, '\n')) }
   ];
   writePbo(path.join(dir, 'addons', 'dzat_anticheat.pbo'), 'DayZAdminTools', files);
-  fs.writeFileSync(path.join(dir, 'mod.cpp'), 'name = "DayZ Admin Tools anti-dupe";\nauthor = "DayZ Admin Tools";\n');
+  writeModCpp(dir);
   fs.writeFileSync(path.join(dir, 'version.txt'), String(MOD_VERSION));
   emitRef('console', { source: 'anticheat', line: `Anti-dupe server mod v${MOD_VERSION} written to ${dir}. It loads at the next server start.` });
   return status();
 }
-function remove() { try { fs.rmSync(modDir(), { recursive: true, force: true }); } catch { /* ignore */ } return status(); }
+// @DayZAdminTools is shared with the DRP_Admin server PBO (drpadmin.js): each removes only its own files
+function writeModCpp(dir) { fs.writeFileSync(path.join(dir, 'mod.cpp'), 'name = "DayZ Admin Tools server mods";\nauthor = "DayZ Admin Tools";\n'); }
+function pruneModDir() {
+  const dir = modDir(); let left = [];
+  try { left = fs.readdirSync(path.join(dir, 'addons')).filter(f => /\.pbo$/i.test(f)); } catch { /* no addons folder */ }
+  if (!left.length) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
+}
+function remove() {
+  for (const f of [path.join(modDir(), 'addons', 'dzat_anticheat.pbo'), path.join(modDir(), 'version.txt')]) { try { fs.unlinkSync(f); } catch { /* not there */ } }
+  pruneModDir();
+  return status();
+}
 function setEnabled(on) { settings.save({ anticheat: { ...cfg(), mod: !!on } }); if (on) install(); return status(); }
 // before each start: keep the mod current while it is enabled; tell server.js whether to load it
 function ensure() {
-  if (!cfg().mod) return { action: 'off' };
+  // off: take the PBO out, since the folder can still be loaded for the DRP_Admin PBO and the anti-dupe mod
+  // changes what items save (loading it by accident means a wipe)
+  if (!cfg().mod) { if (status().installed) { remove(); return { action: 'removed' }; } return { action: 'off' }; }
   try { const st = status(); if (st.upToDate) return { action: 'ok' }; install(); return { action: st.installed ? 'updated' : 'installed' }; } catch (e) { emitRef('console', { source: 'anticheat', line: 'Anti-dupe mod: ' + e.message }); return { action: 'error', error: e.message }; }
 }
 function launchMod() { return cfg().mod && status().installed ? MOD_FOLDER : null; }
@@ -133,4 +146,4 @@ function liveLoot() {
   return lootCache.data;
 }
 function init(emit) { emitRef = emit; load(); }
-module.exports = { liveLoot, init, status, install, remove, setEnabled, ensure, launchMod, ingest, list, housekeeping, MOD_FOLDER };
+module.exports = { liveLoot, init, status, install, remove, setEnabled, ensure, launchMod, ingest, list, housekeeping, writePbo, writeModCpp, pruneModDir, MOD_FOLDER };

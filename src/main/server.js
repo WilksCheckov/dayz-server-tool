@@ -203,6 +203,7 @@ function start() {
     if (pf.error.length) { for (const e of pf.error) emitRef('console', { source: 'preflight', line: 'Problem: ' + e }); throw new Error('Not started: ' + pf.error[0] + (pf.error.length > 1 ? ` (+${pf.error.length - 1} more, see the console)` : '')); }
   } catch (e) { if (/^Not started:/.test(e.message)) throw e; emitRef('console', { source: 'preflight', line: `The checks before start failed to run (${e.message}); starting without them.` }); }
   try { require('./rcon').ensureConfigured(); } catch (e) { emitRef('console', { source: 'rcon', line: 'RCon auto-configuration failed: ' + e.message }); }
+  try { require('./drpadmin').ensure(); } catch (e) { emitRef('console', { source: 'drpadmin', line: 'DRP_Admin mod: ' + e.message }); }
   try { require('./deathlog').ensureBridge(); } catch (e) { emitRef('console', { source: 'deathlog', line: 'Bridge script: ' + e.message }); }
   try { require('./anticheat').ensure(); } catch (e) { emitRef('console', { source: 'anticheat', line: 'Anti-dupe mod: ' + e.message }); }
   fs.mkdirSync(p.profilesDir, { recursive: true });

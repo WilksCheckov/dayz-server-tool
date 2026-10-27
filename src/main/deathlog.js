@@ -290,7 +290,12 @@ const MARK_END = '// <<< DayZ Admin Tools bridge';
 const HOOK = 'DZAT_Bridge.Tick(timeslice); // DayZ Admin Tools hook';
 const BRIDGE_SCRIPT = MARK_BEGIN + '\n' + fs.readFileSync(path.join(__dirname, 'bridge.c'), 'utf8').replace(/\r\n/g, '\n').replace(/\s*$/, '') + '\n' + MARK_END + '\n';
 function initC() { const md = require('./configs').missionDir(); if (!md) throw new Error('No mission found: set the mission template in serverDZ.cfg first'); return path.join(md, 'init.c'); }
+// the DRP_Admin server mod carries the same bridge (drpadmin.js); while it is on, init.c must not have it as well
+// (turned off while the server runs, the PBO stays loaded until the next start removes it, so it still counts)
+function modBridge() { try { const st = require('./drpadmin').status(); return st.enabled || st.installed ? st : null; } catch { return null; } }
 function bridgeStatus() {
+  const mod = modBridge();
+  if (mod) return { installed: mod.installed, version: BRIDGE_VERSION, current: BRIDGE_VERSION, upToDate: mod.upToDate, via: 'mod', file: mod.dir, error: mod.error || null, gearLogBytes: 0, hasCustomMission: true };
   let f; try { f = initC(); } catch (e) { return { installed: false, file: null, error: e.message }; }
   let text = ''; try { text = fs.readFileSync(f, 'utf8'); } catch { return { installed: false, file: f, error: 'init.c not found' }; }
   const m = text.match(/\/\/ >>> DayZ Admin Tools bridge v(\d+)/);
@@ -305,6 +310,7 @@ function stripBridge(text) {
   return text;
 }
 function installBridge() {
+  if (modBridge()) throw new Error('The DRP_Admin server mod is on and runs the bridge itself; turn it off on the Death log page to use the init.c script instead');
   const f = initC();
   if (!fs.existsSync(f)) throw new Error('init.c not found in the active mission');
   const orig = fs.readFileSync(f, 'utf8'); const crlf = orig.includes('\r\n');
@@ -345,6 +351,11 @@ function ensureBridge() {
   if (c.bridge === false) return { action: 'off' };
   try {
     try { const q = path.join(bridgeDir(), 'commands.txt'); const left = fs.readFileSync(q, 'utf8').split(/\r?\n/).filter(Boolean).length; fs.unlinkSync(q); if (left) emitRef('console', { source: 'deathlog', line: `Dropped ${left} refund / heal / teleport command(s) still queued from before; they would otherwise run now.` }); } catch { /* no queue */ }
+    if (modBridge()) {
+      let f = null; try { f = initC(); } catch { /* no mission: nothing to strip */ }
+      if (f && fs.existsSync(f) && /\/\/ >>> DayZ Admin Tools bridge v\d+|DZAT_Bridge\.Tick\(/.test(fs.readFileSync(f, 'utf8'))) { removeBridge(); emitRef('console', { source: 'deathlog', line: 'The DRP_Admin server mod runs the bridge now, so the init.c copy was removed.' }); return { action: 'moved' }; }
+      return { action: 'mod' };
+    }
     const st = bridgeStatus();
     if (st.error) { emitRef('console', { source: 'deathlog', line: 'Bridge script not checked: ' + st.error + '. Refunds, heals, teleports and gear snapshots will not work this run.' }); return { action: 'error', error: st.error }; }
     if (st.upToDate) return { action: 'ok' };

@@ -873,6 +873,14 @@
                 <button class="btn small" id="btnDlOpenDir" title="Open the folder where the script writes its gear log and reads refund commands">Open bridge folder</button>
               </div>
             </div>
+            <div class="row between wrap gap" style="margin-top:10px">
+              <div style="max-width:720px"><b>DRP_Admin server mod</b> <span id="daState" class="badge">checking…</span>
+                <div class="muted">The in-game companion mod, loaded with <code>-serverMod</code> from <code>@DayZAdminTools</code>. It runs the same bridge as above (so <code>init.c</code> is left alone) and adds hooks a mission script cannot have: connects, hits and kills with weapon and distance, base building, placing and vehicles. Changes take effect at the next server start.</div></div>
+              <div class="row gap wrap">
+                <label class="check"><input type="checkbox" id="daEnabled"> Use the DRP_Admin server mod</label>
+                <button class="btn small" id="btnDaEvents">Recent events</button>
+              </div>
+            </div>
           </div>
           <div class="page-toolbar">
             <input id="dlQuery" class="input" placeholder="Search player, killer, weapon or cause" style="width:270px">

@@ -1648,9 +1648,39 @@ async function refreshDeathLog() {
 async function refreshBridgeState() {
   const st = await ipc.invoke('deathlog:bridgeStatus'); const b = $('dlBridgeState');
   b.className = 'badge ' + (st.upToDate ? 'ok' : st.installed ? 'warn' : 'bad');
-  b.textContent = st.error ? st.error : st.upToDate ? `installed (v${st.version})` : st.installed ? `installed v${st.version}, update available` : 'not installed';
+  b.textContent = st.error ? st.error : st.via === 'mod' ? (st.installed ? 'run by the DRP_Admin mod' : 'DRP_Admin mod is written at the next start') : st.upToDate ? `installed (v${st.version})` : st.installed ? `installed v${st.version}, update available` : 'not installed';
+  $('btnDlInstall').disabled = $('btnDlRemove').disabled = st.via === 'mod';
   const s = await ipc.invoke('settings:get'); $('dlBridgeAuto').checked = ((s.deathlog || {}).bridge !== false); $('dlDeleteBody').checked = ((s.deathlog || {}).deleteBody !== false);
+  const da = await ipc.invoke('drpadmin:status'); const db = $('daState');
+  $('daEnabled').checked = da.enabled;
+  db.className = 'badge ' + (!da.enabled ? '' : da.error ? 'bad' : da.upToDate ? 'ok' : 'warn');
+  db.textContent = !da.enabled ? 'off' : da.error ? da.error : da.upToDate ? `installed${da.lastStart ? ' · last loaded ' + fmtShort(da.lastStart.ts) : ''}` : da.installed ? 'update written at the next start' : 'written at the next start';
 }
+// one line per DRP_Admin event: who did what to whom
+function daWho(w) { return !w ? '—' : w.name ? esc(w.name) : `<span class="muted">${esc(w.cls || '?')}</span>`; }
+function daLine(e) {
+  const at = e.pos || (e.who && e.who.pos) || (e.victim && e.victim.pos) || (e.by && e.by.pos);
+  const where = Array.isArray(at) ? `<span class="muted">${Math.round(at[0])}, ${Math.round(at[2])}</span>` : '';
+  let what;
+  if (e.ev === 'hit') what = `${daWho(e.by)} hit ${daWho(e.victim)}${e.zone ? ' in the ' + esc(e.zone) : ''} for ${Math.round(e.dmg || 0)}${e.weapon ? ' with ' + esc(e.weapon) : ''}${e.dist ? ' from ' + Math.round(e.dist) + ' m' : ''}${e.dead ? ' (dead)' : ''}`;
+  else if (e.ev === 'kill') what = `${daWho(e.by)} killed ${daWho(e.victim)}${e.weapon ? ' with ' + esc(e.weapon) : ''}${e.dist ? ' from ' + Math.round(e.dist) + ' m' : ''}`;
+  else if (e.ev === 'connect' || e.ev === 'disconnect') what = `${daWho(e.who)} ${e.ev === 'connect' ? 'connected' : 'disconnected'}`;
+  else if (e.ev === 'build' || e.ev === 'dismantle' || e.ev === 'destroy') what = `${daWho(e.by)} ${e.ev === 'build' ? 'built' : e.ev === 'dismantle' ? 'dismantled' : 'destroyed'} ${esc(e.part || '')} on ${esc(e.cls || '')}`;
+  else if (e.ev === 'place') what = `${daWho(e.by)} placed ${esc(e.cls || '')}`;
+  else if (e.ev === 'vehicle_in' || e.ev === 'vehicle_out') what = `${daWho(e.by)} got ${e.ev === 'vehicle_in' ? 'into' : 'out of'} ${esc(e.cls || '')}`;
+  else if (e.ev === 'start') what = `Server started on ${esc(e.world || '?')} (DRP_Admin v${esc(e.version || '?')})`;
+  else what = esc(e.ev);
+  return `<tr><td class="mono">${esc(fmtShort(e.ts))}</td><td>${esc(e.ev)}</td><td>${what}</td><td>${where}</td></tr>`;
+}
+$('daEnabled').onchange = (e) => run(async () => {
+  const st = await ipc.invoke('drpadmin:setEnabled', $('daEnabled').checked);
+  toast(st.pendingRestart ? 'Saved. The mod is written or removed at the next server start.' : st.enabled ? 'DRP_Admin server mod written to @DayZAdminTools. It loads at the next server start, and the init.c bridge is removed then.' : 'DRP_Admin server mod removed. The init.c bridge is written again at the next start.');
+  refreshBridgeState();
+}, e.target);
+$('btnDaEvents').onclick = (e) => run(async () => {
+  const rows = await ipc.invoke('drpadmin:events', { limit: 300 });
+  await showModal('DRP_Admin events', rows.length ? `<div class="table-wrap" style="max-height:60vh"><table class="table compact"><thead><tr><th>Time</th><th>Event</th><th>What</th><th>Where</th></tr></thead><tbody>${rows.map(daLine).join('')}</tbody></table></div>` : '<p class="muted">No events yet. They appear once the server has started with the mod loaded.</p>', [{ label: 'Close', value: true, primary: true }]);
+}, e.target);
 async function showDeath(id) {
   const r = await ipc.invoke('deathlog:get', id); const box = $('dlDetail');
   if (!r) { box.innerHTML = '<div class="empty">Record not found.</div>'; return; }
