@@ -182,6 +182,8 @@ function requireBridge() {
 // Queue one command for the bridge script and wait for its answer (it polls every three seconds).
 async function sendCommand(cmd, { by = 'app', timeoutMs = 25000, onLate = null } = {}) {
   requireBridge();
+  // A teleport is not a speed hack: the movement watch gives the moved player a moment.
+  if (/^(tp|tpto|vtp)$/.test(cmd.type || '')) { try { require('./netwatch').noteTeleport(cmd); } catch { /* ignore */ } }
   const nonce = crypto.randomBytes(6).toString('hex');
   const dir = bridgeDir(); fs.mkdirSync(dir, { recursive: true });
   const cmdFile = path.join(dir, 'commands.txt');

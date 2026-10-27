@@ -57,6 +57,7 @@ const lootmap = require('./lootmap');
 const stats = require('./stats');
 const audit = require('./audit');
 const combat = require('./combat');
+const netwatch = require('./netwatch');
 const deathlog = require('./deathlog');
 const anticheat = require('./anticheat');
 const drpadmin = require('./drpadmin');
@@ -686,6 +687,7 @@ app.whenReady().then(() => {
   if (!instance.isChild && (appPrefs().closeToTray || process.argv.includes('--minimized'))) buildTray();
   setInterval(refreshTray, 15000);
   timed('players', () => players.init(emit));
+  timed('netwatch', () => netwatch.init(emit));
   timed('steambans', () => steambans.init(emit));
   timed('accounts', () => accounts.init(emit));
   timed('domain', () => domain.init(emit));

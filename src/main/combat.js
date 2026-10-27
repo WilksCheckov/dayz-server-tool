@@ -17,8 +17,10 @@ function player(key, name) { const d = load(); if (!d.players[key]) d.players[ke
 // Thresholds (settings.combatFlags) and what they catch. None of this is proof; it points an admin at a replay or a closer look.
 function flagCfg() { try { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20, ...(require('./settings').load().combatFlags || {}) }; } catch { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20 }; }
 }
-const FLAG_WEIGHT = { 'duplicate item': 4, 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4 };
+const FLAG_WEIGHT = { 'duplicate item': 4, 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4, 'high ping': 1, 'ping spikes': 2, 'lag switch': 3 };
 function raise(p, reason, detail, ts) {
+  // The player's ping at the time (netwatch.js), so a jump during lag reads differently from a clean speed hack.
+  try { if (!/ · ping \d/.test(String(detail))) detail = String(detail || '') + require('./netwatch').pingNote(p.name); } catch { /* no ping data */ }
   p.flags[reason] = (p.flags[reason] || 0) + 1;
   p.flagScore = Object.entries(p.flags).reduce((a, [r, n]) => a + (FLAG_WEIGHT[r] || 1) * Math.min(n, 5), 0);
   p.lastFlag = { reason, detail, ts }; p.lastFlagAt = ts;
@@ -29,6 +31,8 @@ function raise(p, reason, detail, ts) {
 }
 function checkMovement(p, pos, ts) {
   if (!pos) return;
+  // While the bridge's live positions are read, netwatch.js checks movement every few seconds for everyone instead.
+  try { if (require('./netwatch').liveMovement()) { p.lastPos = null; return; } } catch { /* fall back to fights */ }
   const c = flagCfg();
   if (p.lastPos && ts > p.lastPos.ts + 2000) { const dt = (ts - p.lastPos.ts) / 1000; const dist = Math.hypot(pos.x - p.lastPos.x, pos.z - p.lastPos.z); const mps = dist / dt; if (mps > c.speedMps && dist > 300) raise(p, 'impossible movement', `${Math.round(dist)} m in ${Math.round(dt)} s (${Math.round(mps)} m/s)`, ts); }
   p.lastPos = { x: pos.x, z: pos.z, ts };
@@ -146,7 +150,8 @@ function accuracyOf(p) {
   const total = Object.values(p.parts || {}).reduce((a, b) => a + b, 0);
   return { hitsPerKill: p.kills ? +(p.hits / p.kills).toFixed(1) : null, headshotPct: p.hits ? Math.round(100 * p.headshots / p.hits) : null, avgHitDist: p.hitDistN ? Math.round(p.hitDistSum / p.hitDistN) : null, parts: Object.entries(p.parts || {}).sort((a, b) => b[1] - a[1]).map(([part, n]) => ({ part, n, pct: total ? Math.round(100 * n / total) : 0 })) };
 }
-function forPlayer(keyOrName) { const d = load(); const p = d.players[keyOrName] || Object.values(d.players).find(x => x.name === keyOrName); if (!p) return null; return { dealt: Math.round(p.dealt), taken: Math.round(p.taken), hits: p.hits, hitsTaken: p.hitsTaken, headshots: p.headshots, longestKill: Math.round(p.longestKill), avgKillDist: p.distN ? Math.round(p.distSum / p.distN) : null, favourite: Object.entries(p.killsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), deathsBy: Object.entries(p.deathsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), builds: p.builds, accuracy: accuracyOf(p), flags: Object.entries(p.flags || {}).map(([reason, n]) => ({ reason, n })), flagScore: p.flagScore || 0, lastFlag: p.lastFlag || null, flagWindows: windows(p), flagHistory: (p.flagEvents || []).slice(-20).reverse().map(e => ({ ts: e[0], reason: e[1], detail: e[2] })) }; }
+function forPlayer(keyOrName) { const d = load(); const p = d.players[keyOrName] || Object.values(d.players).find(x => x.name === keyOrName); if (!p) return null; return { dealt: Math.round(p.dealt), taken: Math.round(p.taken), hits: p.hits, hitsTaken: p.hitsTaken, headshots: p.headshots, longestKill: Math.round(p.longestKill), avgKillDist: p.distN ? Math.round(p.distSum / p.distN) : null, favourite: Object.entries(p.killsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), deathsBy: Object.entries(p.deathsBy).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => `${w} ×${n}`).join(', '), builds: p.builds, accuracy: accuracyOf(p), flags: Object.entries(p.flags || {}).map(([reason, n]) => ({ reason, n })), flagScore: p.flagScore || 0, lastFlag: p.lastFlag || null, flagWindows: windows(p), flagHistory: (p.flagEvents || []).slice(-20).reverse().map(e => ({ ts: e[0], reason: e[1], detail: e[2] })), ping: pingOf(p.name) }; }
+function pingOf(name) { try { return require('./netwatch').pingStats(name); } catch { return null; } }
 // since = epoch ms (0 = all time): flags and score counted only inside the window
 function suspicious(since = 0) {
   const d = load();
@@ -156,7 +161,7 @@ function suspicious(since = 0) {
     const useAll = !since && !evs.length && p.flagScore; // records from before the history existed
     const flags = useAll ? p.flags : counts;
     const score = useAll ? p.flagScore : Object.entries(counts).reduce((a, [r, n]) => a + (FLAG_WEIGHT[r] || 1) * Math.min(n, 5), 0);
-    return { name: p.name, score, count: useAll ? Object.values(p.flags).reduce((a, b) => a + b, 0) : evs.length, flags: Object.entries(flags).map(([r, n]) => `${r} ×${n}`).join(', '), last: p.lastFlag ? `${p.lastFlag.reason}: ${p.lastFlag.detail}` : '', lastAt: p.lastFlagAt, hits: p.hits, headshotPct: p.hits ? Math.round(100 * p.headshots / p.hits) : 0, windows: windows(p) };
+    return { name: p.name, score, count: useAll ? Object.values(p.flags).reduce((a, b) => a + b, 0) : evs.length, flags: Object.entries(flags).map(([r, n]) => `${r} ×${n}`).join(', '), last: p.lastFlag ? `${p.lastFlag.reason}: ${p.lastFlag.detail}` : '', lastAt: p.lastFlagAt, hits: p.hits, headshotPct: p.hits ? Math.round(100 * p.headshots / p.hits) : 0, windows: windows(p), ping: pingOf(p.name) };
   }).filter(p => p.score > 0).sort((a, b) => b.score - a.score).slice(0, 30);
 }
 function clear() { db = null; try { fs.unlinkSync(file()); } catch { /* ignore */ } load(); }
