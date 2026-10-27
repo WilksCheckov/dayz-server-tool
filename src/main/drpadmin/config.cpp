@@ -23,12 +23,12 @@ class CfgMods
 			class worldScriptModule
 			{
 				value = "";
-				files[] = {"DRP_Admin/scripts/4_World"};
+				files[] = {"DRP_Admin_Server/scripts/4_World"};
 			};
 			class missionScriptModule
 			{
 				value = "";
-				files[] = {"DRP_Admin/scripts/5_Mission"};
+				files[] = {"DRP_Admin_Server/scripts/5_Mission"};
 			};
 		};
 	};

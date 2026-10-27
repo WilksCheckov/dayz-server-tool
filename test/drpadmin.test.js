@@ -19,7 +19,7 @@ const bridge = src.find(f => /drpa_bridge\.c$/.test(f.name)).text;
 t.ok('bridge renamed for the mod', /^class DRPA_Bridge\b/m.test(bridge) && !/DZAT_Bridge/.test(bridge));
 t.ok('world size is a variable set at mission start', /static float WORLD = 15360;/.test(bridge) && !/__DZAT_WORLD__/.test(bridge) && /static const int VERSION = \d+;/.test(bridge));
 t.ok('mission hook calls the mod bridge', /DRPA_Bridge\.Tick\(timeslice\)/.test(src.find(f => /drpa_mission\.c$/.test(f.name)).text));
-t.ok('config loads world and mission scripts', /DRP_Admin\/scripts\/4_World/.test(src[0].text) && /DRP_Admin\/scripts\/5_Mission/.test(src[0].text));
+t.ok('config loads world and mission scripts', /DRP_Admin_Server\/scripts\/4_World/.test(src[0].text) && /DRP_Admin_Server\/scripts\/5_Mission/.test(src[0].text));
 
 // off: the init.c bridge as before, nothing in the mod folder
 dl.ensureBridge();
@@ -29,7 +29,7 @@ t.ok('off: no launch folder', da.launchMod() === null && !fs.existsSync(pbo));
 // on: PBO built, bridge moves out of init.c, death log sees the bridge via the mod
 const st = da.setEnabled(true);
 const buf = fs.readFileSync(pbo);
-t.ok('on: PBO written with the prefix and every script', st.installed && st.upToDate && buf.includes(Buffer.from('DRP_Admin\0')) && ['config.cpp', 'scripts\\4_World\\drpa_events.c', 'scripts\\5_Mission\\drpa_bridge.c', 'scripts\\5_Mission\\drpa_mission.c'].every(n => buf.includes(Buffer.from(n + '\0'))));
+t.ok('on: PBO written with the prefix and every script', st.installed && st.upToDate && buf.includes(Buffer.from('DRP_Admin_Server\0')) && ['config.cpp', 'scripts\\4_World\\drpa_events.c', 'scripts\\5_Mission\\drpa_bridge.c', 'scripts\\5_Mission\\drpa_mission.c'].every(n => buf.includes(Buffer.from(n + '\0'))));
 t.ok('on: -serverMod gets @DayZAdminTools', da.launchMod() === '@DayZAdminTools');
 let r = dl.ensureBridge();
 t.ok('on: init.c bridge removed at start', r.action === 'moved' && !/DZAT_Bridge/.test(fs.readFileSync(initC, 'utf8')), JSON.stringify(r));

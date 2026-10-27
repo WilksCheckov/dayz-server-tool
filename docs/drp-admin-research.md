@@ -185,6 +185,8 @@ structured events to the app:
    2. Server-side gaps (B) with app/portal UI: weather/time, saved teleports, stats, cheats toggles.
    3. App-side gaps (C): watchlist, timed bans, forbidden items.
    4. Client PBO: admin mode, menu shell with player list + player info, tp to cursor.
+      **UI style: the same as the DRP_Factions menu** (user decision 2026-10-26), with tabs in place of LBS's
+      floating frames.
    5. Freecam + spectate.
    6. ESP, ESP drag/select, item spawner with preview.
    7. Construction edit, object sets, items-on-map wipe.

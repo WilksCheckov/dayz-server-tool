@@ -13,7 +13,8 @@ const settings = require('./settings');
 
 const MOD_FOLDER = '@DayZAdminTools';
 const PBO = 'drp_admin_server.pbo';
-const PREFIX = 'DRP_Admin';
+// not DRP_Admin: that is the client PBO's prefix in @DRP_Core, and both load on the server
+const PREFIX = 'DRP_Admin_Server';
 const MAX_EVENTS = 3000;
 // bump when the event format or the hooks change in a way the tool must know about
 const MOD_VERSION = 1;
