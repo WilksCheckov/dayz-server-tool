@@ -33,6 +33,10 @@ const ACTIONS = {
   vbring: { label: '📍 Bring vehicle to a player', perm: 'admin.vehicles', category: 'vehicles', reason: true, target: 'vehicle' },
   vdestroy: { label: '💥 Destroy vehicle', perm: 'admin.vehicles', category: 'vehicles', reason: true, target: 'vehicle', color: 0xff5f5f },
   vdelete: { label: '🗑️ Delete vehicle', perm: 'admin.vehicles', category: 'vehicles', reason: true, target: 'vehicle', color: 0xff5f5f },
+  // only done in game through the DRP_Admin menu (they reach the audit through events.jsonl)
+  adminmode: { label: '🛡️ Admin mode', perm: 'admin.menu', category: null, reason: false, target: 'none', color: 0x8a94a6 },
+  weather: { label: '🌦️ Weather / time', perm: 'admin.weather', category: null, reason: false, target: 'none', color: 0x4f8cff },
+  tpspot: { label: '📍 Teleport spot', perm: 'admin.teleport.manage', category: null, reason: false, target: 'none' },
   // list changes (no in-game command; done through the Lists page or the bot)
   beban: { label: '⛔ BattlEye ban', perm: 'lists.manage', category: null, reason: true, target: 'player', color: 0xff5f5f },
   unban: { label: '✅ Unban', perm: 'lists.manage', category: null, reason: false, target: 'player', color: 0x3ddc84 },

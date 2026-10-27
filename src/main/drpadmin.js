@@ -111,6 +111,7 @@ function ingest() {
       fresh.push(j);
     }
   } finally { fs.closeSync(fd); }
+  for (const e of fresh) if (e.ev === 'admin') auditAdmin(e);
   if (!fresh.length) { save(); return 0; }
   d.events.push(...fresh); if (d.events.length > MAX_EVENTS) d.events.splice(0, d.events.length - MAX_EVENTS);
   save();
@@ -128,11 +129,92 @@ function list({ ev = '', q = '', limit = 300 } = {}) {
   }
   return out;
 }
+// ---------- in-game admin actions into the audit trail ----------
+// The client mod (DRP_Admin in @DRP_Core) writes one ev:"admin" line per action: { action, by {id, steam, name},
+// target?, detail }. Each becomes an adminlog record (audit log, console, Discord admin action channel), named after
+// the catalogue action where there is one. Only recent lines: a first read of an old file must not replay history.
+const INGAME_ACTION = {
+  heal: 'heal', repairgear: 'heal', repairhands: 'heal', stopbleed: 'heal', kill: 'kill', god: 'god',
+  freeze: 'freeze', invisible: 'invisible', strip: 'strip', message: 'message', kick: 'kick', bring: 'bring', tpto: 'tpto',
+  tp_cursor: 'tp', tp_spot: 'tp', spawn: 'spawn', admin_mode: 'adminmode', weather: 'weather', time: 'weather',
+  tp_spot_save: 'tpspot', tp_spot_delete: 'tpspot'
+};
+const INGAME_TEXT = {
+  admin_mode: 'admin mode', tp_cursor: 'teleported to where they looked', tp_spot: 'teleported to a place', time: 'time of day',
+  clear: 'cleared the inventory', stat: 'set a stat', sick: 'gave a sickness', clearsick: 'cured sicknesses', knockout: 'knocked out',
+  breaklegs: 'broke the legs', bleed: 'made bleed', stopbleed: 'stopped the bleeding', vomit: 'made vomit', bloodyhands: 'bloody hands',
+  dry: 'dried off', repairgear: 'repaired all gear', repairhands: 'repaired the item in hands', ammo: 'unlimited ammo',
+  stamina: 'unlimited stamina', aiignore: 'AI ignores them', tp_spot_save: 'saved a teleport spot', tp_spot_delete: 'deleted a teleport spot'
+};
+const AUDIT_WINDOW_MS = 15 * 60000;
+function detailText(e) {
+  const d = e.detail;
+  const what = INGAME_TEXT[e.action] || '';
+  if (d === undefined || d === null || d === true) return what;
+  if (d === false) return `${what || e.action} off`.trim();
+  if (Array.isArray(d)) return `${what}${what ? ' ' : ''}at ${Math.round(d[0])}, ${Math.round(d[2])}`;
+  if (typeof d === 'object') {
+    if (d.stat) return `${d.stat} set to ${Math.round(d.share * 100)}%`;
+    if (d.cls) return `${d.count || 1} × ${d.cls}${d.vehicle ? ` (vehicle, ${d.parts || 0} parts)` : ''}${Array.isArray(d.pos) ? ` at ${Math.round(d.pos[0])}, ${Math.round(d.pos[2])}` : ''}`;
+    if (d.name) return `${what} "${d.name}"`;
+    return `${what} ${Object.entries(d).map(([k, v]) => `${k} ${typeof v === 'number' ? Math.round(v * 100) / 100 : v}`).join(', ')}`.trim();
+  }
+  return `${what}${what ? ': ' : ''}${d}`;
+}
+function auditAdmin(e) {
+  if (!e.ts || Date.now() - e.ts > AUDIT_WINDOW_MS) return;
+  const by = e.by && e.by.name ? `${e.by.name} (in game)` : 'in game';
+  const action = INGAME_ACTION[e.action] || 'afflict';
+  let details = detailText(e);
+  if (action === 'afflict' && !INGAME_TEXT[e.action]) details = `${e.action}${details ? ': ' + details : ''}`;
+  if (e.action === 'message' || e.action === 'kick') details = typeof e.detail === 'string' ? e.detail : details;
+  try {
+    require('./adminlog').record({ action, by, source: 'game', target: e.target && e.target.name ? { name: e.target.name, steam: e.target.steam || null } : null, details, reason: '', result: { status: 'done' } });
+  } catch (err) { emitRef('console', { source: 'drpadmin', line: 'In-game admin action not recorded: ' + err.message }); }
+}
+
+// ---------- in-game admins from the portal ----------
+// profiles/DRP_Admin/admins.json is written from the portal's users: everyone enabled with a Steam id and the
+// admin.menu permission, with their in-game permissions; plus the owner Steam ids from the DRP_Admin card ("*").
+// The mod re-reads it every 30 s. Written only when it changed; never emptied while it still lists someone (so a
+// hand-made file survives until the portal has at least one in-game admin).
+const INGAME_PERMS = ['admin.menu', 'admin.players', 'admin.teleport', 'admin.teleport.manage', 'admin.heal', 'admin.kill', 'admin.god', 'admin.afflict', 'admin.spawn', 'admin.spawn.forbidden', 'admin.weather', 'admin.vehicles', 'admin.kits', 'admin.refund', 'players.message', 'players.kick', 'tickets.view', 'tickets.manage'];
+function adminsFile() { return path.join(settings.paths().profilesDir, 'DRP_Admin', 'admins.json'); }
+function owners() { return (cfg().owners || []).map(s => String(s).trim()).filter(s => /^7656\d{13}$/.test(s)); }
+function computeAdmins() {
+  const out = new Map();
+  for (const s of owners()) out.set(s, { steam: s, name: 'Owner', perms: ['*'] });
+  let users = []; try { users = require('./portal').listUsers(); } catch { /* portal not loaded */ }
+  for (const u of users) {
+    if (!u.enabled || !u.steam || out.has(u.steam) || !u.perms.includes('admin.menu')) continue;
+    out.set(u.steam, { steam: u.steam, name: u.name, perms: u.perms.filter(p => INGAME_PERMS.includes(p)) });
+  }
+  return [...out.values()];
+}
+function syncAdmins() {
+  const admins = computeAdmins(); const f = adminsFile();
+  let current = null; try { current = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { /* none yet */ }
+  const had = current && Array.isArray(current.admins) ? current.admins.length : 0;
+  if (!admins.length && had) return { written: false, admins, reason: 'no in-game admins in the portal yet; the existing file is kept' };
+  const next = JSON.stringify({ admins }, null, 4);
+  if (current && JSON.stringify(current, null, 4) === next) return { written: false, admins };
+  try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, next); } catch (err) { return { written: false, admins, error: err.message }; }
+  emitRef('console', { source: 'drpadmin', line: `In-game admins written: ${admins.map(a => a.name).join(', ') || 'none'} (${f}).` });
+  return { written: true, admins };
+}
+function setOwners(list) {
+  const clean = String(Array.isArray(list) ? list.join('\n') : list || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  const bad = clean.filter(s => !/^7656\d{13}$/.test(s));
+  if (bad.length) throw new Error(`Not a Steam64 id: ${bad.join(', ')}`);
+  settings.save({ drpadmin: { ...cfg(), owners: [...new Set(clean)] } });
+  return syncAdmins();
+}
+
 // trim the event file while the server is down so it does not grow forever
 function housekeeping() {
   try { ingest(); } catch { /* ignore */ }
   try { if (fs.statSync(eventsFile()).size > 8 * 1024 * 1024) { fs.unlinkSync(eventsFile()); load().file = { offset: 0, rest: '' }; save(); } } catch { /* none */ }
 }
 
-function init(emit) { emitRef = emit; load(); }
-module.exports = { init, status, install, remove, setEnabled, ensure, active, launchMod, ingest, list, housekeeping, sources, buildHash, MOD_FOLDER };
+function init(emit) { emitRef = emit; load(); try { syncAdmins(); } catch { /* no server folder yet */ } }
+module.exports = { init, status, install, remove, setEnabled, ensure, active, launchMod, ingest, list, housekeeping, sources, buildHash, syncAdmins, computeAdmins, setOwners, owners, auditAdmin, MOD_FOLDER };

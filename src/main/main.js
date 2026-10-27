@@ -419,6 +419,7 @@ handle('tickets:assign', (id, who) => tickets.assign(id, who, 'app'));
 handle('tickets:link', (id, deathId) => tickets.link(id, deathId, 'app'));
 handle('tickets:unlink', (id, deathId) => tickets.unlink(id, deathId, 'app'));
 handle('tickets:setStatus', (id, status, reason) => tickets.setStatus(id, status, 'app', reason || ''));
+handle('tickets:reply', (id, text) => tickets.message(id, text, 'app', 'admin'));
 handle('portal:status', () => portal.status());
 handle('portal:setEnabled', (on) => portal.setEnabled(on));
 handle('portal:setOwner', (name, password) => portal.setOwner(name, password));
@@ -444,6 +445,8 @@ handle('anticheat:liveLoot', () => anticheat.liveLoot());
 handle('drpadmin:status', () => drpadmin.status());
 handle('drpadmin:setEnabled', (on) => drpadmin.setEnabled(!!on));
 handle('drpadmin:events', (q) => drpadmin.list(q || {}));
+handle('drpadmin:admins', () => ({ admins: drpadmin.computeAdmins(), owners: drpadmin.owners(), sync: drpadmin.syncAdmins() }));
+handle('drpadmin:setOwners', (list) => drpadmin.setOwners(list));
 handle('deathlog:get', (id) => { const r = deathlog.get(id); return r ? { ...r, tickets: tickets.forDeath(r.id) } : r; });
 handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
 handle('deathlog:stats', () => deathlog.stats());
@@ -698,6 +701,7 @@ app.whenReady().then(() => {
   timed('deathlog', () => deathlog.init(emit));
   timed('anticheat', () => anticheat.init(emit));
   timed('drpadmin', () => drpadmin.init(emit));
+  timed('gametickets', () => require('./gametickets').init(emit));
   timed('maplink', () => require('./maplink').init(emit));
   setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); require('./sysinfo').checkDisk().catch(() => {}); }, 15000);
   if (app.isPackaged && !instance.isChild && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {

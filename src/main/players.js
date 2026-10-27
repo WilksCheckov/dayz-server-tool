@@ -97,6 +97,7 @@ function ingest() {
   try { require('./deathlog').ingestGear(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the gear snapshots (refunds need them)', e); }
   try { require('./anticheat').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the dupe detector\'s log', e); }
   try { require('./drpadmin').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the DRP_Admin event log', e); }
+  try { require('./gametickets').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading in-game tickets', e); }
   const d = load();
   const p = settings.paths();
   let files = [];

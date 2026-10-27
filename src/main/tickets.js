@@ -7,7 +7,8 @@ const settings = require('./settings');
 
 let emitRef = () => {};
 const store = () => require('./discord').store();
-const save = () => { require('./discord').saveStore(); emitRef('tickets:changed', {}); };
+// every change also refreshes what the game shows (gametickets.js writes only files that changed)
+const save = () => { require('./discord').saveStore(); emitRef('tickets:changed', {}); try { require('./gametickets').writeOut(); } catch (e) { emitRef('console', { source: 'tickets', line: 'In-game ticket files not written: ' + e.message }); } };
 const all = () => (store().tickets = store().tickets || []);
 const pad = (id) => String(id).replace(/^#/, '').trim().padStart(4, '0');
 const nowIso = () => new Date().toISOString();
@@ -77,8 +78,21 @@ function tagAction(id, { action, by, target, details, reason, result }) {
   save();
   return t.id;
 }
+// in-game tickets (gametickets.js) change a ticket through this: fn gets the stored ticket, the change is saved
+function patch(id, fn) { const t = byId(id); fn(t); save(); return t; }
+// a message in the conversation the player sees (in-game tickets): role 'player' or 'admin'; mirrored as a note.
+// ident = { name, steam, guid } of whoever wrote it in game (in-game name, Steam64, GUID), kept on the record.
+function message(id, text, by, role, ident = null) {
+  const t = byId(id); text = String(text || '').trim(); if (!text) throw new Error('Write a message.');
+  const idn = ident && (ident.steam || ident.guid) ? { name: String(ident.name || ''), steam: String(ident.steam || ''), guid: String(ident.guid || '') } : null;
+  (t.messages = t.messages || []).push({ ts: nowIso(), by: who(by), role, text: text.slice(0, 1000), ...(idn || {}) });
+  const tag = idn ? ` (${idn.name} · ${idn.steam || '?'} · ${idn.guid || '?'})` : '';
+  (t.notes = t.notes || []).push({ ts: nowIso(), by: who(by) + tag, text: (role === 'player' ? '[player] ' : '[to player] ') + text.slice(0, 1000), system: true });
+  if (role === 'admin' && t.game) { t.game.noticeId = (t.game.noticeId || 0) + 1; }
+  save(); return get(id);
+}
 function stats() { const a = all(); return { open: a.filter(t => t.status === 'open').length, closed: a.filter(t => t.status !== 'open').length, unassigned: a.filter(t => t.status === 'open' && !t.assignee).length }; }
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, list, get, create, note, assign, link, unlink, setStatus, forDeath, refFromText, tagAction, stats, pad };
+module.exports = { init, list, get, create, note, assign, link, unlink, setStatus, forDeath, refFromText, tagAction, stats, pad, patch, message, all };

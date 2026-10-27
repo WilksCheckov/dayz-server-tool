@@ -318,12 +318,14 @@ async function pageUsers(main) {
   const showUser = (u) => {
     $('uD').innerHTML = `<h3>${esc(u.name)}</h3><div class="muted small">Effective: ${u.perms.length} of ${d.catalogue.length} permissions</div>
       <label class="mt" style="display:block"><input type="checkbox" id="uTrust" ${u.trusted ? 'checked' : ''}> Trusted: skips approval and daily limits set on their groups</label>
+      <label class="mt" style="display:block">Steam id (Steam64) for the in-game admin menu<input id="uSteam" class="input" value="${esc(u.steam || '')}" placeholder="7656…" style="max-width:220px"></label>
+      <div class="muted small">With a Steam id and "Open the in-game admin menu", this user is an admin in game (DRP_Admin) with these permissions.</div>
       <div class="muted mt">Groups</div><div id="ug">${d.groups.map(g => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-group="${esc(g.id)}" ${u.groups.includes(g.id) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('')}</div>
       <div class="muted mt">Granted on top of the groups</div><div class="perm" id="ua">${permList(u.allow, 'a')}</div>
       <details class="mt"><summary class="muted">Denied even if a group grants it</summary><div class="perm" id="ud">${permList(u.deny, 'd')}</div></details>
       <div class="row mt"><button class="btn primary" id="uSave">Save</button><button class="btn" id="uPw">Set password</button><button class="btn" id="uTog">${u.enabled ? 'Disable' : 'Enable'}</button><button class="btn danger" id="uDel">Delete</button></div>`;
     const upd = (patch) => api('user', { op: 'update', id: u.id, patch }).then(() => { toast('Saved'); pageUsers(main); }).catch(e => toast(e.message, true));
-    $('uSave').onclick = () => upd({ groups: checked($('ug'), 'group'), allow: checked($('ua'), 'perm'), deny: checked($('ud'), 'perm'), trusted: $('uTrust').checked });
+    $('uSave').onclick = () => upd({ groups: checked($('ug'), 'group'), allow: checked($('ua'), 'perm'), deny: checked($('ud'), 'perm'), trusted: $('uTrust').checked, steam: $('uSteam').value.trim() });
     $('uPw').onclick = async () => { const ok = await modal(`Password for ${u.name}`, '<label>New password (8+ characters)</label><input id="np" class="input" type="password">'); if (ok) upd({ password: $('np').value }); };
     $('uTog').onclick = () => upd({ enabled: !u.enabled });
     $('uDel').onclick = async () => { if (await modal(`Delete ${u.name}?`, '<p class="muted">Their sessions end at once.</p>')) api('user', { op: 'delete', id: u.id }).then(() => pageUsers(main)).catch(e => toast(e.message, true)); };

@@ -881,6 +881,14 @@
                 <button class="btn small" id="btnDaEvents">Recent events</button>
               </div>
             </div>
+            <div class="row between wrap gap" style="margin-top:10px">
+              <div style="max-width:720px"><b>In-game admins</b> <span id="daAdmins" class="badge">checking…</span>
+                <div class="muted">Who may use the in-game admin menu (DRP_Admin in <code>@DRP_Core</code>): portal users with a Steam id and the "Open the in-game admin menu" permission, with the permissions their groups give them, plus the owner Steam ids here (everything). Written to <code>profiles/DRP_Admin/admins.json</code>; the game picks changes up within 30 s. What admins do in game shows in the audit log and the Discord admin action channel.</div></div>
+              <div class="row gap wrap">
+                <input id="daOwners" class="input" placeholder="Owner Steam64 ids (space separated)" style="width:280px">
+                <button class="btn small" id="btnDaOwners">Save owners</button>
+              </div>
+            </div>
           </div>
           <div class="page-toolbar">
             <input id="dlQuery" class="input" placeholder="Search player, killer, weapon or cause" style="width:270px">

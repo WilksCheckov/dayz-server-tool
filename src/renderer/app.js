@@ -1655,7 +1655,16 @@ async function refreshBridgeState() {
   $('daEnabled').checked = da.enabled;
   db.className = 'badge ' + (!da.enabled ? '' : da.error ? 'bad' : da.upToDate ? 'ok' : 'warn');
   db.textContent = !da.enabled ? 'off' : da.error ? da.error : da.upToDate ? `installed${da.lastStart ? ' · last loaded ' + fmtShort(da.lastStart.ts) : ''}` : da.installed ? 'update written at the next start' : 'written at the next start';
+  refreshIngameAdmins();
 }
+async function refreshIngameAdmins() {
+  const r = await ipc.invoke('drpadmin:admins'); const b = $('daAdmins');
+  b.className = 'badge ' + (r.admins.length ? 'ok' : 'warn');
+  b.textContent = r.admins.length ? r.admins.map(a => a.name + (a.perms.includes('*') ? ' (everything)' : ` (${a.perms.length})`)).join(', ') : (r.sync && r.sync.reason) || 'nobody yet';
+  b.title = r.admins.map(a => `${a.name} ${a.steam}: ${a.perms.join(', ')}`).join('\n');
+  if (document.activeElement !== $('daOwners')) $('daOwners').value = r.owners.join(' ');
+}
+$('btnDaOwners').onclick = (e) => run(async () => { const r = await ipc.invoke('drpadmin:setOwners', $('daOwners').value); toast(r.error ? 'Saved, but admins.json could not be written: ' + r.error : 'Owner Steam ids saved'); refreshIngameAdmins(); }, e.target);
 // one line per DRP_Admin event: who did what to whom
 function daWho(w) { return !w ? '—' : w.name ? esc(w.name) : `<span class="muted">${esc(w.cls || '?')}</span>`; }
 function daLine(e) {
@@ -1741,6 +1750,19 @@ async function refreshTickets() {
   $('tkTable').querySelector('tbody').innerHTML = tkRows.map(t => `<tr data-id="${esc(t.id)}" class="${t.id === tkSelected ? 'selected' : ''}"><td class="mono">#${esc(t.id)}${t.status === 'open' ? '' : ' <span class="badge">closed</span>'}${t.source === 'discord' ? ' <span class="badge" title="Opened through the Discord bot">discord</span>' : ''}</td><td>${esc(t.subject)}</td><td>${esc(t.player || '')}</td><td>${t.assignee ? esc(t.assignee) : '<span class="muted">nobody</span>'}</td><td>${t.deaths.map(d => '#' + d).join(', ')}</td><td>${t.actions || ''}</td><td class="muted">${esc(tkFmt(t.lastActivity))}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">No tickets.</td></tr>';
   if (tkSelected) showTicket(tkSelected);
 }
+// in-game tickets: the reporter (in-game name, Steam64, GUID), type and urgency, where it was opened and who was near,
+// and the conversation the player sees, with a reply box
+function tkGameBlock(t) {
+  const g = t.game; const c = g.context || {};
+  const urg = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' }[g.urgency] || 'Normal';
+  const near = Array.isArray(c.nearby) && c.nearby.length ? c.nearby.map(n => `${esc(n.name)} (${Math.round(n.dist)} m)`).join(', ') : 'nobody';
+  const conv = (t.messages || []).map(m => `<div class="tk-line"><span class="muted">${esc(tkFmt(m.ts))} · ${m.role === 'admin' ? 'staff ' : ''}${esc(m.by)}${m.role === 'admin' && m.steam ? ` (${esc(m.steam)} / ${esc(m.guid)})` : ''}</span><br>${esc(m.text)}</div>`).join('') || '<div class="muted">No messages.</div>';
+  return `<div class="card-title mt">In game</div>
+    <div class="row gap wrap"><span class="muted">In-game name</span><b>${esc(g.name || t.player || '?')}</b><span class="muted">Steam64</span><span class="mono">${esc(g.steam)}</span><span class="muted">GUID</span><span class="mono">${esc(g.guid || '?')}</span></div>
+    <div class="row gap wrap"><span class="muted">Urgency</span><b>${urg}</b>${c.x ? `<span class="muted">Opened at</span><span class="mono">${Math.round(c.x)}, ${Math.round(c.z)}</span>` : ''}<span class="muted">Near</span><span>${near}</span>${c.death ? `<span class="muted">Last death on the server</span><span>${esc(c.death.cause || '')}${c.death.ago ? ', ' + Math.round(c.death.ago / 60) + ' min before' : ''}</span>` : ''}</div>
+    <div class="card-title mt">Conversation with the player</div>${conv}
+    ${t.status === 'open' ? '<div class="row gap"><input id="tkReply" class="input" placeholder="Reply to the player (they see it in game, signed Admin)"><button class="btn small primary" id="btnTkReply">Reply</button></div>' : ''}`;
+}
 async function showTicket(id) {
   tkSelected = id; let t; try { t = await ipc.invoke('tickets:get', id); } catch (e) { $('tkDetail').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   document.querySelectorAll('#tkTable tbody tr').forEach(tr => tr.classList.toggle('selected', tr.dataset.id === id));
@@ -1753,6 +1775,7 @@ async function showTicket(id) {
     ${t.description ? `<div style="white-space:pre-wrap">${esc(t.description)}</div>` : ''}
     <div class="row gap wrap" style="align-items:center"><span class="muted">Player</span><b>${esc(t.player || '—')}</b><span class="grow"></span><span class="muted">Assignee</span><input id="tkAssignee" class="input" style="width:140px" value="${esc(t.assignee || '')}" placeholder="nobody"><button class="btn small" id="btnTkAssign">Assign</button></div>
     <div class="row gap wrap">${t.status === 'open' ? '<button class="btn small" id="btnTkClose">Close ticket</button>' : '<button class="btn small" id="btnTkReopen">Reopen</button>'}<button class="btn small" id="btnTkCopy" title="Copy #${esc(t.id)} to paste into a reason">Copy #${esc(t.id)}</button></div>
+    ${t.game ? tkGameBlock(t) : ''}
     <div class="card-title mt row between"><span>Linked deaths</span><span class="row gap"><input id="tkDeathId" class="input short" type="number" min="1" placeholder="death #"><button class="btn small" id="btnTkLink">Link</button></span></div>${deaths}
     <div class="card-title mt">Admin actions</div>${actions}
     <div class="card-title mt">Notes</div><div class="row gap"><input id="tkNote" class="input" placeholder="Add a note"><button class="btn small" id="btnTkNote">Add</button></div>${notes}`;
@@ -1761,6 +1784,7 @@ async function showTicket(id) {
   box.querySelector('#btnTkAssign').onclick = () => act(() => ipc.invoke('tickets:assign', t.id, $('tkAssignee').value));
   box.querySelector('#btnTkLink').onclick = () => act(async () => { const n = Number($('tkDeathId').value); if (!n) throw new Error('Give a death record number (Death log page).'); await ipc.invoke('tickets:link', t.id, n); toast(`Death #${n} linked`); });
   box.querySelector('#btnTkNote').onclick = () => act(async () => { await ipc.invoke('tickets:note', t.id, $('tkNote').value); });
+  const rp = box.querySelector('#btnTkReply'); if (rp) rp.onclick = () => act(async () => { await ipc.invoke('tickets:reply', t.id, $('tkReply').value); toast('Sent: the player sees it in game (key K)'); });
   box.querySelector('#btnTkCopy').onclick = () => { navigator.clipboard.writeText('#' + t.id); toast('#' + t.id + ' copied'); };
   const c = box.querySelector('#btnTkClose'); if (c) c.onclick = () => act(async () => { const ok = await showModal(`Close ticket #${t.id}?`, `<label class="field">Reason (optional) <input id="tkWhy" class="input"></label>${t.channelUrl ? '<p class="muted">Its Discord channel is closed too, with the transcript posted to the ticket log.</p>' : ''}`, [{ label: 'Close ticket', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('tickets:setStatus', t.id, 'closed', $('tkWhy').value.trim()); });
   const o = box.querySelector('#btnTkReopen'); if (o) o.onclick = () => act(() => ipc.invoke('tickets:setStatus', t.id, 'open'));

@@ -23,9 +23,14 @@ const PERMS = [
   ['players.ban', 'Ban a player', 'Players'],
   ['lists.view', 'See the ban list, whitelist, priority queue and player notes', 'Players'],
   ['lists.manage', 'Add to and remove from the ban list, whitelist and priority queue; edit player notes', 'Players'],
+  ['admin.menu', 'Open the in-game admin menu (DRP_Admin); needs a Steam id on the user', 'In-game admin'],
+  ['admin.players', 'See and inspect players in game; the in-game map', 'In-game admin'],
   ['admin.heal', 'Heal', 'In-game admin'],
   ['admin.teleport', 'Teleport players (to a player, a map point, their death)', 'In-game admin'],
+  ['admin.teleport.manage', 'Save and delete the server teleport spots (in game)', 'In-game admin'],
   ['admin.spawn', 'Give or spawn any item by class name', 'In-game admin'],
+  ['admin.spawn.forbidden', 'Spawn items on the forbidden items list (in game)', 'In-game admin'],
+  ['admin.weather', 'Change the weather and the time of day (in game)', 'In-game admin'],
   ['admin.kits', 'Give or spawn saved kits', 'In-game admin'],
   ['admin.vehicles', 'Spawn vehicles', 'In-game admin'],
   ['admin.god', 'God mode', 'In-game admin'],
@@ -48,7 +53,7 @@ const DEFAULT_GROUPS = {
   owner: { name: 'Owner', perms: ALL, builtin: true },
   admin: { name: 'Admin', perms: ALL.filter(p => p !== 'portal.users'), approval: {} },
   moderator: { name: 'Moderator', perms: ['server.view', 'players.view', 'players.message', 'players.kick', 'players.ban', 'lists.view', 'lists.manage', 'deaths.view', 'tickets.view', 'tickets.manage', 'audit.view'] },
-  gm: { name: 'Game master', perms: ['server.view', 'players.view', 'players.message', 'lists.view', 'admin.heal', 'admin.teleport', 'admin.spawn', 'admin.kits', 'admin.vehicles', 'admin.god', 'admin.refund', 'deaths.view', 'tickets.view'] },
+  gm: { name: 'Game master', perms: ['admin.menu', 'admin.players', 'server.view', 'players.view', 'players.message', 'lists.view', 'admin.heal', 'admin.teleport', 'admin.spawn', 'admin.kits', 'admin.vehicles', 'admin.god', 'admin.refund', 'deaths.view', 'tickets.view'] },
   developer: { name: 'Developer', perms: ['server.view', 'server.control', 'server.backup', 'logs.view', 'audit.view', 'deaths.view'] }
 };
 // which permission each in-game action needs
@@ -60,17 +65,20 @@ function load() {
   db = { enabled: false, users: {}, groups: {}, sessions: {}, ...(jsonstore.readOr(file(), {}) || {}) };
   for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (!db.groups[id]) db.groups[id] = { ...g, perms: g.perms.slice() };
   // permissions added in a later version join the built-in groups that had them by default (your own groups are left alone)
-  const PERMS_VERSION = 4;
+  const PERMS_VERSION = 5;
   const was = db.permsVersion || 1;
   if (was < 2) for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
   // v3 split "give items, kits and vehicles" into three: whoever had it keeps all three; Owner and Admin may approve
   if (was < 3) { for (const g of Object.values(db.groups)) if ((g.perms || []).includes('admin.spawn')) g.perms = [...new Set([...g.perms, 'admin.kits', 'admin.vehicles'])]; for (const u of Object.values(db.users)) if ((u.allow || []).includes('admin.spawn')) u.allow = [...new Set([...u.allow, 'admin.kits', 'admin.vehicles'])]; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'requests.approve'])]; }
   if (was < 4) { for (const g of Object.values(db.groups)) if ((g.perms || []).includes('admin.kill') && !g.builtin) g.perms = [...new Set([...g.perms, 'admin.afflict'])]; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.afflict'])]; }
+  // v5 added the in-game admin permissions (DRP_Admin): Owner and Admin get them all, Game master the menu and players
+  if (was < 5) { const inGame = ['admin.menu', 'admin.players', 'admin.teleport.manage', 'admin.spawn.forbidden', 'admin.weather']; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, ...inGame])]; if (db.groups.gm && db.groups.gm.builtin !== false) db.groups.gm.perms = [...new Set([...db.groups.gm.perms, 'admin.menu', 'admin.players'])]; }
   if (was < PERMS_VERSION) { db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save(); }
   db.requests = db.requests || []; db.usage = db.usage || {}; db.policy = { blockedClasses: [], ...(db.policy || {}) };
   return db;
 }
-function save() { jsonstore.write(file(), load(), true); }
+// every change to users and groups also refreshes the in-game admin list (written only when it changed)
+function save() { jsonstore.write(file(), load(), true); try { require('./drpadmin').syncAdmins(); } catch { /* not available */ } }
 const idOf = (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').slice(0, 32);
 function hash(pw, salt) { return crypto.scryptSync(String(pw), salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex'); }
 function check(pw, u) { try { const a = Buffer.from(hash(pw, u.salt), 'hex'), b = Buffer.from(u.hash, 'hex'); return a.length === b.length && crypto.timingSafeEqual(a, b); } catch { return false; } }
@@ -81,7 +89,7 @@ function permsOf(u) {
   for (const p of u.deny || []) set.delete(p);
   return set;
 }
-const publicUser = (u) => ({ id: u.id, name: u.name, groups: u.groups || [], allow: u.allow || [], deny: u.deny || [], enabled: u.enabled !== false, trusted: !!u.trusted, createdAt: u.createdAt, createdBy: u.createdBy || null, lastLogin: u.lastLogin || null, lastIp: u.lastIp || null, perms: [...permsOf(u)] });
+const publicUser = (u) => ({ id: u.id, name: u.name, steam: u.steam || '', groups: u.groups || [], allow: u.allow || [], deny: u.deny || [], enabled: u.enabled !== false, trusted: !!u.trusted, createdAt: u.createdAt, createdBy: u.createdBy || null, lastLogin: u.lastLogin || null, lastIp: u.lastIp || null, perms: [...permsOf(u)] });
 
 function listUsers() { return Object.values(load().users).map(publicUser).sort((a, b) => a.name.localeCompare(b.name)); }
 function listGroups() { return Object.entries(load().groups).map(([id, g]) => ({ id, name: g.name, perms: g.perms || [], approval: g.approval || {}, itemsPerDay: Number(g.itemsPerDay) || 0, builtin: !!g.builtin, members: Object.values(load().users).filter(u => (u.groups || []).includes(id)).length })); }
@@ -122,13 +130,15 @@ function allowedNow(user, action, args) {
   if (n && pol.itemsPerDay && usedToday(user.id) + n > pol.itemsPerDay) throw new Error(`That would exceed your limit of ${pol.itemsPerDay} items per day (${usedToday(user.id)} used in the last 24 h).`);
   return !(cat && pol.needs.has(cat));
 }
-function createUser({ name, password, groups = [], allow = [], deny = [] }, by = 'app') {
+// a Steam64 id ties a portal user to their in-game character (DRP_Admin admins.json); '' clears it
+function steamId(v) { const s = String(v || '').trim(); if (s && !/^7656\d{13}$/.test(s)) throw new Error('A Steam id is 17 digits starting with 7656 (Steam64).'); return s; }
+function createUser({ name, password, groups = [], allow = [], deny = [], steam = '' }, by = 'app') {
   const d = load(); const id = idOf(name); name = String(name || '').trim();
   if (!id || name.length < 2 || name.length > 32) throw new Error('Give a user name of 2 to 32 characters.');
   if (d.users[id]) throw new Error(`There is already a user called ${d.users[id].name}.`);
   if (String(password || '').length < 8) throw new Error('The password needs at least 8 characters.');
   const salt = crypto.randomBytes(16).toString('hex');
-  d.users[id] = { id, name, salt, hash: hash(password, salt), groups: groups.filter(g => d.groups[g]), allow: allow.filter(p => ALL.includes(p)), deny: deny.filter(p => ALL.includes(p)), enabled: true, createdAt: new Date().toISOString(), createdBy: by };
+  d.users[id] = { id, name, salt, hash: hash(password, salt), groups: groups.filter(g => d.groups[g]), allow: allow.filter(p => ALL.includes(p)), deny: deny.filter(p => ALL.includes(p)), steam: steamId(steam), enabled: true, createdAt: new Date().toISOString(), createdBy: by };
   save(); audit(by, 'portal: user created', name); return publicUser(d.users[id]);
 }
 function updateUser(id, patch, by = 'app') {
@@ -140,6 +150,7 @@ function updateUser(id, patch, by = 'app') {
   if (patch.deny) next.deny = patch.deny.filter(p => ALL.includes(p));
   if (patch.enabled !== undefined) next.enabled = !!patch.enabled;
   if (patch.trusted !== undefined) next.trusted = !!patch.trusted;
+  if (patch.steam !== undefined) { next.steam = steamId(patch.steam); const taken = Object.values(d.users).find(x => x.id !== id && next.steam && x.steam === next.steam); if (taken) throw new Error(`That Steam id already belongs to ${taken.name}.`); }
   if (patch.password) { if (String(patch.password).length < 8) throw new Error('The password needs at least 8 characters.'); next.salt = crypto.randomBytes(16).toString('hex'); next.hash = hash(patch.password, next.salt); }
   // the last user who can manage the portal cannot lose that (by groups, permissions or being disabled)
   const stillManaged = (next.enabled !== false && permsOf(next).has('portal.users')) || Object.values(d.users).some(x => x.id !== id && x.enabled !== false && permsOf(x).has('portal.users'));
