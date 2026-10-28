@@ -86,6 +86,13 @@ Built next (2026-10-28), not yet tried in game:
   turn, pitch, roll, snap to ground, move to aim, duplicate, delete; switch sets on and off; export to an init.c
   snippet and JSON. Sets that are on come back after a restart (objects already standing there are reused).
   Permission `admin.editor`. Not done: a mouse gizmo (moves are buttons with a step size).
+- **Spectate** (Player info → *Spectate*): the freecam follows the player (started at them if it was off), orbit
+  with the mouse, W/S for distance, all the way in is first person; found again by Steam64 after a respawn.
+- **Vehicle actions** (Map → right-click a vehicle): repair (every zone and part), refuel (all fluids), flip upright,
+  teleport to it, bring it here (empty only), invulnerable on/off, delete (empty only, `admin.delete`, two clicks).
+- **ESP** (toolbar → *ESP*): labels with name and distance for players, vehicles, infected and animals, base parts
+  and tents, loose items; range 50–1500 m. Vehicles at any distance (server list), players as far as the game
+  streams them, the rest within 200 m. Permission `admin.esp`. Acting on a label is by aiming (H, Delete).
 - **Heal / cure fixes**: curing now empties the stomach, removes the agents, switches off the disease modifiers and
   clears queued symptoms (in game and through the bridge, now v7). Heal fully also resets stats and wakes them.
 

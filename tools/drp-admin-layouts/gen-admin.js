@@ -45,7 +45,7 @@ fs.mkdirSync(OUT, { recursive: true });
 // ------------------------------------------------------------------ toolbar (the admin menu itself)
 // Full-screen, transparent frame; the toolbar is a bar along the top, stretched by script to the screen width.
 const TB = 40;
-const toolbarButtons = [['tb_players', 'Players', 110], ['tb_info', 'Player info', 120], ['tb_spawner', 'Item spawner', 130], ['tb_teleports', 'Teleports', 110], ['tb_map', 'Map', 70], ['tb_tickets', 'Tickets', 110], ['tb_env', 'Environment', 120], ['tb_server', 'Server info', 110], ['tb_self', 'Cheats', 90], ['tb_editor', 'Editor', 90]];
+const toolbarButtons = [['tb_players', 'Players', 110], ['tb_info', 'Player info', 120], ['tb_spawner', 'Item spawner', 130], ['tb_teleports', 'Teleports', 110], ['tb_map', 'Map', 70], ['tb_tickets', 'Tickets', 110], ['tb_env', 'Environment', 120], ['tb_server', 'Server info', 110], ['tb_self', 'Cheats', 90], ['tb_editor', 'Editor', 90], ['tb_esp', 'ESP', 70]];
 let tx = 170;
 const tbChildren = [text('tb_title', 16, 0, 150, TB, 'DRP Admin', { bold: true, size: 18 })];
 for (const [id, lbl, w] of toolbarButtons) { tbChildren.push(button(id, tx, 5, w, TB - 10, lbl, { size: 14 })); tx += w + 6; }
@@ -132,6 +132,7 @@ write('drpa_info.layout', content('in_root', [
   button('in_msg_send', 320, 350, 180, 30, 'Send message'),
   button('in_kick', 320, 386, 180, 30, 'Kick (text = reason)'),
   button('in_moderate', 320, 422, 180, 30, 'Moderate...', { color: BTN_ACCENT }),
+  button('in_spectate', 320, 458, 180, 30, 'Spectate'),
   button('in_fx_god', 510, 56, 180, 30, 'God mode'),
   button('in_fx_freeze', 510, 92, 180, 30, 'Freeze'),
   button('in_fx_invisible', 510, 128, 180, 30, 'Invisible'),
@@ -196,6 +197,18 @@ write('drpa_map.layout', content('mp_root', [
   button('mp_loot_find', 680, 360, 97, 28, 'Find', { color: BTN_ACCENT, size: 13 }),
   button('mp_loot_clear', 783, 360, 97, 28, 'Clear', { size: 13 }),
   multiText('mp_layer_info', 680, 396, 200, 200, '', 12),
+  // right-click a vehicle: its actions (last, so it draws over the map)
+  panel('mp_vmenu', 0, 0, 190, 296, CARD, [
+    text('mp_vm_title', 8, 4, 174, 24, '', { bold: true, size: 13 }),
+    button('mp_vm_repair', 8, 32, 174, 28, 'Repair', { size: 13 }),
+    button('mp_vm_refuel', 8, 64, 174, 28, 'Refuel', { size: 13 }),
+    button('mp_vm_flip', 8, 96, 174, 28, 'Flip upright', { size: 13 }),
+    button('mp_vm_tpto', 8, 128, 174, 28, 'Teleport to it', { size: 13 }),
+    button('mp_vm_bring', 8, 160, 174, 28, 'Bring it here', { size: 13 }),
+    button('mp_vm_god', 8, 192, 174, 28, 'Invulnerable: off', { size: 13 }),
+    button('mp_vm_delete', 8, 224, 174, 28, 'Delete', { color: BTN_ACCENT, size: 13 }),
+    button('mp_vm_close', 8, 260, 174, 28, 'Close', { size: 13 }),
+  ]),
 ]));
 // the canvas over the map (heat, territories, trails): its own top-level layout, since a canvas inside the window
 // draws under the map; the script lays it over the map's rectangle every frame
@@ -308,6 +321,46 @@ write('drpa_editor.layout', content('ed_root', [
   button('ed_ground', 660, 340, 122, 28, 'Snap to ground', { size: 13 }), button('ed_toaim', 788, 340, 122, 28, 'Move to aim', { size: 13 }),
   button('ed_dup', 660, 372, 122, 28, 'Duplicate', { size: 13 }), button('ed_del', 788, 372, 122, 28, 'Delete object', { color: BTN_ACCENT, size: 13 }),
 ]));
+
+// ------------------------------------------------------------------ staff: ESP (window, overlay root, one label)
+write('drpa_espwin.layout', content('es_root', [
+  button('es_on', 8, 8, 320, 30, 'ESP on / off', { color: BTN_ACCENT }),
+  button('es_players', 8, 44, 320, 30, 'Players'),
+  button('es_vehicles', 8, 80, 320, 30, 'Vehicles'),
+  button('es_creatures', 8, 116, 320, 30, 'Infected & animals'),
+  button('es_base', 8, 152, 320, 30, 'Base parts & tents'),
+  button('es_items', 8, 188, 320, 30, 'Loose items'),
+  text('es_range_lbl', 8, 226, 110, 24, 'Range', { size: 13 }),
+  bar('es_range', 122, 230, 200, 18),
+  multiText('es_info', 8, 260, 320, 100, '', 12),
+]));
+// the overlay: full screen, under the admin windows, never takes the mouse
+fs.writeFileSync(path.join(OUT, 'drpa_esp.layout'), `FrameWidgetClass drpa_esp_root {
+ ignorepointer 1
+ position 0 0
+ size 1 1
+ hexactpos 0
+ vexactpos 0
+ hexactsize 0
+ vexactsize 0
+ priority 1
+}`);
+fs.writeFileSync(path.join(OUT, 'drpa_esp_label.layout'), `TextWidgetClass drpa_esp_label {
+ ignorepointer 1
+ position 0 0
+ size 200 20
+ hexactpos 1
+ vexactpos 1
+ hexactsize 1
+ vexactsize 1
+ text ""
+ font "${'gui/fonts/sdf_MetronBook24'}"
+ "exact text" 1
+ "exact text size" 13
+ "text halign" center
+ "text valign" center
+}`);
+console.log('wrote drpa_esp.layout, drpa_esp_label.layout');
 
 // ------------------------------------------------------------------ staff: Moderate (bans, lists, watchlist)
 write('drpa_moderate.layout', content('mo_root', [

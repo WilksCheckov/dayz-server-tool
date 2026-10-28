@@ -41,6 +41,7 @@ const PERMS = [
   ['admin.delete', 'Delete objects in game: base parts, locks, items, vehicles (Cheats → Delete tool)', 'In-game admin'],
   ['admin.freecam', 'Freecam in game (fly the camera; the body stays behind)', 'In-game admin'],
   ['admin.editor', 'Object editor in game: place objects and run object sets for events', 'In-game admin'],
+  ['admin.esp', 'ESP in game: labels for players, vehicles, creatures, base parts and items', 'In-game admin'],
   ['deaths.view', 'Death log', 'Records'],
   ['tickets.view', 'See tickets', 'Records'],
   ['tickets.manage', 'Assign, note, link and close tickets', 'Records'],
@@ -79,7 +80,7 @@ function load() {
   if (was < 5) { const inGame = ['admin.menu', 'admin.players', 'admin.teleport.manage', 'admin.spawn.forbidden', 'admin.weather']; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, ...inGame])]; if (db.groups.gm && db.groups.gm.builtin !== false) db.groups.gm.perms = [...new Set([...db.groups.gm.perms, 'admin.menu', 'admin.players'])]; }
   // v6 added DRP_Industry's staff kits: Owner and Admin
   if (was < 6) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.industry'])];
-  if (was < 7) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.delete', 'admin.freecam', 'admin.editor'])];
+  if (was < 7) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.delete', 'admin.freecam', 'admin.editor', 'admin.esp'])];
   if (was < PERMS_VERSION) { db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save(); }
   db.requests = db.requests || []; db.usage = db.usage || {}; db.policy = { blockedClasses: [], ...(db.policy || {}) };
   return db;

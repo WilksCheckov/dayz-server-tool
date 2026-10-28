@@ -102,13 +102,14 @@ function staticLayers() {
 }
 
 // ---------- loot search from the game ----------
-let lootReqAt = 0;
+let lootReqAt = 0, lootReqItem = null;
 function answerLoot() {
   const req = path.join(dir(), 'loot_req.txt');
   let st; try { st = fs.statSync(req); } catch { return false; }
-  if (st.mtimeMs === lootReqAt) return false;
-  lootReqAt = st.mtimeMs;
   const item = fs.readFileSync(req, 'utf8').trim().slice(0, 80);
+  // a new request: a new time, other text, or the answer gone (the game deletes it when it asks again)
+  if (st.mtimeMs === lootReqAt && item === lootReqItem && fs.existsSync(path.join(dir(), 'loot.json'))) return false;
+  lootReqAt = st.mtimeMs; lootReqItem = item;
   const out = { now: now(), item, found: false, reason: '', buildings: 0, spots: [] };
   try {
     const lm = require('./lootmap');
