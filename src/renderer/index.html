@@ -793,6 +793,13 @@
               <label class="field">Warning message ({min} = minutes left) <input id="rsWarnMsg" class="input"></label>
             </div>
           </div>
+                  <div class="card">
+            <div class="card-title row between"><span>In-game events <span class="muted">DRP_Admin editor sets switched on or off on a timetable, announced to every player</span></span><button class="btn small" id="btnEvAdd">Add</button></div>
+            <div class="table-wrap"><table class="table" id="evTable"><thead><tr><th>Set</th><th>Switch</th><th>Days</th><th>Time</th><th>Warn (min)</th><th>Message</th><th>On</th><th>Next</th><th></th></tr></thead><tbody></tbody></table></div>
+            <div class="row gap wrap mt"><button class="btn small primary" id="btnEvSave">Save timetable</button><span class="muted" id="evSets"></span></div>
+            <div class="row gap wrap mt"><input id="evAnnounce" class="input" placeholder="Announcement to every player in game" style="flex:1"><button class="btn small" id="btnEvAnnounce">Announce now</button></div>
+            <p class="muted">Make the sets in game (admin menu → Editor). Times are this PC's local time; a switch more than 5 minutes late is skipped. Needs the DRP_Admin mod in the game.</p>
+          </div>
         </section>
 
         <!-- ONLINE PLAYERS (RCON) -->

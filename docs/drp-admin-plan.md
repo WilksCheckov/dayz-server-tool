@@ -100,6 +100,15 @@ Built next (2026-10-28), not yet tried in game:
 - **Items on the map** (step 8): *Where are they now?* in the Map window shows where an item is right now with its
   live count next to `types.xml` nominal and min (from the anti-dupe mod's item positions, so the real server);
   *Wipe it on the ground* deletes it lying loose within 300 m of the camera (`admin.delete`, two clicks).
+- **Scheduled events** (step 9, app Restarts page → *In-game events*): editor sets switched on or off at a time on
+  chosen weekdays, a warning N minutes before and a message at the switch, plus *Now* and *Announce now*. The app
+  writes `DayZAdminTools/editor_cmd.jsonl`, the mod applies it within 10 s and lists its sets in
+  `editor_sets.json`. Code: `src/main/schedevents.js`, mod `DRPA_Editor.Commands`.
+- **Anticheat from mod data** (step 9): on every player-on-player hit the mod flags melee reach (over 6 m), firearm
+  hits far beyond the weapon's longest zeroing (1.6×, at least 350 m) and admins hurting players while invisible or
+  in god mode. Flags arrive as `ev:"flag"` and become suspicious activity (alerts, automatic watchlist). A cheater's
+  own god mode cannot be told apart reliably, so it is not attempted.
+- **Admin notices** at most one a second, faster ones merged (fixes notices stuck on screen after spawning a lot).
 - **Heal / cure fixes**: curing now empties the stomach, removes the agents, switches off the disease modifiers and
   clears queued symptoms (in game and through the bridge, now v7). Heal fully also resets stats and wakes them.
 

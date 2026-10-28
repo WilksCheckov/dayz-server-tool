@@ -80,4 +80,13 @@ t.ok('filter by kind and text', da.list({ ev: 'kill,build' }).length === 2 && da
 t.ok('server start recorded', da.status().lastStart && da.status().lastStart.world === 'chernarusplus');
 fs.writeFileSync(ev, '{"t":"2026-10-26 21:00:00","ev":"start","world":"enoch"}\n');
 t.ok('a new (smaller) file is read from the start', da.ingest() === 1 && da.status().lastStart.world === 'enoch');
+
+// anticheat flags from the mod become suspicious activity (recent lines only)
+const stamp = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${d.toTimeString().slice(0, 8)}`;
+fs.appendFileSync(ev, JSON.stringify({ t: stamp(new Date()), ev: 'flag', by: { id: 'GCHEAT', steam: '76561198000000009', name: 'Eve' }, reason: 'melee reach', detail: 'hit Bob at 14 m with a fist' }) + '\n');
+fs.appendFileSync(ev, JSON.stringify({ t: '2026-01-01 00:00:00', ev: 'flag', by: { id: 'GOLD', name: 'Old' }, reason: 'melee reach', detail: 'long ago' }) + '\n');
+da.ingest();
+const cf = t.mod('combat').forPlayer('GCHEAT');
+t.ok('a mod flag is suspicious activity', cf && cf.flags.some(f => f.reason === 'melee reach') && cf.flagHistory[0].detail.includes('14 m'), JSON.stringify(cf && cf.flags));
+t.ok('old flag lines are not replayed', !t.mod('combat').forPlayer('GOLD'));
 t.done();

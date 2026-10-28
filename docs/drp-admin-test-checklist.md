@@ -72,6 +72,13 @@ the test server's folder. Things marked *(real server)* need your main server wi
 - [ ] *(real server)* Map → type `AKM`, **Where are they now?**: marks and "AKM now: N (nominal, min)".
 - [ ] **Wipe it on the ground**: two clicks; only loose ones within 300 m go.
 
+## Scheduled events and anticheat
+- [ ] Make a set in the Editor; the app's Restarts page → *In-game events* lists it under "Sets in game".
+- [ ] Add a row a few minutes ahead with a 1-minute warning and a message; the warning and the switch show in game.
+- [ ] *Now* switches it at once; *Announce now* shows a message to everyone.
+- [ ] Second player needed: an admin with god mode or invisible on hits a player → a flag in the app's Statistics
+      → Suspicious activity.
+
 ## Spawner
 - [ ] A canteen or barrel: **Liquid** lists the 8 liquids (crude oil with DRP_Industry); **Full %** sets the amount;
       **Temperature** presets.

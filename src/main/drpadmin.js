@@ -112,6 +112,12 @@ function ingest() {
     }
   } finally { fs.closeSync(fd); }
   for (const e of fresh) if (e.ev === 'admin') auditAdmin(e);
+  // anticheat checks the mod makes on hits (melee reach, beyond a weapon's range, admins hurting players while
+  // invisible or in god mode): suspicious activity, which alerts and feeds the watchlist
+  for (const e of fresh) {
+    if (e.ev !== 'flag' || !e.by || Date.now() - e.ts > AUDIT_WINDOW_MS) continue;
+    try { require('./combat').flagExternal(e.by.id || e.by.steam || e.by.name, e.by.name, String(e.reason || 'mod check'), String(e.detail || ''), e.ts); } catch (err) { emitRef('console', { source: 'drpadmin', line: 'Anticheat flag not recorded: ' + err.message }); }
+  }
   if (!fresh.length) { save(); return 0; }
   d.events.push(...fresh); if (d.events.length > MAX_EVENTS) d.events.splice(0, d.events.length - MAX_EVENTS);
   save();

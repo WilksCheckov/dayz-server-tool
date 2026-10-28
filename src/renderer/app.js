@@ -171,7 +171,7 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
   if (name === 'logs') refreshLogList();
   if (name === 'backups') { loadScheduleForm(); refreshSchedule(); refreshBackups(); }
-  if (name === 'restarts') { loadScheduleForm(); refreshSchedule(); }
+  if (name === 'restarts') { loadScheduleForm(); refreshSchedule(); refreshEvents(); }
   if (name === 'updates') { refreshUpdater(); refreshSteam(); }
   if (name === 'launch') { refreshLaunchLines(); loadCfgForm(); }
   if (name === 'players') { loadRconForm(); refreshPlayers(); refreshRecent(); }
@@ -2582,6 +2582,39 @@ async function refreshCombat() {
   $('combatBoards').innerHTML = lb('Headshot rate (20+ hits)', c.headshotRate) + lb('Fewest hits per kill (3+ kills)', c.hitsPerKill) + lb('Most damage dealt', c.damageDealt) + lb('Most damage taken', c.damageTaken) + lb('Headshots', c.headshots) + lb('Longest kills', c.longestKills) + lb('Rivalries (killer → victim)', c.rivalries) + lb('Favourite weapons', c.favouriteWeapons) + lb('Base builders (actions)', c.builders);
 }
 function pingBadge(ms) { return `<span class="badge ${ms >= 300 ? 'bad' : ms >= 150 ? 'warn' : 'ok'}">${ms} ms</span>`; }
+// ---------- in-game events: DRP_Admin editor sets on a timetable ----------
+const EV_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+let evRows = [];
+function evRowHtml(e, i, sets) {
+  const opts = [...new Set([e.set, ...sets.map(s => s.name)].filter(Boolean))].map(n => `<option ${n === e.set ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  return `<tr data-i="${i}">
+    <td><select class="input ev-set" style="width:150px">${opts || '<option value="">no sets yet</option>'}</select></td>
+    <td><select class="input ev-on" style="width:80px"><option value="1" ${e.on !== false ? 'selected' : ''}>on</option><option value="0" ${e.on === false ? 'selected' : ''}>off</option></select></td>
+    <td>${EV_DAYS.map((d, k) => `<label class="check small"><input type="checkbox" class="ev-day" value="${k}" ${(e.days || []).includes(k) ? 'checked' : ''}>${d}</label>`).join(' ')}<div class="muted small">none ticked = every day</div></td>
+    <td><input class="input ev-time" style="width:70px" value="${esc(e.time || '20:00')}"></td>
+    <td><input class="input ev-warn" type="number" min="0" max="120" style="width:60px" value="${e.warnMin || 0}"></td>
+    <td><input class="input ev-msg" value="${esc(e.message || '')}" placeholder="optional"></td>
+    <td><input type="checkbox" class="ev-enabled" ${e.enabled !== false ? 'checked' : ''}></td>
+    <td class="muted small">${e.next ? fmtDate(e.next) : '—'}</td>
+    <td class="row gap"><button class="btn small ev-now">Now</button><button class="btn small ev-del">✕</button></td></tr>`;
+}
+async function refreshEvents() {
+  let st; try { st = await ipc.invoke('events:state'); } catch { return; }
+  evRows = st.entries;
+  $('evSets').textContent = st.sets.length ? `Sets in game: ${st.sets.map(s => `${s.name} (${s.count}${s.active ? ', on' : ''})`).join(', ')}` : 'No sets reported by the game yet.';
+  drawEvents(st.sets);
+}
+function readEvents() {
+  return [...$('evTable').querySelectorAll('tbody tr[data-i]')].map(tr => ({ id: (evRows[Number(tr.dataset.i)] || {}).id, set: tr.querySelector('.ev-set').value, on: tr.querySelector('.ev-on').value === '1', days: [...tr.querySelectorAll('.ev-day:checked')].map(c => Number(c.value)), time: tr.querySelector('.ev-time').value, warnMin: Number(tr.querySelector('.ev-warn').value) || 0, message: tr.querySelector('.ev-msg').value, enabled: tr.querySelector('.ev-enabled').checked }));
+}
+function drawEvents(sets) {
+  $('evTable').querySelector('tbody').innerHTML = evRows.map((e, i) => evRowHtml(e, i, sets)).join('') || '<tr><td colspan="9" class="muted">No scheduled events. Add one.</td></tr>';
+  $('evTable').querySelectorAll('.ev-del').forEach(b => b.onclick = () => { evRows = readEvents(); evRows.splice(Number(b.closest('tr').dataset.i), 1); drawEvents(sets); });
+  $('evTable').querySelectorAll('.ev-now').forEach(b => b.onclick = () => run(async () => { const r = readEvents()[Number(b.closest('tr').dataset.i)]; await ipc.invoke('events:switch', r.set, r.on); toast(`${r.set} switched ${r.on ? 'on' : 'off'} in game (within 10 s)`); }));
+  $('btnEvAdd').onclick = () => { evRows = readEvents(); evRows.push({ set: (sets[0] || {}).name || '', on: true, days: [], time: '20:00', warnMin: 10, message: '', enabled: true }); drawEvents(sets); };
+}
+$('btnEvSave').onclick = (e) => run(async () => { await ipc.invoke('events:save', readEvents()); toast('Timetable saved'); refreshEvents(); }, e.target);
+$('btnEvAnnounce').onclick = (e) => run(async () => { await ipc.invoke('events:announce', $('evAnnounce').value); $('evAnnounce').value = ''; toast('Sent to every player in game (within 10 s)'); }, e.target);
 // ---------- watchlist ----------
 const WL_CONF = { low: ['Low', ''], medium: ['Medium', 'warn'], high: ['High', 'bad'] };
 const WL_SRC = { app: 'app', game: 'in game', auto: 'automatic' };
