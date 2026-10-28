@@ -124,17 +124,52 @@ function answerLoot() {
   return true;
 }
 
+// ---------- live items from the game: where one item is now (the anti-dupe mod's item positions, every 5 min) ----------
+let itemsReqAt = 0, itemsReqItem = null;
+function answerItems() {
+  const req = path.join(dir(), 'items_req.txt');
+  let st; try { st = fs.statSync(req); } catch { return false; }
+  const item = fs.readFileSync(req, 'utf8').trim().slice(0, 80);
+  if (st.mtimeMs === itemsReqAt && item === itemsReqItem && fs.existsSync(path.join(dir(), 'items.json'))) return false;
+  itemsReqAt = st.mtimeMs; itemsReqItem = item;
+  const out = { now: now(), item, found: false, reason: '', count: 0, nominal: -1, min: -1, ago: 0, spots: [] };
+  try {
+    const live = require('./anticheat').liveLoot();
+    if (!live.available) throw new Error(live.reason || 'No live item positions yet.');
+    // exact class first (case-insensitive), then the first class containing the text
+    const low = item.toLowerCase();
+    let ci = live.classes.findIndex(c => c.toLowerCase() === low);
+    if (ci < 0) ci = live.classes.findIndex(c => c.toLowerCase().includes(low));
+    if (ci < 0) throw new Error(`No ${item} in the world right now.`);
+    const cls = live.classes[ci];
+    const here = live.items.filter(x => x[0] === ci);
+    out.item = cls; out.found = true; out.count = here.length; out.ago = Math.max(0, Math.round((Date.now() - live.at) / 1000));
+    out.spots = here.slice(0, MAX_LOOT).map(x => ({ x: Math.round(x[1]), z: Math.round(x[2]), text: live.places[x[3]] || '' }));
+    try { const t = require('./lootmap').items().find(i => i.name.toLowerCase() === cls.toLowerCase()); if (t) { out.nominal = t.nominal; out.min = t.min; } } catch { /* no types */ }
+  } catch (e) { out.reason = e.message; }
+  writeIfChanged(path.join(dir(), 'items.json'), out);
+  return true;
+}
+
+// the app's kits (Kits page), expanded to one line per item ("Parent;Attachment;Attachment"), for the game's
+// item spawner (DayZAdminTools/kits.json)
+function kitsFile() {
+  let list = []; try { const live = require('./live'); list = live.kits().map(k => { let items = []; try { items = live.kitItems(k.name); } catch { items = []; } return { name: k.name, items }; }).filter(k => k.items.length); } catch { /* no kits */ }
+  return { kits: list };
+}
+
 let lastAt = 0;
 // called from the ingest loop: loot answers at once, the other layers once a minute
 function ingest({ force = false } = {}) {
   if (!fs.existsSync(settings.paths().profilesDir)) return 0;
   fs.mkdirSync(dir(), { recursive: true });
-  let written = answerLoot() ? 1 : 0;
+  let written = (answerLoot() ? 1 : 0) + (answerItems() ? 1 : 0);
   if (!force && Date.now() - lastAt < 60000) return written;
   lastAt = Date.now();
   for (const r of Object.keys(RANGES)) if (writeIfChanged(path.join(dir(), `timed_${r}.json`), timed(r))) written++;
   if (writeIfChanged(path.join(dir(), 'static.json'), staticLayers())) written++;
+  try { if (writeIfChanged(path.join(settings.paths().profilesDir, 'DayZAdminTools', 'kits.json'), kitsFile())) written++; } catch { /* no kits */ }
   return written;
 }
 
-module.exports = { ingest, timed, staticLayers, answerLoot, RANGES };
+module.exports = { ingest, timed, staticLayers, answerLoot, answerItems, kitsFile, RANGES };

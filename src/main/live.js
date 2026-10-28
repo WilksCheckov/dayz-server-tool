@@ -220,4 +220,4 @@ async function act(action, id, args = {}, by = 'app') {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, players, world, act, vact, kits, saveKit, deleteKit, vehicles, spawnAt };
+module.exports = { init, players, world, act, vact, kits, kitItems, saveKit, deleteKit, vehicles, spawnAt };

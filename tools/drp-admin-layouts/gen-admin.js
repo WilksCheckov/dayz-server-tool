@@ -113,6 +113,7 @@ write('drpa_spawner.layout', content('sp_root', [
   button('sp_feet', 693, 258, 107, 30, 'At my feet', { size: 13 }),
   button('sp_self', 580, 294, 107, 30, 'My inventory', { size: 13 }),
   button('sp_target', 693, 294, 107, 30, 'Their inventory', { size: 13 }),
+  button('sp_into', 580, 330, 220, 30, 'Into what I look at', { size: 13 }),
   // last, so it draws over the buttons below when open
   list('sp_liquid_list', 580, 180, 220, 300, 13),
 ]));
@@ -133,6 +134,7 @@ write('drpa_info.layout', content('in_root', [
   button('in_kick', 320, 386, 180, 30, 'Kick (text = reason)'),
   button('in_moderate', 320, 422, 180, 30, 'Moderate...', { color: BTN_ACCENT }),
   button('in_spectate', 320, 458, 180, 30, 'Spectate'),
+  button('in_copypos', 320, 494, 180, 30, 'Copy position'),
   button('in_fx_god', 510, 56, 180, 30, 'God mode'),
   button('in_fx_freeze', 510, 92, 180, 30, 'Freeze'),
   button('in_fx_invisible', 510, 128, 180, 30, 'Invisible'),
@@ -196,6 +198,8 @@ write('drpa_map.layout', content('mp_root', [
   edit('mp_loot', 680, 328, 200, 26),
   button('mp_loot_find', 680, 360, 97, 28, 'Find', { color: BTN_ACCENT, size: 13 }),
   button('mp_loot_clear', 783, 360, 97, 28, 'Clear', { size: 13 }),
+  button('mp_items_find', 680, 396, 200, 28, 'Where are they now?', { size: 13 }),
+  button('mp_wipe', 680, 430, 200, 28, 'Wipe it on the ground (300 m)', { size: 13 }),
   multiText('mp_layer_info', 680, 396, 200, 200, '', 12),
   // right-click a vehicle: its actions (last, so it draws over the map)
   panel('mp_vmenu', 0, 0, 190, 296, CARD, [
@@ -440,7 +444,9 @@ write('drpa_self.layout', content('sf_root', [
   button('sf_delete', 8, 268, 260, 30, 'Delete tool (Del)'),
   button('sf_freecam', 8, 304, 260, 30, 'Freecam (Ins)'),
   button('sf_body', 8, 340, 260, 30, 'Leave freecam: my body here', { color: BTN_ACCENT }),
-  multiText('sf_active', 8, 380, 260, 60, '', 13),
+  button('sf_copypos', 8, 380, 127, 30, 'Copy my position', { size: 13 }),
+  button('sf_dupe', 141, 380, 127, 30, 'Duplicate in hands', { size: 13 }),
+  multiText('sf_active', 8, 420, 260, 60, '', 13),
 ]));
 
 // ------------------------------------------------------------------ delete tool: the confirmation (a menu of its own)

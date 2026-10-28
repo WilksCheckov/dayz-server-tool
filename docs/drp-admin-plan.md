@@ -93,6 +93,13 @@ Built next (2026-10-28), not yet tried in game:
 - **ESP** (toolbar → *ESP*): labels with name and distance for players, vehicles, infected and animals, base parts
   and tents, loose items; range 50–1500 m. Vehicles at any distance (server list), players as far as the game
   streams them, the rest within 200 m. Permission `admin.esp`. Acting on a label is by aiming (H, Delete).
+- **Step 7 small tools**: the app's kits in the item spawner (Kits category, spawned whole, attachments fitted;
+  `admin.kits`, approval category kits); copy a player's or your own position; Bring takes a player's vehicle along;
+  duplicate the item in hands (condition, quantity, liquid, ammo, attachments); spawn into the container you aim
+  at; window layout presets (Ctrl+1…9 save, 1…9 restore, in `profiles/DRP_Admin/layout_preset_<n>.json`).
+- **Items on the map** (step 8): *Where are they now?* in the Map window shows where an item is right now with its
+  live count next to `types.xml` nominal and min (from the anti-dupe mod's item positions, so the real server);
+  *Wipe it on the ground* deletes it lying loose within 300 m of the camera (`admin.delete`, two clicks).
 - **Heal / cure fixes**: curing now empties the stomach, removes the agents, switches off the disease modifiers and
   clears queued symptoms (in game and through the bridge, now v7). Heal fully also resets stats and wakes them.
 
