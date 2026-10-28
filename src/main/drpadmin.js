@@ -144,7 +144,8 @@ const INGAME_TEXT = {
   clear: 'cleared the inventory', stat: 'set a stat', sick: 'gave a sickness', clearsick: 'cured sicknesses', knockout: 'knocked out',
   breaklegs: 'broke the legs', bleed: 'made bleed', stopbleed: 'stopped the bleeding', vomit: 'made vomit', bloodyhands: 'bloody hands',
   dry: 'dried off', repairgear: 'repaired all gear', repairhands: 'repaired the item in hands', ammo: 'unlimited ammo',
-  stamina: 'unlimited stamina', aiignore: 'AI ignores them', tp_spot_save: 'saved a teleport spot', tp_spot_delete: 'deleted a teleport spot'
+  stamina: 'unlimited stamina', aiignore: 'AI ignores them', tp_spot_save: 'saved a teleport spot', tp_spot_delete: 'deleted a teleport spot',
+  delete: 'deleted', moderate_ban: 'ban requested', moderate_list: 'list change requested', moderate_watch: 'watchlist change requested'
 };
 const AUDIT_WINDOW_MS = 15 * 60000;
 function detailText(e) {
@@ -155,7 +156,7 @@ function detailText(e) {
   if (Array.isArray(d)) return `${what}${what ? ' ' : ''}at ${Math.round(d[0])}, ${Math.round(d[2])}`;
   if (typeof d === 'object') {
     if (d.stat) return `${d.stat} set to ${Math.round(d.share * 100)}%`;
-    if (d.cls) return `${d.count || 1} × ${d.cls}${d.vehicle ? ` (vehicle, ${d.parts || 0} parts)` : ''}${Array.isArray(d.pos) ? ` at ${Math.round(d.pos[0])}, ${Math.round(d.pos[2])}` : ''}`;
+    if (d.cls) return `${what ? what + ' ' : ''}${d.count || 1} × ${d.cls}${d.vehicle ? ` (vehicle, ${d.parts || 0} parts)` : ''}${Array.isArray(d.pos) ? ` at ${Math.round(d.pos[0])}, ${Math.round(d.pos[2])}` : ''}`;
     if (d.name) return `${what} "${d.name}"`;
     return `${what} ${Object.entries(d).map(([k, v]) => `${k} ${typeof v === 'number' ? Math.round(v * 100) / 100 : v}`).join(', ')}`.trim();
   }
@@ -178,7 +179,7 @@ function auditAdmin(e) {
 // admin.menu permission, with their in-game permissions; plus the owner Steam ids from the DRP_Admin card ("*").
 // The mod re-reads it every 30 s. Written only when it changed; never emptied while it still lists someone (so a
 // hand-made file survives until the portal has at least one in-game admin).
-const INGAME_PERMS = ['admin.menu', 'admin.players', 'admin.teleport', 'admin.teleport.manage', 'admin.heal', 'admin.kill', 'admin.god', 'admin.afflict', 'admin.spawn', 'admin.spawn.forbidden', 'admin.weather', 'admin.vehicles', 'admin.kits', 'admin.refund', 'players.message', 'players.kick', 'tickets.view', 'tickets.manage'];
+const INGAME_PERMS = ['admin.menu', 'admin.players', 'admin.teleport', 'admin.teleport.manage', 'admin.heal', 'admin.kill', 'admin.god', 'admin.afflict', 'admin.spawn', 'admin.spawn.forbidden', 'admin.weather', 'admin.vehicles', 'admin.kits', 'admin.refund', 'admin.industry', 'admin.delete', 'admin.freecam', 'admin.editor','players.message', 'players.kick', 'players.ban', 'lists.manage', 'tickets.view', 'tickets.manage'];
 function adminsFile() { return path.join(settings.paths().profilesDir, 'DRP_Admin', 'admins.json'); }
 function owners() { return (cfg().owners || []).map(s => String(s).trim()).filter(s => /^7656\d{13}$/.test(s)); }
 function computeAdmins() {
@@ -187,7 +188,9 @@ function computeAdmins() {
   let users = []; try { users = require('./portal').listUsers(); } catch { /* portal not loaded */ }
   for (const u of users) {
     if (!u.enabled || !u.steam || out.has(u.steam) || !u.perms.includes('admin.menu')) continue;
-    out.set(u.steam, { steam: u.steam, name: u.name, perms: u.perms.filter(p => INGAME_PERMS.includes(p)) });
+    // the categories the portal says need another admin's approval for them: the mod sends those for approval
+    let approval = []; try { approval = require('./portal').approvalNeeds(u.id); } catch { /* portal not loaded */ }
+    out.set(u.steam, { steam: u.steam, name: u.name, perms: u.perms.filter(p => INGAME_PERMS.includes(p)), ...(approval.length ? { approval } : {}) });
   }
   return [...out.values()];
 }

@@ -45,7 +45,8 @@ function mergeNameInto(name, idKey) {
   delete d.players[name];
 }
 
-const P = (x, y, z) => ({ x: Number(x), y: Number(y), z: Number(z) });
+// the admin log writes pos=<x, north, height>; positions here use the game's axes: x east, z north, y height
+const P = (x, north, height) => ({ x: Number(x), y: Number(height), z: Number(north) });
 
 function parseLine(line, ctx) {
   const tm = line.match(/^\s*(\d{1,2}):(\d{2}):(\d{2})\s*\|?\s*(.*)$/);
@@ -84,7 +85,7 @@ function applyEvent(ev, d) {
   r.lastSeen = Math.max(r.lastSeen || 0, ev.ts); if (!r.firstSeen || ev.ts < r.firstSeen) r.firstSeen = ev.ts;
   if (ev.pos) r.lastPos = { ...ev.pos, at: ev.ts };
   r.lastEvent = ev.type;
-  if (ev.type === 'connect') { r.connects++; d.online[key] = ev.ts; }
+  if (ev.type === 'connect') { r.connects++; d.online[key] = ev.ts; if (Date.now() - ev.ts < 600000) { try { require('./watchlist').onConnect(ev); } catch { /* no watchlist */ } } }
   else if (ev.type === 'disconnect') { const start = d.online[key]; if (start) { const dur = Math.max(0, Math.round((ev.ts - start) / 1000)); if (dur < 48 * 3600) { r.sessions.push({ start, end: ev.ts }); r.playtimeSec += dur; if (r.sessions.length > 200) r.sessions.shift(); } delete d.online[key]; } }
   else if (ev.type === 'kill') { r.deaths++; const kk = ev.killer.id || ev.killer.name; const kr = rec(kk, ev.killer.name, ev.killer.id); kr.kills++; kr.lastSeen = Math.max(kr.lastSeen || 0, ev.ts); kr.lastKill = { victim: ev.name, weapon: ev.weapon, at: ev.ts }; r.lastDeath = { killer: ev.killer.name, weapon: ev.weapon, at: ev.ts }; }
   else if (ev.type === 'death') { r.deaths++; r.lastDeath = { killer: null, weapon: null, at: ev.ts }; }
@@ -98,6 +99,8 @@ function ingest() {
   try { require('./anticheat').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the dupe detector\'s log', e); }
   try { require('./drpadmin').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading the DRP_Admin event log', e); }
   try { require('./gametickets').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Reading in-game tickets', e); }
+  require('./gamereq').ingest().catch(e => problem('In-game moderation requests', e));
+  try { require('./drpmap').ingest(); } catch (e) { if (e.code !== 'ENOENT') problem('Writing the in-game map layers', e); }
   const d = load();
   const p = settings.paths();
   let files = [];
@@ -175,7 +178,14 @@ function init(emit) {
   load();
   try { ingest(); } catch (e) { problem('Reading the admin logs', e); }
   clearInterval(timer);
-  timer = setInterval(() => { if (server.status().running) { try { ingest(); } catch (e) { problem('Reading the admin logs', e); } } }, 10000);
+  timer = setInterval(() => { if (server.status().running || writtenRecently()) { try { ingest(); } catch (e) { problem('Reading the admin logs', e); } } }, 10000);
+}
+// A server this app did not start (a test server, one started by hand) still writes to the profiles folder: read
+// while its admin log or the mod's event file changed in the last two minutes.
+function writtenRecently() {
+  const dir = settings.paths().profilesDir; const since = Date.now() - 120000;
+  try { if (fs.statSync(path.join(dir, 'DayZAdminTools', 'events.jsonl')).mtimeMs >= since) return true; } catch { /* no mod events */ }
+  try { return fs.readdirSync(dir).some(f => /\.adm$/i.test(f) && fs.statSync(path.join(dir, f)).mtimeMs >= since); } catch { return false; }
 }
 
 module.exports = { init, ingest, all, get, setNote, remove, stats, rebuild, parseLine };

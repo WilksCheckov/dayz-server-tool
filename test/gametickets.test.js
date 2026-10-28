@@ -8,7 +8,7 @@ const settings = t.mod('settings'); settings.save({ installDir: path.join(t.S, '
 fs.mkdirSync(settings.paths().profilesDir, { recursive: true });
 t.mod('audit').init(t.emit);
 // Bob (GUID GBOB) died 5 minutes ago at 1200 / 3400
-t.mod('jsonstore').write(path.join(t.S, 'deathlog.json'), { deaths: [{ id: 7, ts: Date.now() - 300000, name: 'Bob', key: 'GBOB', cause: 'player', causeText: 'Killed by Al', killer: { name: 'Al' }, weapon: 'AKM', pos: { x: 1200, y: 3400 }, hits: [], byPart: {}, totalDamage: 90, gear: [{ c: 'AKM' }, { c: 'Rag' }], refunds: [], attackers: [] }], nextId: 8, pending: {}, gear: {}, gearFile: { offset: 0, rest: '' }, lastDeathAt: {} });
+t.mod('jsonstore').write(path.join(t.S, 'deathlog.json'), { deaths: [{ id: 7, ts: Date.now() - 300000, name: 'Bob', key: 'GBOB', cause: 'player', causeText: 'Killed by Al', killer: { name: 'Al' }, weapon: 'AKM', pos: { x: 1200, y: 3400 }, hits: [], byPart: { head: { hits: 1, damage: 60 }, torso: { hits: 2, damage: 30 } }, totalDamage: 90, distance: 85.2, gear: [{ c: 'AKM', q: -1, h: 0.5 }, { c: 'Rag', q: 4, h: 1 }], refunds: [], attackers: [] }], nextId: 8, pending: {}, gear: {}, gearFile: { offset: 0, rest: '' }, lastDeathAt: {} });
 const discord = t.mod('discord'); discord.init(t.emit);
 t.mod('adminlog').init(t.emit);
 const tk = t.mod('tickets'); tk.init(t.emit);
@@ -18,6 +18,10 @@ const dir = path.join(settings.paths().profilesDir, 'DayZAdminTools');
 const inFile = path.join(dir, 'tickets_in.jsonl');
 const out = (n) => JSON.parse(fs.readFileSync(path.join(dir, 'tickets_out', n + '.json'), 'utf8'));
 const send = (...lines) => { fs.mkdirSync(dir, { recursive: true }); fs.appendFileSync(inFile, lines.map(l => JSON.stringify(l)).join('\n') + '\n'); return gt.ingest(); };
+// the server's admin log: one line a minute ago (inside the ticket's two-minute window), one ten minutes ago (outside)
+const hms = (ms) => new Date(ms).toTimeString().slice(0, 8);
+const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+fs.writeFileSync(path.join(settings.paths().profilesDir, 'server.ADM'), `AdminLog started on ${today} at 00:00:00\n${hms(Date.now() - 600000)} | Player "Bob" (id=GBOB) old line\n${hms(Date.now() - 60000)} | Player "Al" (id=GAL) hit by Player "Bob"\n`);
 const BOB = { name: 'Bob', steam: '76561198000000005', guid: 'GBOB' };
 const ADA = { by: 'Ada', bySteam: '76561198000000004', byGuid: 'GADA' };
 
@@ -59,6 +63,11 @@ const adm = out('_admin');
 const a = adm.tickets.find(x => x.id === id);
 t.ok('admin file: player, Steam64, GUID, position, nearby', a.player === 'Bob' && a.steam === BOB.steam && a.guid === 'GBOB' && a.x === 1210 && a.nearby === 'Al (42 m)');
 t.ok('admin file: the linked death with its spot', a.deathId === 7 && a.deathX === 1200 && a.deathZ === 3400 && /Killed by Al with AKM, 2 items/.test(a.deathText), a.deathText);
+t.ok('admin file: the death in full (killer, weapon, range, hits per part)', /Killer: Al/.test(a.deathDetail) && /Weapon: AKM/.test(a.deathDetail) && /Range: 85.2 m/.test(a.deathDetail) && /head ×1 \(60\), torso ×2 \(30\)/.test(a.deathDetail), a.deathDetail);
+t.ok('admin file: the gear list with amounts and condition', a.gear.join('|') === 'AKM · 50%|Rag ×4', a.gear.join('|'));
+t.ok('admin file: the player history', /0 other tickets · 0 refunds/.test(a.history), a.history);
+t.ok('admin file: the admin log around the ticket, not before it', a.adm.length === 1 && /hit by Player "Bob"/.test(a.adm[0]), JSON.stringify(a.adm));
+t.ok('the app can ask for the same context', gt.contextFor(id).adm.length === 1);
 t.ok('admin file: the staff reply keeps who answered', a.messages.some(m => m.guid === 'GADA' && m.steam === ADA.bySteam) && a.urgency === 'high');
 t.ok('admin file: counts and the newest ticket', adm.open === 1 && adm.unassigned === 1 && adm.latestId === id);
 

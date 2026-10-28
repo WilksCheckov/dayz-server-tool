@@ -1506,7 +1506,9 @@ ipc.on('steam:changed', async (d) => { await loadSteamMap(); if (d && d.checked)
 // ---------- player database ----------
 let pdbRows = [], pdbSelected = null;
 function fmtPlaytime(sec) { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return h ? `${h}h ${m}m` : `${m}m`; }
+let wlKeys = new Set();
 async function refreshPdb() {
+  try { wlKeys = new Set((await ipc.invoke('watchlist:list')).map(e => e.guid)); } catch { wlKeys = new Set(); }
   if (!Object.keys(steamMap).length) await loadSteamMap();
   pdbRows = await ipc.invoke('players:all', { query: $('pdbQuery').value.trim(), sort: $('pdbSort').value });
   const st = await ipc.invoke('players:stats');
@@ -1514,7 +1516,7 @@ async function refreshPdb() {
   $('pdbTable').querySelector('tbody').innerHTML = pdbRows.map(r => `<tr data-key="${esc(r.key)}" class="${pdbSelected === r.key ? 'selected' : ''}">
     <td>${r.online ? '<span class="dot ok" style="margin-right:6px"></span>' : ''}${esc(r.name)}${r.characterName && r.characterName !== r.name ? ` <span class="muted">(${esc(r.characterName)})</span>` : ''}</td>
     <td class="mono">${esc(r.steamId || r.id || '?')}</td><td class="muted">${r.lastSeen ? fmtDate(r.lastSeen) : '—'}</td><td>${fmtPlaytime(r.playtimeSec)}</td><td>${r.kills} / ${r.deaths}</td>
-    <td>${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.priority ? '<span class="badge">priority</span> ' : ''}${r.application ? `<span class="badge">app: ${esc(r.application)}</span>` : ''}${r.account && r.account.suspicious ? ` <span class="badge warn" title="${esc(r.account.flags.join('; '))}">⚠ ${r.account.score}</span>` : ''}${r.combat && r.combat.flagScore ? ` <span class="badge bad" title="${esc(r.combat.flags.map(f => f.reason + ' ×' + f.n).join('; '))}">⚠ combat ${r.combat.flagScore}</span>` : ''}</td><td>${r.steamId ? steamBadges(r.steam) : '<span class="muted">—</span>'}</td><td class="pdb-roles" data-discord="${esc(r.discordId || '')}">${r.discordId ? '<span class="muted">…</span>' : '<span class="muted">—</span>'}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No players recorded yet. The database fills from the admin log (-adminlog) while the server runs.</td></tr>';
+    <td>${wlKeys.has(r.key) || wlKeys.has(r.id) ? '<span class="badge warn" title="On the watchlist">👁 watched</span> ' : ''}${r.banned ? '<span class="badge bad">banned</span> ' : ''}${r.whitelisted ? '<span class="badge ok">whitelist</span> ' : ''}${r.priority ? '<span class="badge">priority</span> ' : ''}${r.application ? `<span class="badge">app: ${esc(r.application)}</span>` : ''}${r.account && r.account.suspicious ? ` <span class="badge warn" title="${esc(r.account.flags.join('; '))}">⚠ ${r.account.score}</span>` : ''}${r.combat && r.combat.flagScore ? ` <span class="badge bad" title="${esc(r.combat.flags.map(f => f.reason + ' ×' + f.n).join('; '))}">⚠ combat ${r.combat.flagScore}</span>` : ''}</td><td>${r.steamId ? steamBadges(r.steam) : '<span class="muted">—</span>'}</td><td class="pdb-roles" data-discord="${esc(r.discordId || '')}">${r.discordId ? '<span class="muted">…</span>' : '<span class="muted">—</span>'}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No players recorded yet. The database fills from the admin log (-adminlog) while the server runs.</td></tr>';
   if (pdbSelected) renderPdbDetail(pdbRows.find(r => r.key === pdbSelected) || await ipc.invoke('players:get', pdbSelected));
   fillDiscordRoles();
 }
@@ -1580,6 +1582,7 @@ function renderPdbDetail(r) {
       <div><span class="muted">Steam bans</span><br>${r.steamId ? steamBadges(r.steam) + (r.steam ? ` <span class="muted">checked ${fmtDate(r.steam.checkedAt)}</span>` : ' <button class="btn small" id="pdSteamCheck">Check now</button>') : '<span class="muted">Steam64 unknown</span>'}</div>
       <div><span class="muted">Discord roles</span><br><span id="pdRoles">${r.discordId ? (pdbRoles[r.discordId] ? roleCell(r, pdbRoles[r.discordId]) : '<span class="muted">…</span>') : '<span class="muted">no Discord account linked</span>'}</span></div>
     </div>
+    <div id="pdWatch"></div>
     ${accountSection(r)}
     ${r.names.length > 1 ? `<div><span class="muted">Names used</span><br>${r.names.map(esc).join(', ')}</div>` : ''}
     <div class="row gap wrap">
@@ -1609,6 +1612,7 @@ function renderPdbDetail(r) {
   const sc = box.querySelector('#pdSteamCheck'); if (sc) sc.onclick = (e) => run(async () => { const st = await ipc.invoke('steam:state'); if (!st.hasKey) { toast('Set a Steam Web API key on the Discord Bot page first', true); return; } const res = await ipc.invoke('steam:check', r.steamId); toast(res ? 'Checked' : 'Steam gave no answer', !res); refreshPdb(); }, e.target);
   const sp = box.querySelector('#pdSteam'); if (sp) sp.onclick = () => ipc.invoke('shell:openExternal', `https://steamcommunity.com/profiles/${r.steamId}`);
   box.querySelector('#pdSaveNote').onclick = (e) => run(async () => { await ipc.invoke('players:setNote', r.key, box.querySelector('#pdNotes').value); toast('Note saved'); refreshPdb(); }, e.target);
+  pdWatch(r);
   box.querySelector('#pdRemove').onclick = (e) => run(async () => { const ok = await showModal(`Delete record for ${r.name}?`, '', [{ label: 'Delete', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('players:remove', r.key); pdbSelected = null; refreshPdb(); });
 }
 $('pdbTable').addEventListener('click', e => { const tr = e.target.closest('tr'); if (!tr || !tr.dataset.key) return; pdbSelected = tr.dataset.key; refreshPdb(); });
@@ -1760,8 +1764,19 @@ function tkGameBlock(t) {
   return `<div class="card-title mt">In game</div>
     <div class="row gap wrap"><span class="muted">In-game name</span><b>${esc(g.name || t.player || '?')}</b><span class="muted">Steam64</span><span class="mono">${esc(g.steam)}</span><span class="muted">GUID</span><span class="mono">${esc(g.guid || '?')}</span></div>
     <div class="row gap wrap"><span class="muted">Urgency</span><b>${urg}</b>${c.x ? `<span class="muted">Opened at</span><span class="mono">${Math.round(c.x)}, ${Math.round(c.z)}</span>` : ''}<span class="muted">Near</span><span>${near}</span>${c.death ? `<span class="muted">Last death on the server</span><span>${esc(c.death.cause || '')}${c.death.ago ? ', ' + Math.round(c.death.ago / 60) + ' min before' : ''}</span>` : ''}</div>
+    <div id="tkCtx"></div>
     <div class="card-title mt">Conversation with the player</div>${conv}
     ${t.status === 'open' ? '<div class="row gap"><input id="tkReply" class="input" placeholder="Reply to the player (they see it in game, signed Admin)"><button class="btn small primary" id="btnTkReply">Reply</button></div>' : ''}`;
+}
+// what the app knows around an in-game ticket (the game's Death and Context windows show the same)
+async function tkContext(id) {
+  let c = null; try { c = await ipc.invoke('tickets:context', id); } catch { return; }
+  const el = $('tkCtx'); if (!el || !c || tkSelected !== id) return;
+  const pre = (s) => `<div class="small" style="white-space:pre-wrap">${esc(s)}</div>`;
+  el.innerHTML = `${c.deathDetail ? `<div class="card-title mt">Death</div>${pre(c.deathDetail)}${c.gear.length ? `<details><summary class="muted">Gear (${c.gear.length})</summary>${pre(c.gear.join('\n'))}</details>` : ''}` : ''}
+    ${c.history ? `<div class="card-title mt">Player history</div><div class="small">${esc(c.history)}</div>` : ''}
+    ${c.alerts ? `<div class="card-title mt">Alerts in the last 24 h</div>${pre(c.alerts)}` : ''}
+    <div class="card-title mt">Admin log around the ticket <span class="muted">two minutes either side</span></div>${c.adm.length ? `<div class="mono small" style="white-space:pre-wrap;max-height:220px;overflow:auto">${esc(c.adm.join('\n'))}</div>` : '<div class="muted">No admin log lines in that window.</div>'}`;
 }
 async function showTicket(id) {
   tkSelected = id; let t; try { t = await ipc.invoke('tickets:get', id); } catch (e) { $('tkDetail').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
@@ -1784,7 +1799,8 @@ async function showTicket(id) {
   box.querySelector('#btnTkAssign').onclick = () => act(() => ipc.invoke('tickets:assign', t.id, $('tkAssignee').value));
   box.querySelector('#btnTkLink').onclick = () => act(async () => { const n = Number($('tkDeathId').value); if (!n) throw new Error('Give a death record number (Death log page).'); await ipc.invoke('tickets:link', t.id, n); toast(`Death #${n} linked`); });
   box.querySelector('#btnTkNote').onclick = () => act(async () => { await ipc.invoke('tickets:note', t.id, $('tkNote').value); });
-  const rp = box.querySelector('#btnTkReply'); if (rp) rp.onclick = () => act(async () => { await ipc.invoke('tickets:reply', t.id, $('tkReply').value); toast('Sent: the player sees it in game (key K)'); });
+  const rp = box.querySelector('#btnTkReply'); if (rp) { rp.onclick = () => act(async () => { await ipc.invoke('tickets:reply', t.id, $('tkReply').value); toast('Sent: the player sees it in game (key K)'); }); $('tkReply').onkeydown = (e) => { if (e.key === 'Enter') rp.click(); }; }
+  if (t.game) tkContext(t.id);
   box.querySelector('#btnTkCopy').onclick = () => { navigator.clipboard.writeText('#' + t.id); toast('#' + t.id + ' copied'); };
   const c = box.querySelector('#btnTkClose'); if (c) c.onclick = () => act(async () => { const ok = await showModal(`Close ticket #${t.id}?`, `<label class="field">Reason (optional) <input id="tkWhy" class="input"></label>${t.channelUrl ? '<p class="muted">Its Discord channel is closed too, with the transcript posted to the ticket log.</p>' : ''}`, [{ label: 'Close ticket', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('tickets:setStatus', t.id, 'closed', $('tkWhy').value.trim()); });
   const o = box.querySelector('#btnTkReopen'); if (o) o.onclick = () => act(() => ipc.invoke('tickets:setStatus', t.id, 'open'));
@@ -2560,11 +2576,62 @@ async function refreshCombat() {
   $('combatWeapons').querySelector('tbody').innerHTML = c.weapons.map(w => `<tr><td>${esc(w.name)}</td><td>${w.kills}</td><td>${w.hits}</td><td>${w.damage.toLocaleString()}</td><td>${w.headshots}</td><td>${w.avgDist ?? '—'}</td><td>${w.maxDist || '—'}</td><td class="muted">${esc(w.ammo)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No player-versus-player hits recorded yet.</td></tr>';
   const parts = c.parts.slice(0, 12); drawBars($('chParts'), parts.map(p => p[1]), parts.map(p => p[0]), '#ff9f3b', { labelsEvery: 12 });
   const lb = (title, rows) => `<div class="card"><div class="card-title">${title}</div><table class="table"><tbody>${rows.length ? rows.map((r, i) => `<tr><td class="muted">${i + 1}</td><td>${esc(r.name)}</td><td class="right">${esc(String(r.value))}</td></tr>`).join('') : '<tr><td class="muted">No data yet.</td></tr>'}</tbody></table></div>`;
+  await refreshWatchlist();
   await refreshSuspicious();
   await refreshAnticheat();
   $('combatBoards').innerHTML = lb('Headshot rate (20+ hits)', c.headshotRate) + lb('Fewest hits per kill (3+ kills)', c.hitsPerKill) + lb('Most damage dealt', c.damageDealt) + lb('Most damage taken', c.damageTaken) + lb('Headshots', c.headshots) + lb('Longest kills', c.longestKills) + lb('Rivalries (killer → victim)', c.rivalries) + lb('Favourite weapons', c.favouriteWeapons) + lb('Base builders (actions)', c.builders);
 }
 function pingBadge(ms) { return `<span class="badge ${ms >= 300 ? 'bad' : ms >= 150 ? 'warn' : 'ok'}">${ms} ms</span>`; }
+// ---------- watchlist ----------
+const WL_CONF = { low: ['Low', ''], medium: ['Medium', 'warn'], high: ['High', 'bad'] };
+const WL_SRC = { app: 'app', game: 'in game', auto: 'automatic' };
+async function refreshWatchlist() {
+  let rows; try { rows = await ipc.invoke('watchlist:list'); } catch { rows = []; }
+  $('wlStats').textContent = rows.length ? `${rows.length} watched · ${rows.filter(r => r.online).length} online` : '';
+  $('wlTable').innerHTML = rows.length ? `<table class="table"><thead><tr><th>Player</th><th>Confidence</th><th>Why</th><th>Added</th><th>Joins</th><th>Playtime</th><th>K / D</th><th>Flags</th><th></th></tr></thead><tbody>${rows.map(r => `<tr>
+    <td>${r.online ? '<span class="dot ok" style="margin-right:6px"></span>' : ''}<b>${esc(r.name || '?')}</b><div class="muted mono small">${esc(r.steam || r.guid)}</div></td>
+    <td><span class="badge ${WL_CONF[r.confidence] ? WL_CONF[r.confidence][1] : ''}">${esc(WL_CONF[r.confidence] ? WL_CONF[r.confidence][0] : r.confidence)}</span></td>
+    <td>${esc(r.reason)}${r.note ? `<div class="muted small">${esc(r.note)}</div>` : ''}</td>
+    <td class="muted">${fmtDate(Date.parse(r.addedAt))}<div class="small">${esc(WL_SRC[r.source] || r.source)}${r.by ? ' · ' + esc(r.by) : ''}</div></td>
+    <td>${r.joins || 0}${r.lastJoinAt ? `<div class="muted small">last ${fmtDate(Date.parse(r.lastJoinAt))}</div>` : ''}</td>
+    <td>${fmtPlaytime(r.playtimeSec || 0)}<div class="muted small">${r.sessions || 0} session(s)</div></td>
+    <td>${r.kills || 0} / ${r.deaths || 0}</td>
+    <td>${r.flagScore ? `<span class="badge bad">${r.flagScore}</span> <span class="muted small">${esc((r.flags || []).map(f => f.reason + ' ×' + f.n).join(', '))}</span>` : '<span class="muted">—</span>'}</td>
+    <td class="row gap"><button class="btn small wl-open" data-key="${esc(r.guid)}">Player</button><button class="btn small wl-edit" data-key="${esc(r.guid)}">Edit</button><button class="btn small wl-del" data-key="${esc(r.guid)}">Remove</button></td></tr>`).join('')}</tbody></table>`
+    : '<div class="muted">Nobody is watched. Add a player here, from the Player database, or in game (Player info → Watch). Players whose suspicious-activity score reaches the alert level are added automatically.</div>';
+  const byKey = new Map(rows.map(r => [r.guid, r]));
+  $('wlTable').querySelectorAll('.wl-open').forEach(b => b.onclick = () => { pdbSelected = b.dataset.key; showPage('database'); refreshPdb(); });
+  $('wlTable').querySelectorAll('.wl-edit').forEach(b => b.onclick = () => watchDialog(byKey.get(b.dataset.key)).then(refreshWatchlist));
+  $('wlTable').querySelectorAll('.wl-del').forEach(b => b.onclick = () => run(async () => { await ipc.invoke('watchlist:remove', b.dataset.key); refreshWatchlist(); }));
+}
+// add or edit: a Steam64 (or the player's known DayZ id), confidence, reason and a private note
+async function watchDialog(cur = {}) {
+  const id = cur.steam || cur.guid || '';
+  const name = cur.name || '';
+  const ok = await showModal(id ? `Watch ${esc(name || id)}` : 'Watch a player', `
+    <label class="field">Steam64 or DayZ id <input id="wlId" class="input mono" value="${esc(id)}" ${id ? 'readonly' : ''}></label>
+    <label class="field">Name <input id="wlName" class="input" value="${esc(name)}"></label>
+    <label class="field">Confidence <select id="wlConf" class="input">${Object.entries(WL_CONF).map(([k, [l]]) => `<option value="${k}" ${(cur.confidence || 'medium') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label class="field">Why <input id="wlReason" class="input" value="${esc(cur.reason || '')}" placeholder="e.g. suspected ESP, reported twice for combat logging"></label>
+    <label class="field">Private note <textarea id="wlNote" class="input" rows="3">${esc(cur.note || '')}</textarea></label>`, [{ label: 'Save', value: true, primary: true }, { label: 'Cancel', value: false }]);
+  if (!ok) return;
+  const raw = $('wlId').value.trim();
+  await run(() => ipc.invoke('watchlist:add', { ...(/^7656\d{13}$/.test(raw) ? { steam: raw } : { guid: raw }), name: $('wlName').value.trim(), confidence: $('wlConf').value, reason: $('wlReason').value, note: $('wlNote').value }));
+}
+// the watch block in the Player database
+async function pdWatch(r) {
+  const el = $('pdWatch'); if (!el) return;
+  let w = null; try { w = await ipc.invoke('watchlist:get', r.id || r.steamId || r.key); } catch { w = null; }
+  if ($('pdWatch') !== el) return;
+  el.innerHTML = w
+    ? `<div class="row gap wrap" style="align-items:center"><span class="badge ${WL_CONF[w.confidence] ? WL_CONF[w.confidence][1] : ''}">👁 watched · ${esc(WL_CONF[w.confidence] ? WL_CONF[w.confidence][0] : w.confidence)}</span><span>${esc(w.reason)}</span><span class="muted">${esc(WL_SRC[w.source] || w.source)}${w.by ? ' · ' + esc(w.by) : ''} · ${w.joins || 0} join(s) since</span><button class="btn small" id="pdWlEdit">Edit</button><button class="btn small" id="pdWlDel">Stop watching</button></div>${w.note ? `<div class="muted small">${esc(w.note)}</div>` : ''}`
+    : `<button class="btn small" id="pdWlAdd" ${r.id || r.steamId ? '' : 'disabled'}>Add to watchlist</button>`;
+  const again = () => { refreshPdb(); };
+  const a = el.querySelector('#pdWlAdd'); if (a) a.onclick = () => watchDialog({ guid: r.id || '', steam: r.steamId || '', name: r.name }).then(again);
+  const e = el.querySelector('#pdWlEdit'); if (e) e.onclick = () => watchDialog(w).then(again);
+  const d = el.querySelector('#pdWlDel'); if (d) d.onclick = () => run(async () => { await ipc.invoke('watchlist:remove', w.guid); again(); });
+}
+$('btnWlAdd').onclick = () => watchDialog().then(refreshWatchlist);
 async function refreshSuspicious() {
   const r = $('susRange').value; const since = r === 'all' ? 0 : Date.now() - Number(r) * 3600000;
   let list; try { list = await ipc.invoke('combat:suspicious', since); } catch { list = []; }

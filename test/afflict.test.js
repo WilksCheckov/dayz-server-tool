@@ -13,7 +13,7 @@ const write = (name, lines) => fs.writeFileSync(path.join(dir, name), ['#begin|2
 function game(answer = 'done|1|0') { const tm = setInterval(() => { if (!fs.existsSync(q)) return; const line = fs.readFileSync(q, 'utf8').trim(); if (!line) return; fs.unlinkSync(q); const f = line.split('|'); game.last = f; fs.appendFileSync(res, `${f[0]}|${answer}\r\n`); clearInterval(tm); }, 100); }
 (async () => {
   const initc = fs.readFileSync(dl.bridgeStatus().file, 'utf8');
-  t.ok('bridge v6 installed with afflict, freeze, invisible, strip and respawn', /bridge v6/.test(initc) && ['"afflict"', '"freeze"', '"invisible"', '"strip"', '"respawn"'].every(k => initc.includes(k)));
+  t.ok('bridge v7 installed with afflict, freeze, invisible, strip and respawn', /bridge v7/.test(initc) && ['"afflict"', '"freeze"', '"invisible"', '"strip"', '"respawn"'].every(k => initc.includes(k)));
   write('players.txt', ['P1|7656P1|Bob|1000|10|2000|90|1|5000|true|-|false|true|false', 'P2|7656P2|Ann|1100|10|2100|0|1|5000|true|-|true']);
   const L = live.players();
   t.ok('frozen / invisible flags read (and absent on an older bridge line)', L.players[0].frozen === true && L.players[0].invisible === false && L.players[1].frozen === false && L.players[1].god === true, JSON.stringify(L.players));

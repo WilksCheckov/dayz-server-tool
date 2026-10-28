@@ -12,7 +12,15 @@ const N = 128, MAX_EVENTS = 300000, MAX_DEATHS = 50000;
 const KIND = { travel: 0, hit: 1, build: 2, logout: 3, login: 4, death: 5 };
 let db = null, mapKeyCache = { at: 0, key: null }, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'heat.json');
-function load() { if (!db) { db = jsonstore.readOr(file(), { maps: {} }); db.maps = db.maps || {}; } return db; }
+function load() {
+  if (!db) {
+    db = jsonstore.readOr(file(), { maps: {} }); db.maps = db.maps || {};
+    // data recorded before positions used the game's axes has each player's height where north belongs: it is
+    // useless, so it is dropped and read again from the admin logs (init)
+    if (!db.posAxes) { db.maps = {}; db.posAxes = 1; db.rebuildPending = true; save(); }
+  }
+  return db;
+}
 let saveTimer = null;
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 2000); }
 function forMap(key) { const d = load(); if (!d.maps[key] || !d.maps[key].events) d.maps[key] = { N, events: [], deaths: [], since: Date.now() }; return d.maps[key]; }
@@ -94,5 +102,8 @@ function rebuild() {
   return { files: files.length, positions: lines, deaths: m.deaths.length };
 }
 
-function init(emit) { emitRef = emit; load(); }
+function init(emit) {
+  emitRef = emit; load();
+  if (db.rebuildPending) { try { rebuild(); db.rebuildPending = false; save(); } catch { /* no mission yet: the heatmap fills as players play */ } }
+}
 module.exports = { init, record, summary, deathsSince, clear, rebuild, causeOf, N };

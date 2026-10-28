@@ -420,6 +420,11 @@ handle('tickets:link', (id, deathId) => tickets.link(id, deathId, 'app'));
 handle('tickets:unlink', (id, deathId) => tickets.unlink(id, deathId, 'app'));
 handle('tickets:setStatus', (id, status, reason) => tickets.setStatus(id, status, 'app', reason || ''));
 handle('tickets:reply', (id, text) => tickets.message(id, text, 'app', 'admin'));
+handle('tickets:context', (id) => require('./gametickets').contextFor(id));
+handle('watchlist:list', () => require('./watchlist').list());
+handle('watchlist:add', (entry) => require('./watchlist').add(entry || {}, 'app', 'app'));
+handle('watchlist:remove', (id) => require('./watchlist').remove(id, 'app'));
+handle('watchlist:get', (id) => require('./watchlist').find(id));
 handle('portal:status', () => portal.status());
 handle('portal:setEnabled', (on) => portal.setEnabled(on));
 handle('portal:setOwner', (name, password) => portal.setOwner(name, password));
@@ -702,6 +707,8 @@ app.whenReady().then(() => {
   timed('anticheat', () => anticheat.init(emit));
   timed('drpadmin', () => drpadmin.init(emit));
   timed('gametickets', () => require('./gametickets').init(emit));
+  timed('watchlist', () => require('./watchlist').init(emit));
+  timed('gamereq', () => require('./gamereq').init(emit));
   timed('maplink', () => require('./maplink').init(emit));
   setTimeout(() => { require('./sysinfo').defenderStatus().catch(() => {}); require('./sysinfo').checkDisk().catch(() => {}); }, 15000);
   if (app.isPackaged && !instance.isChild && settings.load().autoRuntimes !== false && !settings.load().runtimesReady) setTimeout(() => {

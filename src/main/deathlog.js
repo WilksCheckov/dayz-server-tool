@@ -16,6 +16,8 @@ function load() {
   if (db) return db;
   db = jsonstore.readOr(file(), null);
   db = { deaths: [], nextId: 1, pending: {}, gear: {}, gearFile: { offset: 0, rest: '' }, lastDeathAt: {}, ...(db || {}) };
+  // records made before positions used the game's axes have north in pos.y and the height in pos.z: swap once
+  if (!db.posAxes) { for (const r of db.deaths) if (r.pos) { const north = r.pos.y; r.pos.y = r.pos.z; r.pos.z = north; } db.posAxes = 1; save(); }
   return db;
 }
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { jsonstore.write(file(), load()); }, 500); }
@@ -241,7 +243,7 @@ function deathPos(rec) {
   const d = load(); const list = d.gear[rec.key] || [];
   const corpse = list.find(s => s.dead && s.pos && Math.abs(s.ts - rec.ts) <= 180000);
   if (corpse) return [corpse.pos[0], corpse.pos[2]];
-  if (rec.pos) return [rec.pos.x, rec.pos.y];
+  if (rec.pos) return [rec.pos.x, rec.pos.z];
   return null;
 }
 async function teleportToDeath(deathId, { by = 'app' } = {}) {
@@ -286,7 +288,7 @@ function forPlayer(key, limit = 20) { return load().deaths.filter(r => r.key ===
 function stats() { const d = load(); const causes = {}; for (const r of d.deaths) causes[r.cause] = (causes[r.cause] || 0) + 1; return { deaths: d.deaths.length, causes, snapshots: Object.values(d.gear).filter(Array.isArray).reduce((n, l) => n + l.length, 0), players: Object.keys(d.gear).filter(k => !k.startsWith('steam:')).length }; }
 
 // ---------- bridge script in the mission's init.c ----------
-const BRIDGE_VERSION = 6;
+const BRIDGE_VERSION = 7;
 const MARK_BEGIN = '// >>> DayZ Admin Tools bridge v' + BRIDGE_VERSION + ' (managed by the tool: do not edit between the markers)';
 const MARK_END = '// <<< DayZ Admin Tools bridge';
 const HOOK = 'DZAT_Bridge.Tick(timeslice); // DayZ Admin Tools hook';

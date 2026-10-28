@@ -1240,4 +1240,4 @@ function init(emit) {
   else if (mode() !== 'off' && cfg().autoStart && cfg().token) setTimeout(() => start().catch(() => {}), 4000);
 }
 
-module.exports = { saveStore, closeTicket, postAdminAction, postApprovalRequest, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } }, _onInteraction: onInteraction };
+module.exports = { banUser, unbanUser, checkExpiredBans, saveStore, closeTicket, postAdminAction, postApprovalRequest, createFeedChannels, postDeath, postAlert, refreshApplicationEmbeds, rolesFor, feedEvent, init, start, stop, status, buildCommands, cfg, applyLiveLog, notify, store, _tail: { pollLogs, tail, useStubClient(c) { client = c; state.running = true; } }, _onInteraction: onInteraction };

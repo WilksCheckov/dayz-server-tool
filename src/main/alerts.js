@@ -29,6 +29,7 @@ const KINDS = {
   'suspicious-activity': { label: 'Suspicious combat activity (possible cheating)', color: 0xff5f5f, cooldownSec: 300 },
   'duplicate-item': { label: 'Duplicate item detected (possible duping)', color: 0xff5f5f, cooldownSec: 0 },
   'suspicious-player': { label: 'Flagged player joined (possible alt or banned account)', color: 0xf5b942, cooldownSec: 60 },
+  'watchlist-join': { label: 'Watched player joined (watchlist)', color: 0xf5b942, cooldownSec: 0 },
   'steam-ban': { label: 'Player picked up a Steam ban', color: 0xff5f5f, cooldownSec: 0 },
   'tool-problem': { label: 'Tool problem: a save, copy, key, scheduled job or background instance failed', color: 0xf5b942, cooldownSec: 300 },
   'test': { label: 'Test alert', color: 0x4f8cff, cooldownSec: 0 }

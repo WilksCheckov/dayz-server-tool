@@ -409,6 +409,16 @@ class DZAT_Bridge
 		line = line + ",\"items\":" + gear + "}";
 		Append(DIR + "/gear.log", line);
 	}
+	// every sickness gone for good (as the game's ResetPlayer): the stomach emptied (contaminated food or water would
+	// infect again), the agents removed, the disease modifiers off (the always-on ones come back by themselves) and
+	// queued symptoms dropped
+	static void Cure(PlayerBase p)
+	{
+		if (p.GetStomach()) p.GetStomach().ClearContents();
+		p.RemoveAllAgents();
+		if (p.GetModifiersManager()) p.GetModifiersManager().DeactivateAllModifiers();
+		if (p.GetSymptomManager()) p.GetSymptomManager().CleanUpPrimaryQueue();
+	}
 	// what: all | health | bleeding | bones | cure | food
 	static void Heal(PlayerBase p, string what)
 	{
@@ -432,8 +442,7 @@ class DZAT_Bridge
 		}
 		if (all || what == "cure")
 		{
-			p.RemoveAllAgents();
-			if (p.GetModifiersManager()) p.GetModifiersManager().DeactivateAllModifiers();
+			Cure(p);
 		}
 		if (all || what == "food")
 		{
@@ -533,7 +542,7 @@ class DZAT_Bridge
 		}
 		if (kind == "clearsick")
 		{
-			p.RemoveAllAgents();
+			Cure(p);
 			return "done";
 		}
 		return "unknown";

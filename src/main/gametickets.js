@@ -33,10 +33,10 @@ const tickets = () => require('./tickets');
 // ---------- game → app ----------
 function ingest() {
   const d = load(); const f = inFile();
-  let st; try { st = fs.statSync(f); } catch { return 0; }
+  let st; try { st = fs.statSync(f); } catch { refreshOut(); return 0; }
   const meta = d.file;
   if (st.size < meta.offset) { meta.offset = 0; meta.rest = ''; }
-  if (st.size === meta.offset) return 0;
+  if (st.size === meta.offset) { refreshOut(); return 0; }
   const fd = fs.openSync(f, 'r'); const lines = [];
   try {
     const len = Math.min(st.size - meta.offset, 4 * 1024 * 1024); const buf = Buffer.alloc(len);
@@ -47,8 +47,12 @@ function ingest() {
   saveDb();
   let applied = 0;
   for (const j of lines) { try { if (apply(j)) applied++; } catch (e) { emitRef('console', { source: 'tickets', line: `In-game ticket ${j.op || '?'} not applied: ${e.message}` }); } }
+  refreshOut();
   return applied;
 }
+// the context around a ticket keeps changing for a while (the admin log after it, new alerts): rewrite once a minute
+let lastOut = 0;
+function refreshOut() { if (Date.now() - lastOut < 60000) return; lastOut = Date.now(); try { writeOut(); } catch { /* no server folder */ } }
 
 const byRef = (ref) => tickets().all().find(t => t.game && t.game.ref === ref);
 const isPlayers = (t, steam) => t && t.game && t.game.steam === steam;
@@ -125,7 +129,86 @@ function deathInfo(t) {
   } catch { /* no death log */ }
   return { deathId: ids[ids.length - 1], deathX: 0, deathZ: 0, deathText: `#${ids[ids.length - 1]}` };
 }
-function adminView(t) {
+// ---------- ticket context (C4): what the app knows around the ticket, for the game's Death and Context windows ----------
+const ADM_WINDOW_MS = 2 * 60000;
+const ALERT_WINDOW_MS = 24 * 3600000;
+const round1 = (n) => Math.round(Number(n) * 10) / 10;
+// the death in full: cause, killer, weapon, range, hits per body part, who did the damage, and the gear list
+function deathDetail(t) {
+  const ids = t.deaths || []; if (!ids.length) return { deathDetail: '', gear: [] };
+  let d = null; try { d = require('./deathlog').get(ids[ids.length - 1]); } catch { /* no death log */ }
+  if (!d) return { deathDetail: '', gear: [] };
+  const lines = [`Death #${d.id}: ${d.causeText || d.cause}`, `When: ${new Date(d.ts).toLocaleString()}`];
+  if (d.killer) lines.push(`Killer: ${d.killer.name}`);
+  if (d.weapon) lines.push(`Weapon: ${d.weapon}${d.ammo ? ` (${d.ammo})` : ''}`);
+  if (d.distance !== null && d.distance !== undefined) lines.push(`Range: ${round1(d.distance)} m`);
+  if (d.finalPart) lines.push(`Final hit: ${d.finalPart}${d.finalDamage ? `, ${round1(d.finalDamage)} damage` : ''}`);
+  const parts = Object.entries(d.byPart || {}).sort((a, b) => b[1].damage - a[1].damage);
+  if (parts.length) lines.push(`Hits: ${parts.map(([p, v]) => `${p} ×${v.hits} (${Math.round(v.damage)})`).join(', ')}`);
+  const by = (d.attackers || []).slice(0, 4);
+  if (by.length) lines.push(`Damage from: ${by.map(a => `${a.name} ${Math.round(a.damage)}`).join(', ')}`);
+  lines.push(d.gear ? `Gear: ${d.gear.length} items${d.gearFromCorpse ? ' (from the body)' : ' (last snapshot before death)'}` : 'Gear: no snapshot');
+  const done = (d.refunds || []).filter(f => f.status === 'done' && f.ok > 0);
+  if (done.length) lines.push(`Refunded ${done.length} time${done.length > 1 ? 's' : ''}`);
+  const gear = (d.gear || []).slice(0, 120).map(it => `${it.c}${Number.isFinite(it.q) && it.q >= 0 ? ` ×${Math.round(it.q)}` : ''}${Number.isFinite(it.h) && it.h < 1 ? ` · ${Math.round(it.h * 100)}%` : ''}`);
+  return { deathDetail: lines.join('\n'), gear };
+}
+// the player's history in one paragraph: playtime, sessions, deaths, earlier tickets, refunds, the staff note
+function history(t, all) {
+  const g = t.game || {}; const out = [];
+  let p = null; try { p = require('./players').get(g.guid) || null; } catch { /* no player db */ }
+  if (p) {
+    out.push(`Playtime ${Math.round((p.playtimeSec || 0) / 360) / 10} h over ${(p.sessions || []).length} sessions`);
+    if (p.firstSeen) out.push(`first seen ${new Date(p.firstSeen).toLocaleDateString()}`);
+    out.push(`${p.kills || 0} kills, ${p.deaths || 0} deaths`);
+    if ((p.names || []).length > 1) out.push(`names: ${p.names.slice(-4).join(', ')}`);
+  }
+  const earlier = all.filter(x => x !== t && x.game && x.game.steam === g.steam);
+  out.push(`${earlier.length} other ticket${earlier.length === 1 ? '' : 's'}`);
+  try { const refunds = require('./deathlog').forPlayer(g.guid || g.steam, 200).reduce((n, r) => n + (r.refunds || 0), 0); out.push(`${refunds} refund${refunds === 1 ? '' : 's'}`); } catch { /* no death log */ }
+  if (p && p.note) out.push(`note: ${p.note}`);
+  return out.join(' · ');
+}
+// suspicious-activity flags (dupes included) in the last 24 h
+function alerts(t) {
+  const g = t.game || {};
+  let c = null; try { c = require('./combat').forPlayer(g.guid) || require('./combat').forPlayer(g.name); } catch { /* no combat data */ }
+  if (!c) return '';
+  const since = Date.now() - ALERT_WINDOW_MS;
+  return (c.flagHistory || []).filter(h => h.ts >= since).slice(0, 8).map(h => `${new Date(h.ts).toLocaleTimeString()} ${h.reason}: ${h.detail}`).join('\n');
+}
+// the server admin log (.ADM) from two minutes before to two minutes after the ticket was made; cached once complete
+const admCache = new Map();
+function admExcerpt(t) {
+  if (admCache.has(t.id)) return admCache.get(t.id);
+  const at = Date.parse(t.createdAt); if (!at) return [];
+  const dir = settings.paths().profilesDir; const out = [];
+  let files = [];
+  try { files = fs.readdirSync(dir).filter(f => /\.adm$/i.test(f)).map(f => ({ full: path.join(dir, f), m: fs.statSync(path.join(dir, f)).mtimeMs })).filter(f => f.m >= at - ADM_WINDOW_MS).sort((a, b) => a.m - b.m).slice(0, 3); } catch { return []; }
+  const { parseLine } = require('./players');
+  for (const f of files) {
+    let text = ''; try { text = fs.readFileSync(f.full, 'utf8'); } catch { continue; }
+    const ctx = {};
+    for (const line of text.split(/\r?\n/)) {
+      const ev = parseLine(line, ctx);
+      if (!ev || !ctx.date || Math.abs(ev.ts - at) > ADM_WINDOW_MS) continue;
+      out.push(line.trim().slice(0, 200));
+      if (out.length >= 60) break;
+    }
+  }
+  // after the window has passed the excerpt cannot change any more
+  if (Date.now() - at > ADM_WINDOW_MS + 30000) admCache.set(t.id, out);
+  return out;
+}
+function context(t, all) {
+  const d = deathDetail(t);
+  if (!t.game || !t.game.steam) return { deathDetail: d.deathDetail, gear: d.gear, history: '', alerts: '', adm: [] };
+  return { deathDetail: d.deathDetail, gear: d.gear, history: history(t, all), alerts: alerts(t), adm: admExcerpt(t) };
+}
+// for the app's own ticket page
+function contextFor(id) { const all = tickets().all(); const t = all.find(x => x.id === tickets().pad(id)); return t ? context(t, all) : null; }
+
+function adminView(t, all = []) {
   const g = t.game || {}; const c = g.context || {};
   const nearby = Array.isArray(c.nearby) ? c.nearby.map(n => `${n.name} (${Math.round(n.dist)} m)`).join(', ') : '';
   const death = deathInfo(t);
@@ -135,7 +218,7 @@ function adminView(t) {
     source: g.steam ? 'game' : t.channelId ? 'discord' : 'app', description: t.description || '',
     messages: (t.messages || []).slice(-30).map(m => ({ ts: m.ts, by: m.by, role: m.role, text: m.text, name: m.name || '', steam: m.steam || '', guid: m.guid || '' })),
     notes: (t.notes || []).filter(n => !String(n.text).startsWith('[player]') && !String(n.text).startsWith('[to player]')).slice(-15).map(n => ({ ts: n.ts, by: n.by, role: 'note', text: n.text })),
-    x: c.x || 0, z: c.z || 0, nearby, ...death };
+    x: c.x || 0, z: c.z || 0, nearby, ...death, ...context(t, all) };
 }
 function writeIfChanged(f, obj) {
   const text = JSON.stringify(obj, null, 1);
@@ -161,9 +244,9 @@ function writeOut() {
   const shown = all.filter(t => t.status === 'open' || (t.closedAt && Date.parse(t.closedAt) >= since)).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || (URGENCY_RANK[(a.game || {}).urgency] ?? 2) - (URGENCY_RANK[(b.game || {}).urgency] ?? 2) || b.createdAt.localeCompare(a.createdAt)).slice(0, 60);
   const latest = all.reduce((m, t) => (t.id > m ? t.id : m), '');
   const latestT = all.find(t => t.id === latest);
-  if (writeIfChanged(path.join(outDir(), '_admin.json'), { latestId: latest, latestTitle: latestT ? latestT.subject : '', open: all.filter(t => t.status === 'open').length, unassigned: all.filter(t => t.status === 'open' && !t.assignee).length, tickets: shown.map(adminView) })) written++;
+  if (writeIfChanged(path.join(outDir(), '_admin.json'), { latestId: latest, latestTitle: latestT ? latestT.subject : '', open: all.filter(t => t.status === 'open').length, unassigned: all.filter(t => t.status === 'open' && !t.assignee).length, tickets: shown.map(t => adminView(t, all)) })) written++;
   return written;
 }
 
 function init(emit) { emitRef = emit; load(); try { writeOut(); } catch { /* no server folder yet */ } }
-module.exports = { init, ingest, writeOut, apply, CATEGORIES, URGENCY };
+module.exports = { init, ingest, writeOut, apply, contextFor, CATEGORIES, URGENCY };

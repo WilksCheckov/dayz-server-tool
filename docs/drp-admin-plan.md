@@ -38,6 +38,57 @@ what we build next, in order, with the in-game ticket system as the headline fea
 - It's unconfirmed whether I opens the vanilla inventory.
 - Helicopters aren't on the map (only `CarScript` is tracked).
 
+**Progress (2026-10-27):** steps 1–3 of the suggested order are built (Phase A, B1/B2, C1–C3 in-game tickets).
+Step 4 is built but not yet tried in game:
+- The app adds context to every in-game ticket: the death in full, the gear list, the player's history, alerts in
+  the last 24 h, and the `.ADM` lines from two minutes either side. It shows on the app's ticket page and in game.
+- In game, the Tickets window has **Death details** (Death window: teleport, refund, show on map) and **Context &
+  admin log** buttons.
+- The app's Test instance (`C:\DayZServers\Test`) reads the Developer Tools test server's folder (install folder =
+  the Developer Tools workspace, so its mission and profiles).
+
+Step 5 (Phase D) is built but not yet tried in game:
+- The app writes `DayZAdminTools/map/`: `timed_<1h|24h|7d>.json` (deaths by cause, heat grids for travel, hits,
+  building and logins), `static.json` (vehicle spawns, DRP_Factions territories, loot zones and caches, open
+  tickets) and `loot.json` (answers `loot_req.txt`). Code: `src/main/drpmap.js`.
+- The Map window has a layers panel. Marks show deaths, vehicle spawns, zones, caches, tickets and loot spots; a
+  canvas laid over the map draws heat, territories and the selected player's trail (kept by the server mod, 30 min).
+- Fixed on the way: the admin log's `pos=<x, north, height>` was stored with the height where north belongs, so the
+  heatmap, last positions and the speed check used the height. Old death records are migrated; old heat data is
+  dropped and read again from the logs.
+- The app now also reads the logs while a server it did not start writes them (the test server).
+- Not done from the table: PvP killer → victim lines (the killer's position is not recorded).
+
+Step 6 (B3/B4) is built but not yet tried in game:
+- **Watchlist** (`src/main/watchlist.js`): confidence, reason, private note; added from the Statistics page, the
+  Player database or in game, and automatically (source "auto") when a suspicious-activity score reaches the alert
+  level (never over a staff entry). Joins raise the `watchlist-join` alert; the mod reads
+  `DayZAdminTools/watchlist.json`, tells admins in game when a watched player joins and shows it in Player info.
+- **Moderation from the game** (`src/main/gamereq.js`, mod `DRPA_Moderation.c`, window *Moderate* from Player
+  info): ban (permanent or 1/3/7/30 days, through the Discord module's ban with expiry), whitelist and priority
+  queue add/remove, watch/unwatch. Lines go to `requests_in.jsonl`; answers come back in `requests_out.json`. A ban
+  kicks at once, and the mod refuses players in `ban.txt` itself (the engine reads it only at start).
+- **Approvals**: `admins.json` lists each admin's categories that need approval (portal group policy); the mod holds
+  such an action, the app makes a portal request (`portal.requestFromGame`), and the decision goes back to the game,
+  which runs it if the admin is still online. Timed bans now expire even while the Discord bot is off.
+- New in-game permissions: `players.ban`, `lists.manage`.
+
+Built next (2026-10-28), not yet tried in game:
+- **Delete tool** (Cheats → *Delete tool*, key Delete): deletes what the crosshair points at after a confirmation
+  that names it; a locked gate, door or container can lose just its lock. Players and map objects are refused.
+  Permission `admin.delete`.
+- **Freecam** (Cheats → *Freecam*, key Insert): the admin becomes a spectator with a `DRPA_FreeCam` (COT's method:
+  `SelectSpectator` + `UpdateSpectatorPosition`), the body stays behind without taking damage. WASD, Q/E, Shift,
+  walk key; admin actions aim from the camera. *Leave freecam: my body here* moves the body under the camera.
+  Permission `admin.freecam`.
+- **Editor** (toolbar → *Editor*): object sets per map in `profiles/DRP_Admin/editor/<map>.json`; place from a
+  searchable catalogue (map objects and spawnables) where the crosshair points, select what you aim at, nudge,
+  turn, pitch, roll, snap to ground, move to aim, duplicate, delete; switch sets on and off; export to an init.c
+  snippet and JSON. Sets that are on come back after a restart (objects already standing there are reused).
+  Permission `admin.editor`. Not done: a mouse gizmo (moves are buttons with a step size).
+- **Heal / cure fixes**: curing now empties the stomach, removes the agents, switches off the disease modifiers and
+  clears queued symptoms (in game and through the bridge, now v7). Heal fully also resets stats and wakes them.
+
 ---
 
 ## 1. Principles (apply to everything below)

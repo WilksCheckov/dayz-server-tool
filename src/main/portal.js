@@ -37,6 +37,10 @@ const PERMS = [
   ['admin.kill', 'Kill a player (and respawn: kill with the body removed)', 'In-game admin'],
   ['admin.afflict', 'Afflictions and punishments: sickness, injuries, freeze, strip gear, invisible', 'In-game admin'],
   ['admin.refund', 'Refund a death', 'In-game admin'],
+  ['admin.industry', 'Take, carry and place industrial building kits and pack buildings up (DRP_Industry)', 'In-game admin'],
+  ['admin.delete', 'Delete objects in game: base parts, locks, items, vehicles (Cheats → Delete tool)', 'In-game admin'],
+  ['admin.freecam', 'Freecam in game (fly the camera; the body stays behind)', 'In-game admin'],
+  ['admin.editor', 'Object editor in game: place objects and run object sets for events', 'In-game admin'],
   ['deaths.view', 'Death log', 'Records'],
   ['tickets.view', 'See tickets', 'Records'],
   ['tickets.manage', 'Assign, note, link and close tickets', 'Records'],
@@ -65,7 +69,7 @@ function load() {
   db = { enabled: false, users: {}, groups: {}, sessions: {}, ...(jsonstore.readOr(file(), {}) || {}) };
   for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (!db.groups[id]) db.groups[id] = { ...g, perms: g.perms.slice() };
   // permissions added in a later version join the built-in groups that had them by default (your own groups are left alone)
-  const PERMS_VERSION = 5;
+  const PERMS_VERSION = 7;
   const was = db.permsVersion || 1;
   if (was < 2) for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
   // v3 split "give items, kits and vehicles" into three: whoever had it keeps all three; Owner and Admin may approve
@@ -73,6 +77,9 @@ function load() {
   if (was < 4) { for (const g of Object.values(db.groups)) if ((g.perms || []).includes('admin.kill') && !g.builtin) g.perms = [...new Set([...g.perms, 'admin.afflict'])]; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.afflict'])]; }
   // v5 added the in-game admin permissions (DRP_Admin): Owner and Admin get them all, Game master the menu and players
   if (was < 5) { const inGame = ['admin.menu', 'admin.players', 'admin.teleport.manage', 'admin.spawn.forbidden', 'admin.weather']; for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, ...inGame])]; if (db.groups.gm && db.groups.gm.builtin !== false) db.groups.gm.perms = [...new Set([...db.groups.gm.perms, 'admin.menu', 'admin.players'])]; }
+  // v6 added DRP_Industry's staff kits: Owner and Admin
+  if (was < 6) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.industry'])];
+  if (was < 7) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.delete', 'admin.freecam', 'admin.editor'])];
   if (was < PERMS_VERSION) { db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save(); }
   db.requests = db.requests || []; db.usage = db.usage || {}; db.policy = { blockedClasses: [], ...(db.policy || {}) };
   return db;
@@ -187,8 +194,18 @@ function newRequest(user, action, args, target) {
   try { require('./discord').postApprovalRequest(r).catch(() => {}); } catch { /* bot not loaded */ }
   return r;
 }
+// An in-game action (DRP_Admin) that needs approval: the game keeps the action and runs it once approved here.
+function requestFromGame(steam, cat, desc, rid, reason = '') {
+  const user = Object.values(load().users).find(u => u.steam === steam && u.enabled !== false);
+  if (!user) throw new Error('your Steam id is not linked to a portal user');
+  const r = newRequest(user, 'ingame', { desc, rid, reason }, null);
+  r.category = CATEGORIES.some(([c]) => c === cat) ? cat : 'ingame'; save();
+  return r;
+}
+function approvalNeeds(userId) { const u = load().users[userId]; return u ? [...policyFor(u).needs] : []; }
 function describeRequest(r) {
-  const a = r.args || {}; const t = r.target ? ` for ${r.target.name}` : '';
+  const a = r.args || {};
+  if (r.action === 'ingame') return `${a.desc || 'in-game action'} (in game)${r.reason ? ` — ${r.reason}` : ''}`; const t = r.target ? ` for ${r.target.name}` : '';
   const what = VEHICLE_ACTIONS.includes(r.action) ? `${(ACTION_LABEL[r.action] || r.action).replace(/^\S+\s/, '')}${a.what ? ' (' + a.what + ')' : ''}${a.to ? ' to ' + a.to : ''}` : r.action === 'give' ? `${a.count || 1} × ${a.item}` : r.action === 'kit' ? `kit ${a.kit}` : r.action === 'vehicle' ? `vehicle ${a.vehicle}` : r.action === 'spawn' ? `${a.vehicle || (a.kit ? 'kit ' + a.kit : `${a.count || 1} × ${a.item}`)} at ${Math.round(a.x)}, ${Math.round(a.z)}` : r.action === 'refund' ? `refund of death #${a.id}` : r.action;
   return `${what}${t}${r.reason ? ` — ${r.reason}` : ''}`;
 }
@@ -203,7 +220,7 @@ async function decide(id, approve, approverName, approverId = null, note = '') {
   if (r.status !== 'pending') throw new Error(`Request #${id} is already ${r.status}.`);
   if (approverId && approverId === r.by) throw new Error('You cannot approve your own request.');
   r.decidedBy = approverName; r.decidedAt = new Date().toISOString(); r.note = String(note || '').slice(0, 300);
-  if (!approve) { r.status = 'denied'; save(); audit(`${approverName} (portal)`, 'portal: denied ' + r.id, describeRequest(r)); emitRef('console', { source: 'portal', line: `${approverName} denied ${r.byName}'s request #${r.id}: ${describeRequest(r)}` }); return r; }
+  if (!approve) { r.status = 'denied'; save(); if (r.action === 'ingame') { try { require('./gamereq').decided(r.args.rid, false, approverName); } catch { /* ignore */ } } audit(`${approverName} (portal)`, 'portal: denied ' + r.id, describeRequest(r)); emitRef('console', { source: 'portal', line: `${approverName} denied ${r.byName}'s request #${r.id}: ${describeRequest(r)}` }); return r; }
   r.status = 'approved'; save();
   const by = `${r.byName} (portal, approved by ${approverName})`;
   try {
@@ -214,6 +231,8 @@ async function decide(id, approve, approverName, approverId = null, note = '') {
   return r;
 }
 async function runAction(action, args, target, by) {
+  // the game runs it: tell it the decision
+  if (action === 'ingame') { require('./gamereq').decided(args.rid, true, by.replace(/^.*approved by (.*)\)$/, '$1')); return { status: 'done', note: 'runs in game' }; }
   const live = require('./live');
   if (action === 'spawn') return live.spawnAt(args, by);
   if (VEHICLE_ACTIONS.includes(action)) return live.vact(action, target.id, args, by);
@@ -436,4 +455,4 @@ function setOwner(name, password) {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { init, handle, notify, status, setEnabled, setOwner, listUsers, listGroups, createUser, updateUser, deleteUser, upsertGroup, deleteGroup, setPolicy, login, sessionUser, decide, describeRequest, listRequests, PERMS, ACTION_PERM, CATEGORIES, _load: load };
+module.exports = { requestFromGame, approvalNeeds, init, handle, notify, status, setEnabled, setOwner, listUsers, listGroups, createUser, updateUser, deleteUser, upsertGroup, deleteGroup, setPolicy, login, sessionUser, decide, describeRequest, listRequests, PERMS, ACTION_PERM, CATEGORIES, _load: load };
