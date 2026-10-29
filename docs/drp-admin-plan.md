@@ -81,11 +81,25 @@ Built next (2026-10-28), not yet tried in game:
   `SelectSpectator` + `UpdateSpectatorPosition`), the body stays behind without taking damage. WASD, Q/E, Shift,
   walk key; admin actions aim from the camera. *Leave freecam: my body here* moves the body under the camera.
   Permission `admin.freecam`.
-- **Editor** (toolbar → *Editor*): object sets per map in `profiles/DRP_Admin/editor/<map>.json`; place from a
-  searchable catalogue (map objects and spawnables) where the crosshair points, select what you aim at, nudge,
-  turn, pitch, roll, snap to ground, move to aim, duplicate, delete; switch sets on and off; export to an init.c
-  snippet and JSON. Sets that are on come back after a restart (objects already standing there are reused).
-  Permission `admin.editor`. Not done: a mouse gizmo (moves are buttons with a step size).
+- **Editor** (toolbar → *Editor*, built 2026-10-28, not yet tried in game): a full-screen mode with the free camera
+  (WASD/QE fly, right mouse looks, wheel sets speed) and the mouse cursor. Research: `reports/DayZ Editor and Loader
+  study.md` (our own code; the DayZ Editor is CC BY-NC-ND).
+  - Left: object browser (search, 15 categories, preview with size). Picking an object places it at the cursor.
+  - Right: sets (new, on/off, export, import, delete), the placed objects plus removed map objects, typed numbers.
+  - World: click / Shift / Ctrl select, box select, drag over the ground (Alt: height), red/green/blue arrows and a
+    yellow ring drawn on a canvas, Grid / Angle snap, follow ground, Ctrl+C/V/D, Delete, Ctrl+Z/Y (100 steps).
+  - Objects have stable ids per set; edits go to the server as batches by id (`DRPA_Editor.Apply`).
+  - Map objects: Delete on a map building/tree removes it in the set. Phase 0 (2026-10-28): `ObjectDelete` does
+    nothing to map objects, so the server and every client sink them 1000 m (`DRPA_Hide`), and the list goes to each
+    player on connect and 20 s later.
+  - Import from `profiles/DRP_Admin/editor/import`: JSON .dze (both deletion keys), Expansion .map (with
+    deletions), the game's object spawner JSON. Binary .dze is refused with a hint. Export adds `_spawner.json`
+    and `.map`.
+  - **Loot spots** (top bar or L): the spawn points of the buildings around the camera from the mission's
+    `mapgroupproto.xml` (`DRPA_LootSpots`). Drag to move, Ctrl+click inside a building to add, Delete to remove,
+    with undo. Saved to the file at once (first save keeps `mapgroupproto.xml.drpa_backup`). A point belongs to a
+    building type, so every building of that type changes; the economy reads the file at restart.
+  Permission `admin.editor`.
 - **Spectate** (Player info → *Spectate*): the freecam follows the player (started at them if it was off), orbit
   with the mouse, W/S for distance, all the way in is first person; found again by Steam64 after a respawn.
 - **Vehicle actions** (Map → right-click a vehicle): repair (every zone and part), refuel (all fluids), flip upright,

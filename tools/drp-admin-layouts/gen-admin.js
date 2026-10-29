@@ -299,32 +299,80 @@ write('drpa_death.layout', content('dt_root', [
   button('dt_refund', 212, 346, 196, 30, 'Refund the death'),
   button('dt_map', 416, 346, 196, 30, 'Show on map'),
 ]));
-// ------------------------------------------------------------------ staff: Editor (object sets), placed by script
-write('drpa_editor.layout', content('ed_root', [
-  label('ed_l_sets', 8, 4, 230, 'Object sets'),
-  list('ed_sets', 8, 28, 230, 300, 12),
-  edit('ed_newname', 8, 340, 230, 26),
-  button('ed_new', 8, 372, 112, 30, 'New set', { size: 13 }),
-  button('ed_toggle', 126, 372, 112, 30, 'Switch on', { size: 13 }),
-  button('ed_export', 8, 408, 112, 30, 'Export', { size: 13 }),
-  button('ed_delset', 126, 408, 112, 30, 'Delete set', { size: 13 }),
-  label('ed_l_search', 246, 4, 400, 'Objects: search name or class (buildings, walls, props, items)'),
-  edit('ed_search', 246, 28, 400, 26),
-  list('ed_items', 246, 62, 400, 300, 16),
-  text('ed_count', 246, 370, 400, 20, '', { color: MUTED, size: 12 }),
-  button('ed_place', 246, 396, 400, 32, 'Place where I look', { color: BTN_ACCENT }),
-  multiText('ed_sel', 660, 4, 250, 70, '', 12),
-  button('ed_pick', 660, 80, 250, 28, 'Select what I aim at', { size: 13 }),
-  button('ed_step', 660, 114, 250, 28, 'Step: 0.5 m / 5 deg', { size: 13 }),
-  button('ed_xm', 660, 148, 122, 28, 'West -', { size: 13 }), button('ed_xp', 788, 148, 122, 28, 'East +', { size: 13 }),
-  button('ed_zm', 660, 180, 122, 28, 'South -', { size: 13 }), button('ed_zp', 788, 180, 122, 28, 'North +', { size: 13 }),
-  button('ed_ym', 660, 212, 122, 28, 'Down', { size: 13 }), button('ed_yp', 788, 212, 122, 28, 'Up', { size: 13 }),
-  button('ed_rl', 660, 244, 122, 28, 'Turn left', { size: 13 }), button('ed_rr', 788, 244, 122, 28, 'Turn right', { size: 13 }),
-  button('ed_pm', 660, 276, 122, 28, 'Pitch -', { size: 13 }), button('ed_pp', 788, 276, 122, 28, 'Pitch +', { size: 13 }),
-  button('ed_tm', 660, 308, 122, 28, 'Roll -', { size: 13 }), button('ed_tp', 788, 308, 122, 28, 'Roll +', { size: 13 }),
-  button('ed_ground', 660, 340, 122, 28, 'Snap to ground', { size: 13 }), button('ed_toaim', 788, 340, 122, 28, 'Move to aim', { size: 13 }),
-  button('ed_dup', 660, 372, 122, 28, 'Duplicate', { size: 13 }), button('ed_del', 788, 372, 122, 28, 'Delete object', { color: BTN_ACCENT, size: 13 }),
-]));
+// ------------------------------------------------------------------ staff: Editor mode (full screen, placed by script)
+// The world shows through the middle; a canvas under the panels draws selection boxes, handles and the box-select
+// rectangle. Low priority like the windows, so the object preview (ItemPreviewWidget) renders.
+const EMW = 1920, EMH = 1080, EML = 340, EMR = 330, EMT = 40, EMB = 30;
+const fieldRow = (id, lbl, x, y) => [text(`${id}_lbl`, x, y, 44, 26, lbl, { color: MUTED, size: 13 }), edit(id, x + 46, y, 100, 26)];
+write('drpa_editmode.layout', {
+  cls: 'FrameWidgetClass', name: 'em_root',
+  props: 'position 0 0\n size 1 1\n hexactpos 0\n vexactpos 0\n hexactsize 0\n vexactsize 0\n priority 2',
+  children: [
+    { cls: 'CanvasWidgetClass', name: 'em_canvas', props: 'ignorepointer 1\n position 0 0\n size 1 1\n hexactpos 0\n vexactpos 0\n hexactsize 0\n vexactsize 0', children: [] },
+    panel('em_top', 0, 0, EMW, EMT, BAR, [
+      text('em_title', 12, 0, 520, EMT, 'DRP Editor', { bold: true, size: 16 }),
+      button('em_undo', 540, 5, 80, 30, 'Undo', { size: 13 }),
+      button('em_redo', 626, 5, 80, 30, 'Redo', { size: 13 }),
+      button('em_snap', 720, 5, 130, 30, 'Grid: off', { size: 13 }),
+      button('em_angle', 856, 5, 130, 30, 'Angle: 15', { size: 13 }),
+      button('em_ground', 992, 5, 170, 30, 'Follow ground: on', { size: 13 }),
+      button('em_loot', 1168, 5, 150, 30, 'Loot spots: off', { size: 13 }),
+      button('em_help', 1324, 5, 100, 30, 'Help (H)', { size: 13 }),
+      button('em_exit', 1430, 5, 120, 30, 'Exit (Esc)', { color: BTN_ACCENT, size: 13 }),
+    ]),
+    panel('em_topline', 0, EMT, EMW, 2, LINE),
+    panel('em_left', 0, EMT + 2, EML, EMH - EMT - EMB - 2, CARD, [
+      heading('em_l_browser', 10, 6, 300, 'Objects'),
+      edit('em_search', 10, 34, EML - 20, 26),
+      label('em_l_cats', 10, 64, 300, 'Category'),
+      list('em_cats', 10, 86, EML - 20, 200, 12),
+      list('em_items', 10, 292, EML - 20, 300, 16),
+      text('em_count', 10, 596, EML - 20, 20, '', { color: MUTED, size: 12 }),
+      panel('em_preview_bg', 10, 620, EML - 20, 220, '0.05 0.05 0.05 1', [
+        { cls: 'ItemPreviewWidgetClass', name: 'em_preview', props: 'position 0 0\n size 1 1\n hexactpos 1\n vexactpos 1\n hexactsize 0\n vexactsize 0', children: [] },
+        text('em_preview_none', 0, 0, EML - 20, 220, '', { color: MUTED, size: 13, align: 'center' }),
+      ]),
+      multiText('em_info', 10, 846, EML - 20, 60, '', 12),
+    ]),
+    panel('em_right', EMW - EMR, EMT + 2, EMR, EMH - EMT - EMB - 2, CARD, [
+      heading('em_l_sets', 10, 6, 300, 'Sets'),
+      list('em_sets', 10, 34, EMR - 20, 130, 12),
+      edit('em_newname', 10, 170, EMR - 20, 26),
+      button('em_new', 10, 200, 152, 28, 'New set', { size: 13 }),
+      button('em_toggle', 168, 200, 152, 28, 'Switch on', { size: 13 }),
+      button('em_export', 10, 232, 100, 28, 'Export', { size: 13 }),
+      button('em_import', 115, 232, 100, 28, 'Import', { size: 13 }),
+      button('em_delset', 220, 232, 100, 28, 'Delete set', { size: 13 }),
+      heading('em_l_objs', 10, 268, 300, 'Placed objects'),
+      list('em_objs', 10, 296, EMR - 20, 260, 16),
+      heading('em_l_sel', 10, 564, 300, 'Selection'),
+      multiText('em_sel', 10, 590, EMR - 20, 40, '', 12),
+      ...fieldRow('em_fx', 'X', 10, 634), ...fieldRow('em_fyaw', 'Yaw', 166, 634),
+      ...fieldRow('em_fy', 'Height', 10, 664), ...fieldRow('em_fpitch', 'Pitch', 166, 664),
+      ...fieldRow('em_fz', 'Z', 10, 694), ...fieldRow('em_froll', 'Roll', 166, 694),
+      button('em_apply', 10, 726, EMR - 20, 28, 'Apply numbers', { size: 13 }),
+      button('em_toground', 10, 758, 100, 28, 'Ground', { size: 13 }),
+      button('em_dup', 115, 758, 100, 28, 'Duplicate', { size: 13 }),
+      button('em_del', 220, 758, 100, 28, 'Delete', { color: BTN_ACCENT, size: 13 }),
+    ]),
+    panel('em_bottom', 0, EMH - EMB, EMW, EMB, BAR, [
+      text('em_status', 12, 0, 900, EMB, '', { size: 13 }),
+      text('em_hint', 920, 0, 990, EMB, '', { color: MUTED, size: 13, align: 'right' }),
+    ]),
+    panel('em_tip', 0, 0, 260, 24, '0 0 0 0.75', [text('em_tip_text', 6, 0, 250, 24, '', { size: 13 })]),
+    panel('em_importbox', 660, 240, 600, 470, '0.07 0.07 0.07 0.97', [
+      heading('em_import_title', 16, 10, 560, 'Import a file as a new set'),
+      multiText('em_import_note', 16, 40, 568, 64, 'Put files in the server profile folder DRP_Admin/editor/import: a JSON .dze from the DayZ Editor, an Expansion .map (keeps removed map objects) or the game object spawner JSON.', 13),
+      list('em_imports', 16, 110, 568, 300, 16),
+      button('em_import_go', 16, 420, 280, 34, 'Import the picked file', { color: BTN_ACCENT, size: 14 }),
+      button('em_import_cancel', 304, 420, 280, 34, 'Cancel', { size: 14 }),
+    ]),
+    panel('em_helpbox', 500, 120, 920, 760, '0.07 0.07 0.07 0.96', [
+      heading('em_help_title', 16, 10, 600, 'Editor keys and mouse'),
+      multiText('em_helptext', 16, 44, 888, 700, '', 14),
+    ]),
+  ],
+});
 
 // ------------------------------------------------------------------ staff: ESP (window, overlay root, one label)
 write('drpa_espwin.layout', content('es_root', [
