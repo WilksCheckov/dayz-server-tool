@@ -185,7 +185,7 @@ function auditAdmin(e) {
 // admin.menu permission, with their in-game permissions; plus the owner Steam ids from the DRP_Admin card ("*").
 // The mod re-reads it every 30 s. Written only when it changed; never emptied while it still lists someone (so a
 // hand-made file survives until the portal has at least one in-game admin).
-const INGAME_PERMS = ['admin.menu', 'admin.players', 'admin.teleport', 'admin.teleport.manage', 'admin.heal', 'admin.kill', 'admin.god', 'admin.afflict', 'admin.spawn', 'admin.spawn.forbidden', 'admin.weather', 'admin.vehicles', 'admin.kits', 'admin.refund', 'admin.industry', 'admin.delete', 'admin.freecam', 'admin.editor', 'admin.esp','players.message', 'players.kick', 'players.ban', 'lists.manage', 'tickets.view', 'tickets.manage'];
+const INGAME_PERMS = ['admin.menu', 'admin.players', 'admin.teleport', 'admin.teleport.manage', 'admin.heal', 'admin.kill', 'admin.god', 'admin.afflict', 'admin.spawn', 'admin.spawn.forbidden', 'admin.weather', 'admin.vehicles', 'admin.kits', 'admin.refund', 'admin.industry', 'admin.delete', 'admin.freecam', 'admin.editor', 'admin.esp', 'admin.bases', 'players.message', 'players.kick', 'players.ban', 'lists.manage', 'tickets.view', 'tickets.manage'];
 function adminsFile() { return path.join(settings.paths().profilesDir, 'DRP_Admin', 'admins.json'); }
 function owners() { return (cfg().owners || []).map(s => String(s).trim()).filter(s => /^7656\d{13}$/.test(s)); }
 function computeAdmins() {

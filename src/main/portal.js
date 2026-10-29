@@ -42,6 +42,7 @@ const PERMS = [
   ['admin.freecam', 'Freecam in game (fly the camera; the body stays behind)', 'In-game admin'],
   ['admin.editor', 'Object editor in game: place objects and run object sets for events', 'In-game admin'],
   ['admin.esp', 'ESP in game: labels for players, vehicles, creatures, base parts and items', 'In-game admin'],
+  ['admin.bases', 'Admin Build Hammer in game: build, dismantle and repair base parts without materials (DRP_Bases)', 'In-game admin'],
   ['deaths.view', 'Death log', 'Records'],
   ['tickets.view', 'See tickets', 'Records'],
   ['tickets.manage', 'Assign, note, link and close tickets', 'Records'],
@@ -70,7 +71,7 @@ function load() {
   db = { enabled: false, users: {}, groups: {}, sessions: {}, ...(jsonstore.readOr(file(), {}) || {}) };
   for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (!db.groups[id]) db.groups[id] = { ...g, perms: g.perms.slice() };
   // permissions added in a later version join the built-in groups that had them by default (your own groups are left alone)
-  const PERMS_VERSION = 7;
+  const PERMS_VERSION = 8;
   const was = db.permsVersion || 1;
   if (was < 2) for (const [id, g] of Object.entries(DEFAULT_GROUPS)) if (db.groups[id]) db.groups[id].perms = [...new Set([...(db.groups[id].perms || []), ...g.perms.filter(p => ['lists.view', 'lists.manage'].includes(p))])];
   // v3 split "give items, kits and vehicles" into three: whoever had it keeps all three; Owner and Admin may approve
@@ -81,6 +82,8 @@ function load() {
   // v6 added DRP_Industry's staff kits: Owner and Admin
   if (was < 6) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.industry'])];
   if (was < 7) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.delete', 'admin.freecam', 'admin.editor', 'admin.esp'])];
+  // v8 added DRP_Bases' Admin Build Hammer: Owner and Admin
+  if (was < 8) for (const id of ['owner', 'admin']) if (db.groups[id]) db.groups[id].perms = [...new Set([...db.groups[id].perms, 'admin.bases'])];
   if (was < PERMS_VERSION) { db.permsVersion = PERMS_VERSION; if (Object.keys(db.users).length) save(); }
   db.requests = db.requests || []; db.usage = db.usage || {}; db.policy = { blockedClasses: [], ...(db.policy || {}) };
   return db;
