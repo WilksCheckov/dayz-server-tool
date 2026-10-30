@@ -520,6 +520,9 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .inst-grid { display: grid; grid-template-columns: 70px 1fr; gap: 4px 12px; margin-top: 8px; font-size: 12.5px; align-items: center; }
 .inst-grid code { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal-box:has(#kitPicker) { width: 940px; }
+.modal-box:has(#zonePicker) { width: 1000px; }
+.zone-editor { grid-template-columns: 1.3fr 1fr; }
+.zone-editor .zr > span.grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
 .kit-left, .kit-right { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .kit-rows, .kit-items { height: 300px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px; }
@@ -550,3 +553,25 @@ details.muted p { margin: 8px 0 0; line-height: 1.55; }
 .tk-detail .tk-line { padding: 4px 0; border-bottom: 1px solid var(--border); }
 .tk-detail .tk-line.system { color: var(--muted); font-style: italic; }
 .tk-badge-open { color: var(--ok); }
+
+/* DRP Factions page */
+.fx-body { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding-bottom: 12px; }
+.fx-steps { display: flex; flex-direction: column; gap: 8px; }
+.fx-step { display: flex; gap: 10px; align-items: flex-start; }
+.fx-step .badge { min-width: 18px; text-align: center; margin-top: 2px; }
+.fx-split { display: grid; grid-template-columns: 320px 1fr; gap: 12px; min-height: 0; }
+.fx-list { display: flex; flex-direction: column; gap: 8px; }
+.fx-list .ip-list { max-height: 70vh; }
+.veh-swatch.big { width: 22px; height: 22px; border-radius: 4px; }
+.fx-settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
+.fx-settings .card { display: flex; flex-direction: column; gap: 6px; }
+.table td.right-align { text-align: right; white-space: nowrap; }
+.fx-tiers { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; margin-top: 12px; align-items: start; }
+.fx-tier { display: flex; flex-direction: column; gap: 8px; }
+.fxt-wrap { max-height: 320px; }
+.col { display: flex; flex-direction: column; }
+.fx-body > * { flex-shrink: 0; }
+.fx-tier .input.short { width: 64px; margin: 0; }
+.fx-tier .table td, .fx-tier .table th { padding: 3px 6px; }
+.fxt-class { border-top: 1px solid var(--border); padding: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.fxt-uses .check { font-size: 11.5px; }

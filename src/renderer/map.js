@@ -65,6 +65,7 @@ async function drawMap() {
   await drawOverlay(ctx, c);
   drawLoot(ctx, c);
   drawLiveLoot(ctx, c);
+  drawZones(ctx, c);
   drawVehicles(ctx, c);
   drawWorld(ctx, c);
   // players: live positions (bridge script) for those online, the last logged position for everyone else
@@ -235,14 +236,22 @@ function renderLootList() {
 function mapInit() {
   const c = $('mapCanvas');
   c.addEventListener('wheel', e => { e.preventDefault(); const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const v = mapState.view; const f = e.deltaY < 0 ? 1.2 : 1 / 1.2; const ns = Math.min(40, Math.max(1, v.scale * f)); const k = ns / v.scale; const sz = baseSize(c); const ox = (c.width - sz) / 2, oy = (c.height - sz) / 2; v.ox = px - ox - (px - ox - v.ox) * k; v.oy = py - oy - (py - oy - v.oy) * k; v.scale = ns; if (ns === 1) { v.ox = 0; v.oy = 0; } scheduleDraw(); }, { passive: false });
-  c.addEventListener('mousedown', e => { if (e.button !== 0) return; mapState.drag = { x: e.clientX, y: e.clientY, ox: mapState.view.ox, oy: mapState.view.oy, moved: false }; });
+  c.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    // painting loot tiers: a click or a drag paints sectors instead of panning
+    if (tiers.paint && zoneOn()) { const rect = c.getBoundingClientRect(); tiers.dragging = true; paintAt(c, e.clientX - rect.left, e.clientY - rect.top); return; }
+    mapState.drag = { x: e.clientX, y: e.clientY, ox: mapState.view.ox, oy: mapState.view.oy, moved: false };
+  });
   window.addEventListener('mousemove', e => {
     const rect = c.getBoundingClientRect(); const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (tiers.dragging) { if (inside) paintAt(c, e.clientX - rect.left, e.clientY - rect.top); return; }
+    if (inside && zoneOn() && document.querySelector('#page-map.active')) { const before = mapState.hover; mapState.hover = toWorld(c, e.clientX - rect.left, e.clientY - rect.top); if (!before || sectorAt(before[0], before[1]) !== sectorAt(mapState.hover[0], mapState.hover[1])) scheduleDraw(); }
     if (mapState.drag) { const dx = e.clientX - mapState.drag.x, dy = e.clientY - mapState.drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) mapState.drag.moved = true; mapState.view.ox = mapState.drag.ox + dx; mapState.view.oy = mapState.drag.oy + dy; scheduleDraw(); return; }
     if (!inside || !document.querySelector('#page-map.active')) return;
     const w = toWorld(c, e.clientX - rect.left, e.clientY - rect.top); mapState.hover = w; if (mapState.measure && mapState.measure.a && !mapState.measure.b) { mapState.measure.cursor = w; scheduleDraw(); } else { const el = $('mapInfo'); const t = el.textContent.replace(/ · cursor .*$/, ''); el.textContent = t + ` · cursor ${Math.round(w[0])}, ${Math.round(w[1])}`; }
   });
   window.addEventListener('mouseup', e => {
+    if (tiers.dragging) { tiers.dragging = false; return; }
     const d = mapState.drag; mapState.drag = null; if (!d) return;
     if (d.moved) return;
     const rect = c.getBoundingClientRect(); const px = e.clientX - rect.left, py = e.clientY - rect.top; const w = toWorld(c, px, py);
@@ -301,7 +310,7 @@ function showPlayerPopup(r) {
   showModal(r.name, body, [{ label: 'Open in Database', value: 'db', primary: true }, { label: 'Close', value: false }]).then(v => { if (v === 'db') { pdbSelected = r.key; showPage('database'); } });
 }
 // ----- live admin: players online now, their actions -----
-const adm = { live: null, world: null, sel: null, selVeh: null, pickTp: null, pickVtp: null, follow: false, timer: null, kits: [], vehicles: [], afflictions: [] };
+const adm = { live: null, world: null, zones: null, selZone: null, pickZone: null, sel: null, selVeh: null, pickTp: null, pickVtp: null, follow: false, timer: null, kits: [], vehicles: [], afflictions: [] };
 const BREAK_KINDS = [['tyres', 'Flat tyres'], ['fuel', 'Drain the fuel'], ['engine', 'Ruin the engine'], ['battery', 'Ruin the battery'], ['all', 'Everything']];
 async function loadKits() { try { [adm.kits, adm.vehicles] = await Promise.all([ipc.invoke('live:kits'), ipc.invoke('live:vehicles')]); } catch { /* no mission yet */ } if (!adm.afflictions.length) try { adm.afflictions = (await ipc.invoke('live:actions')).AFFLICTIONS || []; } catch { /* older main */ } }
 const HEALS = [['all', 'Heal everything'], ['health', 'Health, blood and shock'], ['bleeding', 'Stop bleeding'], ['bones', 'Fix broken bones'], ['cure', 'Cure diseases'], ['food', 'Food and water']];
@@ -327,6 +336,9 @@ async function pollLive() {
   if (!document.querySelector('#page-map.active')) return;
   try { adm.live = await ipc.invoke('live:players'); } catch (e) { adm.live = { available: false, reason: e.message, players: [] }; }
   try { adm.world = await ipc.invoke('live:world'); } catch (e) { adm.world = { available: false, reason: e.message, vehicles: [], flags: [] }; }
+  try { const prev = adm.zones && adm.zones.available ? adm.zones.result.seq : null; adm.zones = await ipc.invoke('drpzones:state'); zoneResultToast(prev, adm.zones); } catch (e) { adm.zones = { available: false, reason: e.message }; }
+  if (adm.zones && adm.zones.available) { await loadSectors(); if (!tiers.data) await loadTiers(); }
+  renderTierPanel();
   const p = livePlayer(adm.sel); if (adm.follow && p) centreOn(p);
   renderAdmin(); renderVehPanel(); scheduleDraw();
 }
@@ -579,6 +591,164 @@ function pointMenu(w) {
     { label: 'Copy the position', run: () => { navigator.clipboard.writeText(`${Math.round(w[0])} ${Math.round(w[1])}`); toast('Position copied'); } }
   ];
 }
+// ----- DRP Factions: territory sectors, faction areas and loot tiers, painted on the map -----
+// The mod splits the map into sectors (profiles\DRP_Factions\sectors.json). Faction areas are drawn like the in-game
+// map: held sectors filled in the faction's colour, one outline and label per connected group. Loot tiers are painted
+// onto sectors here and saved to loot_tiers.json; the faction holding a sector gets rolls from its tier's pool.
+const sec = { at: 0, map: null, key: '', fill: null, lines: null, blobs: [], tierKey: '', tierFill: null };
+const TIER_COLORS = ['', '#7cc47f', '#e0c04e', '#f08a3c', '#ff4d4d'];
+const tiers = { data: null, at: 0, edits: new Map(), clsEdits: new Map(), mode: 'tier', paint: false, brush: 1, clsBrush: 'civilian', dragging: false };
+const CLASS_COLORS = { civilian: '#6fcf6f', civil: '#4fb3ff', police: '#8a7dff', military: '#c9a227' };
+const classColor = (id) => CLASS_COLORS[id] || '#cfcfcf';
+const zoneOn = () => $('lyrZones').checked && adm.zones && adm.zones.available && sec.map;
+async function loadSectors() {
+  const Z = adm.zones; if (!Z || !Z.available || !Z.sectorsAt || Z.sectorsAt === sec.at) return;
+  try {
+    const d = await ipc.invoke('drpzones:sectors'); if (!d || !d.available) return;
+    const n = d.n, grid = new Int32Array(n * n);
+    d.rows.forEach((row, r) => { let c = 0; for (const run of row.split(',')) { const [id, len] = run.split('*').map(Number); grid.fill(id, r * n + c, Math.min(n * n, r * n + c + len)); c += len; } });
+    const byId = new Map(d.sectors.map(s => [s.id, s]));
+    const borders = (d.borders || []).map(b => { const v = b.split(',').map(Number); return { a: v[0], b: v[1], pts: v.slice(2) }; });
+    sec.map = { n, R: d.raster, grid, sectors: d.sectors, byId, borders }; sec.at = Z.sectorsAt; sec.key = ''; sec.tierKey = '';
+  } catch (e) { toast('Sector map: ' + e.message, true); }
+}
+function sectorAt(x, z) { const m = sec.map; if (!m) return -1; const c = Math.floor(x / m.R), r = Math.floor(z / m.R); return c < 0 || r < 0 || c >= m.n || r >= m.n ? -1 : m.grid[r * m.n + c]; }
+function sectorName(id) { const s = sec.map && sec.map.byId.get(id); return s ? s.name : id > 0 ? 'sector ' + id : 'the sea'; }
+const KINDS = ['countryside', 'village', 'town', 'city', 'military'];
+// the faction holding a sector (claim or captured), or null
+function sectorOwner(id) { if (!adm.zones) return null; for (const f of adm.zones.factions) if (f.cells.some(c => c.x === id && !c.pending)) return f; return null; }
+// an offscreen image with one pixel per raster cell, north up
+function rasterImage(colorOf) {
+  const m = sec.map; const cv = document.createElement('canvas'); cv.width = m.n; cv.height = m.n;
+  const g = cv.getContext('2d'); const img = g.createImageData(m.n, m.n); const cache = new Map();
+  for (let r = 0; r < m.n; r++) for (let c = 0; c < m.n; c++) {
+    const id = m.grid[r * m.n + c]; if (id < 1) continue;
+    let rgba = cache.get(id); if (rgba === undefined) { rgba = colorOf(id); cache.set(id, rgba); } if (!rgba) continue;
+    const o = ((m.n - 1 - r) * m.n + c) * 4; img.data[o] = rgba[0]; img.data[o + 1] = rgba[1]; img.data[o + 2] = rgba[2]; img.data[o + 3] = rgba[3];
+  }
+  g.putImageData(img, 0, 0); return cv;
+}
+const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+function buildTerritory() {
+  const Z = adm.zones; const m = sec.map; const key = JSON.stringify(Z.factions.map(f => [f.id, f.color, f.tag, f.cells])) + sec.at;
+  if (key === sec.key) return; sec.key = key;
+  const owner = new Map(); for (const f of Z.factions) for (const c of f.cells) owner.set(c.x, { f, pending: c.pending });
+  sec.fill = rasterImage(id => { const o = owner.get(id); return o ? [...hexRgb(o.f.color), o.pending ? 50 : 105] : null; });
+  // lines: territory edges (owner changes) in the owner's colour, faint sector borders otherwise
+  sec.lines = m.borders.map(b => { const oa = owner.get(b.a), ob = owner.get(b.b); const fa = oa && oa.f.id, fb = ob && ob.f.id;
+    return fa !== fb ? { pts: b.pts, color: (oa || ob).f.color, width: 2 } : b.a > 0 && b.b > 0 ? { pts: b.pts, color: 'rgba(255,255,255,.28)', width: 1 } : null; }).filter(Boolean);
+  // one label per connected group of a faction's sectors
+  sec.blobs = []; const seen = new Set();
+  for (const [id, o] of owner) {
+    if (seen.has(id)) continue; const group = []; const todo = [id]; seen.add(id);
+    while (todo.length) { const cur = todo.pop(); group.push(cur); const s = m.byId.get(cur); if (!s) continue; for (const nb of s.nb) { const on = owner.get(nb); if (!seen.has(nb) && on && on.f.id === o.f.id) { seen.add(nb); todo.push(nb); } } }
+    let wx = 0, wz = 0, w = 0; for (const g of group) { const s = m.byId.get(g); if (s) { wx += s.cx * s.cells; wz += s.cz * s.cells; w += s.cells; } }
+    if (!w) continue; const gx = wx / w, gz = wz / w;
+    const at = group.map(g => m.byId.get(g)).filter(Boolean).sort((a, b) => Math.hypot(a.cx - gx, a.cz - gz) - Math.hypot(b.cx - gx, b.cz - gz))[0];
+    sec.blobs.push({ x: at.cx, z: at.cz, f: o.f, sectors: group.length });
+  }
+}
+// tier and zone class of a sector: unsaved paint first, then the saved file
+function savedSector(id) { return tiers.data && tiers.data.sectors ? tiers.data.sectors.find(x => x.id === id) : null; }
+function tierOf(id) { if (tiers.edits.has(id)) return tiers.edits.get(id); const t = savedSector(id); return t ? t.tier || 0 : 0; }
+function classOf(id) { if (tiers.clsEdits.has(id)) return tiers.clsEdits.get(id); const t = savedSector(id); return t ? t.cls || '' : ''; }
+// the class that counts: painted, else military for bases and airfields and civilian elsewhere (as the mod does)
+function classEff(id) { const c = classOf(id); if (c) return c; const s = sec.map && sec.map.byId.get(id); return s && s.kind === 4 ? 'military' : 'civilian'; }
+function className(id) { const c = tiers.data && (tiers.data.classes || []).find(x => x.id === id); return c ? c.name : id; }
+function unsavedCount() { return new Set([...tiers.edits.keys(), ...tiers.clsEdits.keys()]).size; }
+function buildTierFill() {
+  const key = sec.at + tiers.mode + JSON.stringify([...tiers.edits]) + JSON.stringify([...tiers.clsEdits]) + tiers.at; if (key === sec.tierKey) return; sec.tierKey = key;
+  sec.tierFill = tiers.mode === 'class'
+    ? rasterImage(id => [...hexRgb(classColor(classEff(id))), classOf(id) ? 120 : 45])
+    : rasterImage(id => { const t = tierOf(id); return t ? [...hexRgb(TIER_COLORS[t]), 110] : null; });
+}
+function drawZones(ctx, c) {
+  const info = $('lyrZoneInfo'); if (!info) return;
+  if (!zoneOn()) { info.textContent = adm.zones && adm.zones.available && !sec.map ? 'Sector map loading…' : ''; return; }
+  const m = sec.map; const v = mapState.view;
+  const [x0, y0] = toScreen(c, 0, m.n * m.R); const [x1, y1] = toScreen(c, m.n * m.R, 0);
+  ctx.save(); ctx.imageSmoothingEnabled = false;
+  const showTiers = $('lyrTiers') && $('lyrTiers').checked;
+  if (showTiers) { buildTierFill(); ctx.drawImage(sec.tierFill, x0, y0, x1 - x0, y1 - y0); }
+  buildTerritory(); if (!showTiers) ctx.drawImage(sec.fill, x0, y0, x1 - x0, y1 - y0);
+  ctx.restore();
+  const kx = (x1 - x0) / (m.n * m.R); const pxPerCell = m.R * kx;
+  for (const l of sec.lines) {
+    if (l.width === 1 && pxPerCell < 0.6 && !showTiers) continue;
+    ctx.strokeStyle = l.color; ctx.lineWidth = l.width; ctx.beginPath();
+    for (let i = 0; i + 1 < l.pts.length; i += 2) { const [sx, sy] = toScreen(c, l.pts[i], l.pts[i + 1]); if (i) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy); }
+    ctx.stroke();
+  }
+  // the sector under the cursor
+  if (mapState.hover) {
+    const id = sectorAt(mapState.hover[0], mapState.hover[1]);
+    if (id > 0) { ctx.strokeStyle = '#2ee05a'; ctx.lineWidth = 3; for (const b of m.borders) { if (b.a !== id && b.b !== id) continue; ctx.beginPath(); for (let i = 0; i + 1 < b.pts.length; i += 2) { const [sx, sy] = toScreen(c, b.pts[i], b.pts[i + 1]); if (i) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy); } ctx.stroke(); } }
+  }
+  ctx.textAlign = 'center';
+  if (!showTiers) for (const b of sec.blobs) {
+    const [sx, sy] = toScreen(c, b.x, b.z); ctx.font = 'bold 13px Segoe UI'; const label = `[${b.f.tag}] ${b.f.name}`;
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(label, sx, sy); ctx.fillStyle = '#fff'; ctx.fillText(label, sx, sy);
+  }
+  if (pxPerCell >= 2.5 || (showTiers && pxPerCell >= 1.2)) {
+    ctx.font = '11px Segoe UI';
+    for (const s of m.sectors) {
+      const [sx, sy] = toScreen(c, s.cx, s.cz); if (sx < 0 || sy < 0 || sx > c.width || sy > c.height) continue;
+      const t = tierOf(s.id); const label = showTiers ? `${s.name} · ${t ? 'T' + t : 'no tier'} · ${className(classEff(s.id))}` : s.name;
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.strokeText(label, sx, sy + (showTiers ? 0 : 16)); ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillText(label, sx, sy + (showTiers ? 0 : 16));
+    }
+  }
+  ctx.textAlign = 'start';
+  const held = adm.zones.factions.reduce((n, f) => n + f.cells.length, 0);
+  const counts = [1, 2, 3, 4].map(t => m.sectors.filter(s => tierOf(s.id) === t).length);
+  const what = tiers.mode === 'class' ? (tiers.data && tiers.data.classes || []).map(cl => `${cl.name} ${m.sectors.filter(s => classEff(s.id) === cl.id).length}`).join(', ') : counts.map((n, i) => `T${i + 1} ${n}`).join(', ');
+  info.textContent = showTiers ? `${tiers.mode === 'class' ? 'zone classes' : 'tiers'}: ${what}${unsavedCount() ? ` · ${unsavedCount()} unsaved` : ''}${tiers.paint ? ' · painting: click or drag over sectors' : ''}` : `${m.sectors.length} sectors, ${held} held`;
+}
+// ----- painting loot tiers -----
+async function loadTiers() { try { const r = await ipc.invoke('drpf:lootTiers'); tiers.data = r; tiers.at = Date.now(); } catch { tiers.data = null; } }
+function paintAt(c, px, py) {
+  const w = toWorld(c, px, py); const id = sectorAt(w[0], w[1]); if (id < 1) return;
+  const saved = savedSector(id);
+  if (tiers.mode === 'class') { const was = saved ? saved.cls || '' : ''; if (tiers.clsBrush === was) tiers.clsEdits.delete(id); else tiers.clsEdits.set(id, tiers.clsBrush); }
+  else { const was = saved ? saved.tier || 0 : 0; if (tiers.brush === was) tiers.edits.delete(id); else tiers.edits.set(id, tiers.brush); }
+  renderTierPanel(); scheduleDraw();
+}
+function renderTierPanel() {
+  const box = $('admTierBox'); if (!box) return; box.hidden = !(adm.zones && adm.zones.available && sec.map);
+  if (box.hidden) return;
+  $('admTierCount').textContent = unsavedCount() ? `(${unsavedCount()} unsaved)` : '';
+  const modes = `<div class="row gap"><button class="btn small ${tiers.mode === 'tier' ? 'primary' : ''}" data-mode="tier">Tiers</button><button class="btn small ${tiers.mode === 'class' ? 'primary' : ''}" data-mode="class">Zone classes</button></div>`;
+  const brushes = tiers.mode === 'class'
+    ? [{ id: '', name: 'Automatic' }, ...((tiers.data && tiers.data.classes) || [])].map(cl => `<button class="btn small ${tiers.paint && tiers.clsBrush === cl.id ? 'primary' : ''}" data-cls="${esc(cl.id)}" style="${cl.id ? `border-color:${classColor(cl.id)}` : ''}">${esc(cl.name)}</button>`).join('')
+    : [0, 1, 2, 3, 4].map(t => `<button class="btn small ${tiers.paint && tiers.brush === t ? 'primary' : ''}" data-tier="${t}" style="${t ? `border-color:${TIER_COLORS[t]}` : ''}">${t ? 'Tier ' + t : 'None'}</button>`).join('');
+  $('admTierTools').innerHTML = modes + brushes + `<button class="btn small ${tiers.paint ? '' : 'primary'}" data-tier="off">${tiers.paint ? 'Stop painting' : 'Pan the map'}</button>`;
+  $('admTierSave').disabled = !unsavedCount(); $('admTierDiscard').disabled = !unsavedCount();
+}
+async function saveTierPaint() {
+  const list = new Map((tiers.data && tiers.data.sectors || []).map(x => [x.id, { tier: x.tier || 0, cls: x.cls || '' }]));
+  for (const [id, t] of tiers.edits) list.set(id, { ...(list.get(id) || { cls: '' }), tier: t });
+  for (const [id, c] of tiers.clsEdits) list.set(id, { ...(list.get(id) || { tier: 0 }), cls: c });
+  try { await ipc.invoke('drpf:saveLootTiers', { sectors: [...list].map(([id, v]) => ({ id, tier: v.tier, cls: v.cls })).filter(x => x.tier || x.cls) }); tiers.edits.clear(); tiers.clsEdits.clear(); await loadTiers(); renderTierPanel(); scheduleDraw(); toast('Saved. The server reloads the loot tiers and zone classes within a few seconds.'); }
+  catch (e) { toast(e.message, true); }
+}
+// right-click on a sector
+function sectorMenu(id, w) {
+  const s = sec.map.byId.get(id); const o = sectorOwner(id);
+  return [
+    { header: `${s.name} · ${KINDS[s.kind] || ''} · ${o ? `held by [${o.tag}] ${o.name}` : 'unclaimed'} · ${tierOf(id) ? 'Tier ' + tierOf(id) : 'no loot tier'} · ${className(classEff(id))}${classOf(id) ? '' : ' (automatic)'}` },
+    { label: 'Loot tier', sub: [0, 1, 2, 3, 4].map(t => ({ label: t ? 'Tier ' + t : 'None', run: () => { tiers.edits.set(id, t); renderTierPanel(); scheduleDraw(); toast('Painted: save to keep it'); } })) },
+    { label: 'Zone class', sub: [{ id: '', name: 'Automatic' }, ...((tiers.data && tiers.data.classes) || [])].map(cl => ({ label: cl.name, run: () => { tiers.clsEdits.set(id, cl.id); renderTierPanel(); scheduleDraw(); toast('Painted: save to keep it'); } })) },
+    { label: 'Give this sector to a faction', sub: (adm.zones.factions || []).map(f => ({ label: `[${f.tag}] ${f.name}`, run: () => withReason(`Give ${s.name} to [${f.tag}] ${f.name}`, '', 'Give', (why) => ipc.invoke('drpf:command', { op: 'grant_cell', factionId: f.id, cellX: id, cellZ: 0, reason: why }).then(() => toast('Sent: the server applies it within a few seconds')).catch(e => toast(e.message, true))) })) },
+    ...(o ? [{ label: `Take it from [${o.tag}] ${o.name}`, danger: true, run: () => withReason(`Take ${s.name} from [${o.tag}] ${o.name}?`, '<p>A captured sector is removed; a claimed one loses its claim (the table stays).</p>', 'Take', (why) => { const claim = (adm.zones.factions.find(f => f.id === o.id) || { cells: [] }).cells.find(c => c.x === id); const cmd = claim && claim.kind !== 'captured' && claim.claimId ? { op: 'remove_claim', factionId: o.id, claimId: claim.claimId } : { op: 'remove_cell', factionId: o.id, cellX: id, cellZ: 0 }; ipc.invoke('drpf:command', { ...cmd, reason: why }).then(() => toast('Sent')).catch(e => toast(e.message, true)); }) }] : []),
+    { sep: true },
+    ...pointMenu(w).slice(1)
+  ];
+}
+function zoneResultToast(prev, next) {
+  if (prev === null || !next || !next.available || next.result.seq <= prev) return;
+  const msg = next.result.messages[next.result.messages.length - 1] || 'Applied';
+  toast('Server: ' + msg.replace(/^\d\d:\d\d:\d\d /, ''), /Unknown|refused|No /.test(msg));
+}
+
 $('admSearch').addEventListener('input', renderAdmin);
 $('btnKits').onclick = () => kitManager();
 $('admList').addEventListener('click', e => { const it = e.target.closest('.ip-item'); if (it && it.dataset.id) admSelect(it.dataset.id); });
@@ -602,13 +772,23 @@ $('mapCanvas').addEventListener('contextmenu', e => {
   if (hit) { admSelect(hit.id); showCtx(playerMenu(hit), e.clientX, e.clientY); }
   else if (wh && wh.kind === 'vehicle') { adm.selVeh = wh.obj.id; renderVehPanel(); scheduleDraw(); showCtx(vehicleMenu(wh.obj), e.clientX, e.clientY); }
   else if (wh && wh.kind === 'flag') showCtx(flagMenu(wh.obj), e.clientX, e.clientY);
-  else showCtx(pointMenu(toWorld(c, px, py)), e.clientX, e.clientY);
+  else { const w = toWorld(c, px, py); const sid = zoneOn() ? sectorAt(w[0], w[1]) : -1; showCtx(sid > 0 ? sectorMenu(sid, w) : pointMenu(w), e.clientX, e.clientY); }
 });
 document.addEventListener('click', e => { if (!e.target.closest('#ctxMenu')) closeCtx(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCtx(); if (adm.pickTp) { adm.pickTp = null; $('mapCanvas').style.cursor = ''; toast('Teleport cancelled'); } if (adm.pickVtp) { adm.pickVtp = null; $('mapCanvas').style.cursor = ''; toast('Move cancelled'); } } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCtx(); if (adm.pickTp) { adm.pickTp = null; $('mapCanvas').style.cursor = ''; toast('Teleport cancelled'); } if (adm.pickVtp) { adm.pickVtp = null; $('mapCanvas').style.cursor = ''; toast('Move cancelled'); } if (tiers.paint) { tiers.paint = false; renderTierPanel(); toast('Stopped painting'); } } });
 $('admVehSearch').addEventListener('input', renderVehPanel);
 $('admVehList').addEventListener('click', e => { const it = e.target.closest('[data-vid]'); if (!it) return; adm.selVeh = it.dataset.vid; const v = liveVeh(adm.selVeh); if (v) centreOn(v); renderVehPanel(); scheduleDraw(); });
 $('admVehList').addEventListener('contextmenu', e => { const it = e.target.closest('[data-vid]'); const v = it && liveVeh(it.dataset.vid); if (!v) return; e.preventDefault(); adm.selVeh = v.id; renderVehPanel(); showCtx(vehicleMenu(v), e.clientX, e.clientY); });
-$('lyrVeh').onchange = $('lyrFlags').onchange = () => scheduleDraw();
+$('lyrVeh').onchange = $('lyrFlags').onchange = $('lyrZones').onchange = () => scheduleDraw();
+$('lyrTiers').onchange = () => { if ($('lyrTiers').checked) $('lyrZones').checked = true; else tiers.paint = false; renderTierPanel(); scheduleDraw(); };
+$('admTierTools').addEventListener('click', e => {
+  const m = e.target.closest('[data-mode]'); if (m) { tiers.mode = m.dataset.mode; $('lyrTiers').checked = true; $('lyrZones').checked = true; renderTierPanel(); scheduleDraw(); return; }
+  const cb = e.target.closest('[data-cls]'); if (cb) { tiers.paint = true; tiers.clsBrush = cb.dataset.cls; $('lyrTiers').checked = true; $('lyrZones').checked = true; renderTierPanel(); scheduleDraw(); return; }
+  const b = e.target.closest('[data-tier]'); if (!b) return;
+  if (b.dataset.tier === 'off') { tiers.paint = false; } else { tiers.paint = true; tiers.brush = Number(b.dataset.tier); $('lyrTiers').checked = true; $('lyrZones').checked = true; }
+  renderTierPanel(); scheduleDraw();
+});
+$('admTierSave').onclick = () => saveTierPaint();
+$('admTierDiscard').onclick = () => { tiers.edits.clear(); tiers.clsEdits.clear(); renderTierPanel(); scheduleDraw(); };
 
 mapInit();

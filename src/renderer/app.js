@@ -137,7 +137,8 @@ const NAV = [
     { page: 'whitelist', label: 'Whitelist', sub: 'Who may join when enableWhitelist is on (whitelist.txt)', icon: 'lists' },
     { page: 'tickets', label: 'Tickets', sub: 'Support tickets with assignees, notes, linked deaths and the admin actions done for them', icon: 'lists' },
     { page: 'priority', label: 'Priority queue', sub: 'Who skips the login queue (priority.txt)', icon: 'priority' },
-    { page: 'map', label: 'Map', sub: 'Live players with admin actions (right-click), loot, vehicles and heat', icon: 'map' }
+    { page: 'map', label: 'Map', sub: 'Live players with admin actions (right-click), loot, vehicles and heat', icon: 'map' },
+    { page: 'factions', label: 'Factions', sub: 'DRP Factions: install it, factions, territory, wars, players, settings and admins (loot zones are on the Map)', icon: 'players' }
   ] },
   { title: 'Integrations', items: [
     { page: 'discord', label: 'Discord Bot', sub: 'Slash commands, whitelist applications, bans, live logs', icon: 'discord' },
@@ -184,6 +185,7 @@ function showPage(name) {
   if (name === 'mission') refreshMission();
   if (name === 'tasks') refreshTasks();
   if (name === 'network') refreshNetwork();
+  if (name === 'factions' && typeof fxStart === 'function') fxStart();
   if (name === 'map') { loadMapInfo().then(() => { scheduleDraw(); ensureMapImage(false); mapLive(true); }); }
   if (name === 'stats') { refreshStats(); refreshCombat(); }
   if (name === 'audit') refreshAudit();
