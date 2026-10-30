@@ -111,7 +111,7 @@ function ingest() {
       fresh.push(j);
     }
   } finally { fs.closeSync(fd); }
-  for (const e of fresh) if (e.ev === 'admin') auditAdmin(e);
+  for (const e of fresh) if (e.ev === 'admin') { auditAdmin(e); try { require('./netwatch').noteGameTeleport(e); } catch { /* no movement watch */ } }
   // anticheat checks the mod makes on hits (melee reach, beyond a weapon's range, admins hurting players while
   // invisible or in god mode): suspicious activity, which alerts and feeds the watchlist
   for (const e of fresh) {

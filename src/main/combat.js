@@ -17,7 +17,7 @@ function player(key, name) { const d = load(); if (!d.players[key]) d.players[ke
 // Thresholds (settings.combatFlags) and what they catch. None of this is proof; it points an admin at a replay or a closer look.
 function flagCfg() { try { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20, ...(require('./settings').load().combatFlags || {}) }; } catch { return { headshotRate: 0.55, minHitsForRate: 25, longHeadshotM: 400, extremeKillM: 900, burstHits: 4, burstWindowMs: 1500, killBurst: 3, killBurstMs: 10000, speedMps: 80, alertScore: 3, relogCount: 4, relogWindowMs: 600000, combatLogSec: 20 }; }
 }
-const FLAG_WEIGHT = { 'duplicate item': 4, 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4, 'high ping': 1, 'ping spikes': 2, 'lag switch': 3 };
+const FLAG_WEIGHT = { 'duplicate item': 4, 'headshot rate': 2, 'long-range headshot': 2, 'multi-target burst': 3, 'impossible movement': 3, 'teleport without admin action': 3, 'extreme-range kill': 1, 'kill burst': 2, 'rapid relogs': 3, 'combat logging': 1, 'BattlEye kick': 4, 'high ping': 1, 'ping spikes': 2, 'lag switch': 3 };
 function raise(p, reason, detail, ts) {
   // The player's ping at the time (netwatch.js), so a jump during lag reads differently from a clean speed hack.
   try { if (!/ · ping \d/.test(String(detail))) detail = String(detail || '') + require('./netwatch').pingNote(p.name); } catch { /* no ping data */ }

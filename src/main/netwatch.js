@@ -6,6 +6,10 @@
 // "impossible movement"; a single jump of teleportM or more on foot (vehicleTeleportM in a vehicle) is flagged at once.
 // Not checked: dead players, players the tool just teleported (map, Discord, death teleports; noteTeleport), the first
 // position after a login or respawn, and players in god mode, frozen or invisible (admins at work).
+// Teleports admins make in game with DRP_Admin (to the cursor, to a player, Bring, saved spots, vehicles, freecam) reach
+// the app as "admin" events a little after the move (drpadmin.ingest -> noteGameTeleport), so every movement flag is
+// held HOLD_MS first and dropped when such a teleport of that player (as the admin or the target) is close in time. A
+// single jump that nothing explains is flagged as "teleport without admin action"; fast movement as before.
 //
 // Ping: RCon's player list (BattlEye's ping per player) is sampled every 15 s and matched to players by name.
 //   high ping     the median of the last 2 minutes is above highPingMs
@@ -20,12 +24,17 @@ const MOVE_EVERY_MS = 4000;
 const PING_EVERY_MS = 15000;
 const PING_KEEP_MS = 30 * 60000;
 const TP_GRACE_MS = 20000;
+const HOLD_MS = 20000;            // a movement flag waits this long for a DRP_Admin teleport to explain it
+const GAME_TP_WINDOW_MS = 30000;  // how close in time that teleport must be
+const GAME_TP = new Set(['tp_cursor', 'tpto', 'bring', 'tp_spot', 'freecam', 'spectate', 'vehicle_tpto', 'vehicle_bring']);
 let emitRef = () => {};
 let moveTimer = null, pingTimer = null;
 const state = new Map();          // identity id -> { name, pos, fast, lastMoveFlag, ... }
 const pings = new Map();          // lower-case name -> { name, samples: [[ts, ms]], spikes: [ts], lastHighFlag, lastSpikeFlag }
 const teleported = new Map();     // identity id or Steam id -> until (ts)
 let vehicleGraceUntil = 0;
+const gameTps = [];               // DRP_Admin teleports: { keys: [id, steam, ...], ts, vehicle }
+const held = [];                  // movement flags waiting: { id, steam, name, ts, heldAt, jump, inVehicle, detail, laggy }
 let liveAt = 0;                   // when live positions were last read (combat.js skips its own fight-only check then)
 
 function cfg() {
@@ -40,6 +49,33 @@ function noteTeleport(cmd) {
   if (cmd.type === 'vtp') { vehicleGraceUntil = until; return; }
   if (cmd.id && cmd.id !== '-') teleported.set(String(cmd.id), until);
 }
+// A DRP_Admin teleport (an "admin" event from the mod): the admin and the target, if any, moved.
+function noteGameTeleport(e) {
+  if (!e || !GAME_TP.has(e.action)) return false;
+  const keys = [];
+  // the admin moves (to the cursor, a player, a spot, a vehicle, into freecam); Bring and a spot sent to a player move the
+  // target, spectating does not
+  const moved = e.action === 'bring' || e.action === 'tp_spot' ? [e.by, e.target] : [e.by];
+  for (const w of moved) if (w) for (const k of [w.id, w.steam]) if (k) keys.push(String(k));
+  gameTps.push({ keys, ts: e.ts || Date.now(), vehicle: String(e.action).startsWith('vehicle_') });
+  const cut = Date.now() - 5 * 60000;
+  while (gameTps.length && gameTps[0].ts < cut) gameTps.shift();
+  return true;
+}
+const explained = (h) => gameTps.some(g => Math.abs(g.ts - h.ts) <= GAME_TP_WINDOW_MS && (g.keys.includes(String(h.id)) || (h.steam && g.keys.includes(String(h.steam))) || (g.vehicle && h.inVehicle)));
+// Flags held long enough: read the mod's latest events once, then flag what no teleport explains.
+function releaseHeld(now = Date.now()) {
+  if (!held.some(h => now - h.heldAt >= HOLD_MS)) return;
+  try { require('./drpadmin').ingest(); } catch { /* no DRP_Admin */ }
+  for (let i = 0; i < held.length;) {
+    const h = held[i];
+    if (now - h.heldAt < HOLD_MS) { i++; continue; }
+    held.splice(i, 1);
+    if (explained(h)) continue;
+    combat().flagExternal(h.id, h.name, h.jump ? 'teleport without admin action' : 'impossible movement', h.detail, h.ts);
+    if (h.laggy) combat().flagExternal(h.id, h.name, 'lag switch', `${h.detail} during ${h.laggy}`, h.ts);
+  }
+}
 const graced = (p) => [p.id, p.steam].some(k => k && (teleported.get(k) || 0) > Date.now()) || (p.vehicle && vehicleGraceUntil > Date.now());
 
 // ---------- movement ----------
@@ -48,6 +84,7 @@ function sampleMovement() {
   try { data = require('./live').players(); } catch { return; }
   if (!data.available) return;
   liveAt = Date.now();
+  releaseHeld();
   const c = cfg();
   const ts = data.at || Date.now();
   const seen = new Set();
@@ -77,13 +114,12 @@ function sampleMovement() {
       s.fast = 0;
       const how = inVehicle ? `in ${p.vehicle || 'a vehicle'}` : 'on foot';
       const detail = `${Math.round(dist)} m in ${dt.toFixed(1)} s ${how} (${Math.round(mps)} m/s, limit ${limit})`;
-      combat().flagExternal(p.id, p.name, 'impossible movement', detail, ts);
       const pk = pings.get(p.name.toLowerCase());
       // A spike that is still going on counts too (its ping has not come back down yet).
       const spike = pk && (pk.spikes.some(t => Math.abs(ts - t) <= 30000) || (pk.pendingSpike && Math.abs(ts - pk.pendingSpike.ts) <= 30000)
         || pk.samples.some(([t, ms]) => Math.abs(ts - t) <= 30000 && ms > c.spikeMs));
       const high = pk && median(recent(pk, 120000)) > c.highPingMs;
-      if (spike || high) combat().flagExternal(p.id, p.name, 'lag switch', `${detail} during ${spike ? 'a ping spike' : 'high ping'}`, ts);
+      held.push({ id: p.id, steam: p.steam, name: p.name, ts, heldAt: Date.now(), jump: dist >= jump, inVehicle, detail, laggy: spike ? 'a ping spike' : high ? 'high ping' : '' });
     }
   }
   for (const id of state.keys()) if (!seen.has(id)) state.delete(id);   // logged out: the next login starts fresh
@@ -157,4 +193,4 @@ function init(emit) {
   pingTimer = setInterval(() => { samplePing().catch(() => {}); }, PING_EVERY_MS);
 }
 
-module.exports = { init, noteTeleport, pingStats, pingNote, liveMovement, _test: { sampleMovement, samplePing, state, pings } };
+module.exports = { init, noteTeleport, noteGameTeleport, pingStats, pingNote, liveMovement, _test: { sampleMovement, samplePing, releaseHeld, state, pings, held, gameTps } };
