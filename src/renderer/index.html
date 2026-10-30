@@ -308,6 +308,7 @@
               <button class="tab etab active" data-etab="types">Types</button>
               <button class="tab etab" data-etab="events">Events</button>
               <button class="tab etab" data-etab="spawnable">Spawnable types</button>
+              <button class="tab etab" data-etab="live" title="How many of each item are in the world now against nominal and min (needs the anti-dupe mod)">Live counts</button>
             </div>
             <select id="ecoFile" class="input eco-file"></select>
             <button class="btn small" id="btnEcoUnregister" title="Remove the selected custom file from cfgeconomycore.xml (the file is kept)">Unregister</button>
@@ -376,6 +377,11 @@
             </div>
           </div>
 
+          <div class="eco-pane" id="eco-live" hidden>
+            <div class="row gap wrap eco-filters"><input id="elSearch" class="input" placeholder="Name contains…" style="width:200px"><select id="elStatus" class="input eco-sel"><option value="">Every item</option><option value="under">Under min</option><option value="over">Over nominal</option><option value="unlisted">Not in types (or nominal 0)</option><option value="ok">Within range</option></select><span class="muted" id="elInfo"></span><span class="grow"></span><button class="btn small" id="btnElRefresh">Refresh</button></div>
+            <div class="muted" style="margin:4px 0">Counted the way the Central Economy counts: each item's count_in_map, count_in_hoarder (tents, barrels, crates, stashes) and count_in_cargo flags. Items players carry are not in the sweep, so counts can only be lower than the economy's.</div>
+            <div class="table-wrap" style="max-height:calc(100vh - 260px)"><table class="table" id="elTable"><thead><tr><th>Item</th><th>Category</th><th>Nominal</th><th>Min</th><th>Counted</th><th>Ground</th><th>Storage</th><th>In items</th><th>State</th></tr></thead><tbody></tbody></table></div>
+          </div>
           <div class="problems-head row between" id="ecoProblemsHead" hidden><span id="ecoProblemsTitle">Problems</span><span class="muted">Saving validates the file; problems are highlighted in the Config Editor.</span></div>
           <div id="ecoProblems" class="problems eco-problems" hidden></div>
         </section>

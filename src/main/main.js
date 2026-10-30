@@ -318,6 +318,7 @@ handle('players:rebuild', () => players.rebuild());
 handle('players:ingest', () => players.ingest());
 handle('players:discordRoles', (ids) => discord.rolesFor(ids || []));
 handle('players:history', (key) => require('./profile').history(key));
+handle('economy:insight', () => require('./econinsight').insight());
 handle('steam:state', () => steambans.state());
 handle('steam:all', () => steambans.all());
 handle('steam:check', (id) => steambans.check(id));

@@ -1862,9 +1862,10 @@ async function refreshEconomy() {
 }
 function ecoFillFlagNames() { const kind = $('bulkFlagKind').value; const list = { usage: eco.limits.usages, value: eco.limits.values, tag: eco.limits.tags, category: eco.limits.categories }[kind] || []; $('bulkFlagName').innerHTML = list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join(''); }
 $('bulkFlagKind').onchange = ecoFillFlagNames;
-document.querySelectorAll('.etab').forEach(t => t.onclick = () => ecoSetTab(t.dataset.etab));
+document.querySelectorAll('.etab').forEach(t => t.onclick = () => t.dataset.etab === 'live' ? ecoLive() : ecoSetTab(t.dataset.etab));
 function ecoSetTab(tab) {
   eco.tab = tab;
+  ecoLiveShow(false);
   if (tab === 'spawnable') loadItemCatalog().then(renderItemPicker).catch(() => {});
   if (tab === 'types') renderBrush();
   document.querySelectorAll('.etab').forEach(x => x.classList.toggle('active', x.dataset.etab === tab));
@@ -1876,6 +1877,36 @@ function ecoSetTab(tab) {
   if (st && list.some(f => f.abs === st.abs)) sel.value = st.abs; else if (list.length) { sel.value = list.find(f => f.exists) ? list.find(f => f.exists).abs : list[0].abs; ecoLoad(); return; }
   ecoRender();
 }
+// Live counts: items in the world now against nominal and min (econinsight.js, from the anti-dupe mod's item sweep).
+const ECO_FILE_CONTROLS = ['ecoFile', 'btnEcoUnregister', 'btnEcoNewFile', 'btnEcoImport', 'ecoInfo', 'btnEcoOpenEditor', 'btnEcoRevert', 'btnEcoSave'];
+let ecoLiveData = null;
+function ecoLiveShow(on) {
+  $('eco-live').hidden = !on;
+  ECO_FILE_CONTROLS.forEach(id => { $(id).hidden = on; });
+  if (on) { ['types', 'events', 'spawnable'].forEach(k => { $('eco-' + k).hidden = true; }); document.querySelectorAll('.etab').forEach(x => x.classList.toggle('active', x.dataset.etab === 'live')); }
+}
+async function ecoLive() {
+  ecoLiveShow(true);
+  $('elInfo').textContent = 'Counting…';
+  try { ecoLiveData = await ipc.invoke('economy:insight'); } catch (e) { ecoLiveData = { available: false, reason: e.message }; }
+  renderEcoLive();
+}
+const EL_STATE = { under: ['bad', 'under min'], over: ['warn', 'over nominal'], unlisted: ['', 'not in types'], ok: ['ok', 'ok'] };
+function renderEcoLive() {
+  const d = ecoLiveData; const body = $('elTable').querySelector('tbody');
+  if (!d || !d.available) { $('elInfo').textContent = ''; body.innerHTML = `<tr><td colspan="9" class="muted">${esc((d && d.reason) || 'No data.')}</td></tr>`; return; }
+  $('elInfo').textContent = `${d.items.toLocaleString()} items, swept ${fmtDate(d.at)} · ${d.summary.under} under min · ${d.summary.over} over nominal · ${d.summary.unlisted} not in types`;
+  const q = $('elSearch').value.trim().toLowerCase(); const st = $('elStatus').value;
+  const order = { under: 0, over: 1, unlisted: 2, ok: 3 };
+  const gap = r => r.status === 'under' ? (r.min || 0) - r.counted : r.status === 'over' ? r.counted - (r.nominal || 0) : r.total;
+  const rows = d.rows.filter(r => (!q || r.name.toLowerCase().includes(q)) && (!st || r.status === st))
+    .sort((a, b) => order[a.status] - order[b.status] || gap(b) - gap(a) || a.name.localeCompare(b.name)).slice(0, 2000);
+  const n = v => v === null || v === undefined ? '<span class="muted">—</span>' : v;
+  body.innerHTML = rows.map(r => `<tr><td class="mono">${esc(r.name)}</td><td>${esc(r.category)}</td><td>${n(r.nominal)}</td><td>${n(r.min)}</td><td><b>${r.counted}</b></td><td>${r.map}</td><td>${r.hoarder}</td><td>${r.cargo}</td><td><span class="badge ${EL_STATE[r.status][0]}">${EL_STATE[r.status][1]}</span></td></tr>`).join('') || '<tr><td colspan="9" class="muted">Nothing matches.</td></tr>';
+}
+$('elSearch').addEventListener('input', () => { clearTimeout(renderEcoLive._t); renderEcoLive._t = setTimeout(renderEcoLive, 200); });
+$('elStatus').onchange = renderEcoLive;
+$('btnElRefresh').onclick = (e) => run(ecoLive, e.target);
 $('ecoFile').onchange = () => ecoLoad();
 $('btnEcoUnregister').onclick = (e) => run(async () => {
   const abs = $('ecoFile').value; const f = (eco.files ? [].concat(eco.files.types, eco.files.events, eco.files.spawnable) : []).find(x => x.abs === abs);
