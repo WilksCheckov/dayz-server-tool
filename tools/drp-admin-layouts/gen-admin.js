@@ -497,6 +497,23 @@ write('drpa_self.layout', content('sf_root', [
   multiText('sf_active', 8, 420, 260, 60, '', 13),
 ]));
 
+// ------------------------------------------------------------------ admin notices: one box, bottom right, never takes the mouse
+// (the game's notification list leaves entries stuck when they come fast; DRPA_Notice fills this box instead)
+fs.writeFileSync(path.join(OUT, 'drpa_notice.layout'), render({
+  cls: 'FrameWidgetClass', name: 'drpa_notice',
+  props: 'ignorepointer 1\n position 0 0\n size 1 1\n hexactpos 0\n vexactpos 0\n hexactsize 0\n vexactsize 0\n priority 999',
+  children: [{
+    cls: 'PanelWidgetClass', name: 'nt_panel',
+    props: `ignorepointer 1\n position 24 160\n size 440 40\n halign right_ref\n valign bottom_ref\n hexactpos 1\n vexactpos 1\n hexactsize 1\n vexactsize 1\n color 0.07 0.07 0.07 0.92\n style DayZDefaultPanel`,
+    children: [
+      { cls: 'PanelWidgetClass', name: 'nt_line', props: `ignorepointer 1\n position 0 0\n size 4 1\n hexactpos 1\n vexactpos 1\n hexactsize 1\n vexactsize 0\n color ${LINE}\n style DayZDefaultPanel` },
+      // rich text, so the script can read how tall the wrapped lines are
+      Object.assign(multiText('nt_text', 14, 8, 416, 24, '', 14), { cls: 'RichTextWidgetClass' }),
+    ],
+  }],
+}));
+console.log('wrote drpa_notice.layout');
+
 // ------------------------------------------------------------------ delete tool: the confirmation (a menu of its own)
 {
   const CW = 520, CH = 230, HEAD = 44;
