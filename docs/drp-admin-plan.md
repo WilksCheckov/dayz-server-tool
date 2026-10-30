@@ -122,7 +122,19 @@ Built next (2026-10-28), not yet tried in game:
   hits far beyond the weapon's longest zeroing (1.6×, at least 350 m) and admins hurting players while invisible or
   in god mode. Flags arrive as `ev:"flag"` and become suspicious activity (alerts, automatic watchlist). A cheater's
   own god mode cannot be told apart reliably, so it is not attempted.
-- **Admin notices** at most one a second, faster ones merged (fixes notices stuck on screen after spawning a lot).
+- **Admin notices** in a box of DRP_Admin's own (`drpa_notice.layout`, bottom right, last three notices, 4 s each, a
+  repeat counts up). The game's notification list left spammed notices stuck on screen. Confirmed in game 2026-10-29.
+- **Step 9, Phase F** (2026-10-29, app side, tested with unit tests, not yet tried with a real server or guild):
+  - *Player profile history* (Player database → History): deaths, kills, tickets, refunds, admin actions on the
+    player and dupe alerts, matched by DayZ id, Steam64, Discord id or name (`src/main/profile.js`).
+  - *Economy → Live counts*: items in the world now against nominal and min, counted by each item's
+    count_in_map / hoarder / cargo flags; under min, over nominal, not in types (`src/main/econinsight.js`). Items
+    players carry are not in the anti-dupe sweep, so counts can only be lower than the CE's.
+  - *Anticheat*: DRP_Admin's in-game teleports (cursor, to a player, Bring, spots, vehicles, freecam) now explain
+    movement flags; a jump nothing explains is "teleport without admin action" (`netwatch.js` holds each flag 20 s).
+  - *Discord*: in-game ticket posts and player replies carry "Reply to the player" (admins; the reply reaches the
+    game); death posts with a position carry "Teleport me there" (admins name their character once).
+  - Not done: an "open in game" link from the app's profile (needs a mod command).
 - **Heal / cure fixes**: curing now empties the stomach, removes the agents, switches off the disease modifiers and
   clears queued symptoms (in game and through the bridge, now v7). Heal fully also resets stats and wakes them.
 

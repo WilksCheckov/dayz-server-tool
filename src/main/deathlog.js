@@ -376,4 +376,4 @@ function housekeeping() {
 }
 
 function init(emit) { emitRef = emit; load(); }
-module.exports = { sendCommand, init, sourceKind, sourceLabel, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };
+module.exports = { deathPos, sendCommand, init, sourceKind, sourceLabel, record, ingestGear, list, get, forPlayer, stats, refund, heal, teleport, teleportToDeath, findPlayer, HEAL_KINDS, bridgeStatus, installBridge, removeBridge, ensureBridge, housekeeping, bridgeDir, online };

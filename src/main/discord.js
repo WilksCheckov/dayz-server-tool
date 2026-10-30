@@ -285,11 +285,13 @@ const warned = {};
 function warnOnce(key, msg) { const now = Date.now(); if (warned[key] && now - warned[key] < 600000) return; warned[key] = now; addLog(msg); }
 const sendFailed = (what, id) => e => warnOnce(what + id, `${what} not posted to channel ${id}: ${e && e.message || e}`);
 // Admin actions for accountability: to the admin action channel, else the action log channel; nothing when neither is set.
-async function postAdminAction({ title, color, fields }) {
+// ticketReply: an in-game ticket number; the post gets a Reply button that answers the player in game (admins only).
+async function postAdminAction({ title, color, fields, ticketReply = null }) {
   const c = cfg(); const id = c.adminLogChannelId || c.logChannelId; if (!id) return;
   if ((!client && !shared()) || !state.running) throw new Error('the bot is not running');
   const ch = await channel(id); if (!ch) throw new Error(`channel ${id} not found or not visible to the bot`);
-  await ch.send({ embeds: [new EmbedBuilder().setTitle(title.slice(0, 250)).setColor(color).addFields(fields).setFooter({ text: myName() }).setTimestamp(new Date())] });
+  const components = ticketReply ? [new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Primary').setCustomId(`gtreply-${ticketReply}`).setLabel('Reply to the player'))] : [];
+  await ch.send({ embeds: [new EmbedBuilder().setTitle(title.slice(0, 250)).setColor(color).addFields(fields).setFooter({ text: myName() }).setTimestamp(new Date())], components });
 }
 // A portal request that needs approval: posted to the admin action channel with Approve / Deny buttons (admins only).
 async function postApprovalRequest(r) {
@@ -443,7 +445,12 @@ function deathEmbed(r) {
   e.setFooter({ text: `/refund id:${r.id} spawns this gear at the player's feet while they are online` });
   return e;
 }
-async function postDeath(r) { const c = cfg(); if (!state.running || !c.deathLogChannelId || !r) return; const ch = await channel(c.deathLogChannelId); if (!ch) return warnOnce('death' + c.deathLogChannelId, `Death log channel ${c.deathLogChannelId} not found or not visible to the bot.`); ch.send({ embeds: [deathEmbed(r)] }).catch(sendFailed('Death log', c.deathLogChannelId)); }
+// A death with a known position gets a "Teleport me there" button: an admin names their character once (remembered).
+function deathRow(r) {
+  let pos = null; try { pos = require('./deathlog').deathPos(r); } catch { /* no position */ }
+  return pos ? [new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle('Secondary').setCustomId(`deathtp-${r.id}`).setLabel('Teleport me there (admins)'))] : [];
+}
+async function postDeath(r) { const c = cfg(); if (!state.running || !c.deathLogChannelId || !r) return; const ch = await channel(c.deathLogChannelId); if (!ch) return warnOnce('death' + c.deathLogChannelId, `Death log channel ${c.deathLogChannelId} not found or not visible to the bot.`); ch.send({ embeds: [deathEmbed(r)], components: deathRow(r) }).catch(sendFailed('Death log', c.deathLogChannelId)); }
 function feedEvent(ev) {
   if ((!client && !shared()) || !state.running || !ev || !ev.type) return;
   if (ev.ts < Date.now() - 2 * 60 * 1000) return; // replayed history, not live
@@ -952,6 +959,21 @@ async function onInteraction(interaction) {
     // ----- buttons -----
     if (interaction.isButton()) {
       const [req, a, b] = interaction.customId.split('-');
+      if (req === 'gtreply') {
+        if (!isAllowed(interaction)) return ephemeralErr('⛔ Only admins can answer tickets.');
+        const m = new ModalBuilder().setCustomId(`modal-gtreply-${a}`).setTitle(`Reply to ticket #${a}`.slice(0, 45));
+        m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('text').setLabel('The player reads this in game').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)));
+        return interaction.showModal(m);
+      }
+      if (req === 'deathtp') {
+        if (!isAllowed(interaction)) return ephemeralErr('⛔ Only admins can teleport.');
+        const known = (store().tpNames || {})[interaction.user.id] || (store().applications[interaction.user.id] || {}).characterName || '';
+        const m = new ModalBuilder().setCustomId(`modal-deathtp-${a}`).setTitle(`Teleport to death #${a}`.slice(0, 45));
+        const ti = new TextInputBuilder().setCustomId('player').setLabel('Your character in game (must be online)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60);
+        if (known) ti.setValue(known);
+        m.addComponents(new ActionRowBuilder().addComponents(ti));
+        return interaction.showModal(m);
+      }
       if (req === 'apr') {
         if (!isAllowed(interaction)) return ephemeralErr('⛔ Only admins can approve or deny requests.');
         try {
@@ -1043,6 +1065,31 @@ async function onInteraction(interaction) {
         saveStore(); emitRef('discord:state', status());
         addLog(`Application submitted by ${interaction.user.tag} (${steamId})`);
         return interaction.editReply({ content: 'Your application was submitted. You will be notified once it is reviewed.' });
+      }
+      if (id.startsWith('modal-gtreply-')) {
+        if (!isAllowed(interaction)) return ephemeralErr('⛔ Only admins can answer tickets.');
+        const tid = id.slice('modal-gtreply-'.length);
+        try { require('./tickets').message(tid, interaction.fields.getTextInputValue('text'), `${interaction.user.tag} (Discord)`, 'admin'); } catch (e) { return ephemeralErr('❌ ' + e.message); }
+        addLog(`${interaction.user.tag} answered in-game ticket #${tid}`);
+        return interaction.reply({ content: `Sent on ticket #${tid}. The player sees it in game the next time the server reads the ticket files.`, ephemeral: true });
+      }
+      if (id.startsWith('modal-deathtp-')) {
+        if (!isAllowed(interaction)) return ephemeralErr('⛔ Only admins can teleport.');
+        const did = Number(id.slice('modal-deathtp-'.length)); const pname = interaction.fields.getTextInputValue('player').trim();
+        await interaction.deferReply({ ephemeral: true });
+        const dl = require('./deathlog'); const al = require('./adminlog');
+        const rec = dl.get(did); if (!rec) return interaction.editReply({ content: `No death record #${did}.` });
+        const pos = dl.deathPos(rec); if (!pos) return interaction.editReply({ content: `Death #${did} has no position.` });
+        const p = dl.findPlayer(pname); if (!p) return interaction.editReply({ content: `No player called "${pname}" in the player database.` });
+        store().tpNames = { ...(store().tpNames || {}), [interaction.user.id]: p.name }; saveStore();
+        if (!p.online) return interaction.editReply({ content: `${p.name} is not online.` });
+        const by = interaction.user.tag; const reason = `death #${did}`;
+        try {
+          al.check('tp', reason);
+          const res = await dl.teleport(p.key, pos, { by });
+          al.record({ action: 'tp', by, source: 'discord', target: { name: p.name, steam: p.steamId }, details: `to death #${did} of ${rec.name} (${Math.round(pos[0])}, ${Math.round(pos[1])})`, reason, result: res });
+          return interaction.editReply({ content: res.status === 'done' ? `📍 ${p.name} teleported to death #${did} (${Math.round(pos[0])}, ${Math.round(pos[1])}).` : res.status === 'offline' ? `${p.name} is not in game right now.` : 'The server did not answer in time. Is the bridge script installed and the server running?' });
+        } catch (e) { return interaction.editReply({ content: '❌ ' + e.message }); }
       }
       if (id === 'modal-ticket') {
         await interaction.deferReply({ ephemeral: true });

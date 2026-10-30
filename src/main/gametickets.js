@@ -80,7 +80,7 @@ function apply(j) {
       if (recent) T.link(t.id, recent.id, 'game');
     } catch { /* no death log */ }
     emitRef('console', { source: 'tickets', line: `In-game ticket #${t.id} from ${j.name}: ${title}` });
-    try { require('./discord').postAdminAction({ title: `🎫 New in-game ticket #${t.id}`, color: 0x4f8cff, fields: [{ name: 'Player', value: `${j.name || '?'}\nSteam64 ${j.steam}\nGUID ${j.guid || '?'}`, inline: true }, { name: 'Type', value: CATEGORIES[cat], inline: true }, { name: 'Urgency', value: URGENCY[urgency], inline: true }, { name: title.slice(0, 250), value: String(j.text || '—').slice(0, 1000) }] }).catch(() => {}); } catch { /* bot not loaded */ }
+    try { require('./discord').postAdminAction({ title: `🎫 New in-game ticket #${t.id}`, color: 0x4f8cff, fields: [{ name: 'Player', value: `${j.name || '?'}\nSteam64 ${j.steam}\nGUID ${j.guid || '?'}`, inline: true }, { name: 'Type', value: CATEGORIES[cat], inline: true }, { name: 'Urgency', value: URGENCY[urgency], inline: true }, { name: title.slice(0, 250), value: String(j.text || '—').slice(0, 1000) }], ticketReply: t.id }).catch(() => {}); } catch { /* bot not loaded */ }
     return true;
   }
   const t = T.all().find(x => x.id === T.pad(j.ticket || ''));
@@ -89,7 +89,9 @@ function apply(j) {
     case 'reply':
       if (!isPlayers(t, j.steam)) throw new Error('not their ticket');
       if (t.status !== 'open') throw new Error('the ticket is closed');
-      T.message(t.id, j.text, `${j.name || t.player} (player, in game)`, 'player'); return true;
+      T.message(t.id, j.text, `${j.name || t.player} (player, in game)`, 'player');
+      try { require('./discord').postAdminAction({ title: `💬 Ticket #${t.id}: ${j.name || t.player} replied`, color: 0x4f8cff, fields: [{ name: (t.game && t.game.title || t.subject || '').slice(0, 250) || 'Reply', value: String(j.text || '—').slice(0, 1000) }], ticketReply: t.id }).catch(() => {}); } catch { /* bot not loaded */ }
+      return true;
     case 'seen':
       if (!isPlayers(t, j.steam)) return false;
       T.patch(t.id, (s) => { s.game.seenAt = new Date().toISOString(); }); return true;
