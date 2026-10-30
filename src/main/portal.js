@@ -207,6 +207,8 @@ function requestFromGame(steam, cat, desc, rid, reason = '') {
   return r;
 }
 function approvalNeeds(userId) { const u = load().users[userId]; return u ? [...policyFor(u).needs] : []; }
+// the user's daily item cap (their most generous group's "items per day", 0 = none); the in-game mod applies it too
+function itemsPerDay(userId) { const u = load().users[userId]; return u ? policyFor(u).itemsPerDay : 0; }
 function describeRequest(r) {
   const a = r.args || {};
   if (r.action === 'ingame') return `${a.desc || 'in-game action'} (in game)${r.reason ? ` — ${r.reason}` : ''}`; const t = r.target ? ` for ${r.target.name}` : '';
@@ -459,4 +461,4 @@ function setOwner(name, password) {
 
 function init(emit) { emitRef = emit; }
 
-module.exports = { requestFromGame, approvalNeeds, init, handle, notify, status, setEnabled, setOwner, listUsers, listGroups, createUser, updateUser, deleteUser, upsertGroup, deleteGroup, setPolicy, login, sessionUser, decide, describeRequest, listRequests, PERMS, ACTION_PERM, CATEGORIES, _load: load };
+module.exports = { requestFromGame, approvalNeeds, itemsPerDay, init, handle, notify, status, setEnabled, setOwner, listUsers, listGroups, createUser, updateUser, deleteUser, upsertGroup, deleteGroup, setPolicy, login, sessionUser, decide, describeRequest, listRequests, PERMS, ACTION_PERM, CATEGORIES, _load: load };

@@ -18,6 +18,11 @@ const PREFIX = 'DRP_Admin_Server';
 const MAX_EVENTS = 3000;
 // bump when the event format or the hooks change in a way the tool must know about
 const MOD_VERSION = 1;
+// The version of the files the app shares with the DRP_Admin client mod (events, admins.json, requests, tickets, map
+// layers). The mod reports its own at start ("mod_start" event, DRPA_PROTOCOL); a different one gets a warning.
+const MOD_PROTOCOL = 1;
+const CORE = '@DRP_Core';
+const CLIENT_PBO = 'DRP_Admin.pbo';
 let db = null, saveTimer = null, emitRef = () => {};
 const file = () => path.join(app.getPath('userData'), 'drpadmin.json');
 function load() { if (db) return db; db = jsonstore.readOr(file(), null); db = { events: [], file: { offset: 0, rest: '' }, lastStart: null, ...(db || {}) }; return db; }
@@ -53,7 +58,37 @@ function status() {
   let current = null, error = null; try { current = buildHash(); } catch (e) { error = e.message; }
   const installed = fs.existsSync(pbo);
   const d = load();
-  return { enabled: cfg().enabled, installed, version: MOD_VERSION, build: built, current, upToDate: installed && built === current, dir, error, events: d.events.length, lastStart: d.lastStart };
+  return { enabled: cfg().enabled, installed, version: MOD_VERSION, build: built, current, upToDate: installed && built === current, dir, error, events: d.events.length, lastStart: d.lastStart, client: clientStatus() };
+}
+// The DRP_Admin client mod comes in @DRP_Core (built by the DayZ Developer Tools, copied in by the Factions setup):
+// is it on the server and on the mod list, are its keys in the keys folder, and which version did it last report?
+function clientStatus() {
+  const s = settings.load(); const p = settings.paths(s);
+  const core = path.join(p.serverDir, CORE);
+  const installed = fs.existsSync(path.join(core, 'addons', CLIENT_PBO));
+  const entry = (s.mods || []).find(m => m.id === CORE);
+  const onList = !!entry && entry.enabled !== false && !entry.serverSide;
+  let keys = []; try { keys = fs.readdirSync(path.join(core, 'keys')).filter(k => /\.bikey$/i.test(k)); } catch { /* no keys folder */ }
+  const missingKeys = keys.filter(k => !fs.existsSync(path.join(p.keysDir, k)));
+  const last = load().lastModStart || null;
+  const protocolOk = !last || last.protocol === MOD_PROTOCOL;
+  const problems = [];
+  if (!installed) problems.push(`${CLIENT_PBO} is not in ${CORE} on the server`);
+  else if (!onList) problems.push(`${CORE} is not on the mod list (or is server-side only)`);
+  if (installed && !keys.length) problems.push(`${CORE} has no keys folder: players cannot join with signature checks on`);
+  if (missingKeys.length) problems.push(`key ${missingKeys.join(', ')} is not in the server's keys folder`);
+  if (!protocolOk) problems.push(`the mod (v${last.version}) speaks protocol ${last.protocol}, this app ${MOD_PROTOCOL}: update ${last.protocol < MOD_PROTOCOL ? 'the mod' : 'the app'}`);
+  return { installed, onList, keys, missingKeys, version: last ? last.version : null, protocol: last ? last.protocol : null, expected: MOD_PROTOCOL, protocolOk, lastStart: last ? last.ts : null, problems };
+}
+// copy the keys @DRP_Core ships into the server's keys folder
+function installClientKeys() {
+  const p = settings.paths(); const src = path.join(p.serverDir, CORE, 'keys');
+  let keys = []; try { keys = fs.readdirSync(src).filter(k => /\.bikey$/i.test(k)); } catch { /* none */ }
+  if (!keys.length) throw new Error(`${CORE} on the server has no keys folder.`);
+  fs.mkdirSync(p.keysDir, { recursive: true });
+  for (const k of keys) fs.copyFileSync(path.join(src, k), path.join(p.keysDir, k));
+  emitRef('console', { source: 'drpadmin', line: `Copied ${keys.join(', ')} into the keys folder` });
+  return clientStatus();
 }
 function install() {
   const dir = modDir();
@@ -108,6 +143,7 @@ function ingest() {
       if (!j || typeof j.ev !== 'string') continue;
       j.ts = parseStamp(j.t); delete j.t;
       if (j.ev === 'start') d.lastStart = { ts: j.ts, world: j.world || null, version: j.version || null };
+      if (j.ev === 'mod_start') d.lastModStart = { ts: j.ts, version: j.version || null, protocol: Number(j.protocol) || 0 };
       fresh.push(j);
     }
   } finally { fs.closeSync(fd); }
@@ -196,7 +232,8 @@ function computeAdmins() {
     if (!u.enabled || !u.steam || out.has(u.steam) || !u.perms.includes('admin.menu')) continue;
     // the categories the portal says need another admin's approval for them: the mod sends those for approval
     let approval = []; try { approval = require('./portal').approvalNeeds(u.id); } catch { /* portal not loaded */ }
-    out.set(u.steam, { steam: u.steam, name: u.name, perms: u.perms.filter(p => INGAME_PERMS.includes(p)), ...(approval.length ? { approval } : {}) });
+    let itemsPerDay = 0; try { itemsPerDay = require('./portal').itemsPerDay(u.id) || 0; } catch { /* portal not loaded */ }
+    out.set(u.steam, { steam: u.steam, name: u.name, perms: u.perms.filter(p => INGAME_PERMS.includes(p)), ...(approval.length ? { approval } : {}), ...(itemsPerDay > 0 ? { itemsPerDay } : {}) });
   }
   return [...out.values()];
 }
@@ -226,4 +263,4 @@ function housekeeping() {
 }
 
 function init(emit) { emitRef = emit; load(); try { syncAdmins(); } catch { /* no server folder yet */ } }
-module.exports = { init, status, install, remove, setEnabled, ensure, active, launchMod, ingest, list, housekeeping, sources, buildHash, syncAdmins, computeAdmins, setOwners, owners, auditAdmin, MOD_FOLDER };
+module.exports = { init, status, clientStatus, installClientKeys, MOD_PROTOCOL, INGAME_PERMS, install, remove, setEnabled, ensure, active, launchMod, ingest, list, housekeeping, sources, buildHash, syncAdmins, computeAdmins, setOwners, owners, auditAdmin, MOD_FOLDER };

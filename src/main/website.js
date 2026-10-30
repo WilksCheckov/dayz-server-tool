@@ -18,7 +18,8 @@ let statusCache = { at: 0, data: null };
 
 const DEFAULT_PAGES = [
   { slug: 'rules', title: 'Rules', content: '# Server rules\n\n1. No cheating, exploiting or glitching.\n2. Respect other players and the admins.\n3. No racism, hate speech or harassment.\n\nBreaking the rules gets you banned. Appeal on our Discord.' },
-  { slug: 'about', title: 'About', content: '# About the server\n\nTell your players what makes your server special: map, loot economy, base building rules, events, wipes.' }
+  { slug: 'about', title: 'About', content: '# About the server\n\nTell your players what makes your server special: map, loot economy, base building rules, events, wipes.' },
+  { slug: 'help', title: 'Help & tickets', content: '# Getting help in game\n\nPress **K** in game to open **Help**. You can rebind it under Options → Controls → "Help and tickets".\n\n## Opening a ticket\n\n1. Pick what it is about: you died or lost gear, a report about a player, your base or building, a bug, a question, or something else.\n2. Give it a short title and describe what happened: where, when and who was involved.\n3. Send it. If you died in the last half hour, your death is attached for the admins automatically.\n\nYou can keep one ticket open per subject. After sending one, wait two minutes before opening another.\n\n## Answers\n\nAdmins answer in game. A notice tells you when there is a reply, and you can answer back from the Help window. Admins may also answer from Discord; the reply still shows in game.\n\nWhen the ticket is solved an admin closes it. If the problem comes back, open a new ticket and mention the old number (for example #0041).' }
 ];
 
 function cfg() {

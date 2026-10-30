@@ -458,6 +458,7 @@ handle('drpadmin:setEnabled', (on) => drpadmin.setEnabled(!!on));
 handle('drpadmin:events', (q) => drpadmin.list(q || {}));
 handle('drpadmin:admins', () => ({ admins: drpadmin.computeAdmins(), owners: drpadmin.owners(), sync: drpadmin.syncAdmins() }));
 handle('drpadmin:setOwners', (list) => drpadmin.setOwners(list));
+handle('drpadmin:installClientKeys', () => drpadmin.installClientKeys());
 handle('deathlog:get', (id) => { const r = deathlog.get(id); return r ? { ...r, tickets: tickets.forDeath(r.id) } : r; });
 handle('deathlog:forPlayer', (key) => deathlog.forPlayer(key));
 handle('deathlog:stats', () => deathlog.stats());

@@ -135,6 +135,21 @@ Built next (2026-10-28), not yet tried in game:
   - *Discord*: in-game ticket posts and player replies carry "Reply to the player" (admins; the reply reaches the
     game); death posts with a position carry "Teleport me there" (admins name their character once).
   - Not done: an "open in game" link from the app's profile (needs a mod command).
+- **Step 10, Phase G** (2026-10-30; mod compiled and loaded on the test server, limits not yet tried in game):
+  - *Version handshake*: DRP_Admin 0.2.0 writes `{"ev":"mod_start","version","protocol"}` to events.jsonl at start
+    (`DRPA_VERSION`, `DRPA_PROTOCOL` in DRPA_Common.c); the app's DRP_Admin card shows the client version and warns
+    when the protocol differs from `MOD_PROTOCOL` in drpadmin.js. The client and server PBO are the same file, so
+    signature checks already keep players on the server's version.
+  - *Client install state*: the card also shows whether DRP_Admin.pbo is in @DRP_Core on the server, @DRP_Core is on
+    the mod list (not server-side only) and its keys are in the keys folder, with *Copy the key*. Copying @DRP_Core
+    itself stays with the Factions setup.
+  - *Rate limits*: per admin, at most 30 spawn requests and 30 teleports (cursor, to a player, Bring, to a spot) a
+    minute; owners with `*` are not limited. The portal group's *items per day* now goes into admins.json
+    (`itemsPerDay`) and the mod enforces it per calendar day (`profiles/DRP_Admin/spawn_today.json`).
+  - *One permission list*: `test/drpadmin-release.test.js` fails if an in-game permission is missing from the
+    portal catalogue or the mod's `DRPA_PERM_` constants differ from `INGAME_PERMS` (generating the mod constants
+    was not done; the mod is built by another tool).
+  - *Docs*: the website has a default *Help & tickets* page (key K, categories, cooldown, answers in game).
 - **Heal / cure fixes**: curing now empties the stomach, removes the agents, switches off the disease modifiers and
   clears queued symptoms (in game and through the bridge, now v7). Heal fully also resets stats and wakes them.
 

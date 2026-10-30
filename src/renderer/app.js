@@ -1686,6 +1686,11 @@ async function refreshBridgeState() {
   $('daEnabled').checked = da.enabled;
   db.className = 'badge ' + (!da.enabled ? '' : da.error ? 'bad' : da.upToDate ? 'ok' : 'warn');
   db.textContent = !da.enabled ? 'off' : da.error ? da.error : da.upToDate ? `installed${da.lastStart ? ' · last loaded ' + fmtShort(da.lastStart.ts) : ''}` : da.installed ? 'update written at the next start' : 'written at the next start';
+  const cl = da.client || { problems: [] }; const cb = $('daClient');
+  cb.className = 'badge ' + (cl.problems.length ? (cl.installed ? 'warn' : 'bad') : 'ok');
+  cb.textContent = cl.problems.length ? cl.problems[0] : `client v${cl.version || '?'}${cl.lastStart ? ' · reported ' + fmtShort(cl.lastStart) : ' · not started yet'}`;
+  cb.title = cl.problems.length ? cl.problems.join('\n') : `DRP_Admin ${cl.version || '(not reported yet)'}, protocol ${cl.protocol || '?'} (this app: ${cl.expected})`;
+  $('btnDaKeys').hidden = !(cl.missingKeys && cl.missingKeys.length);
   refreshIngameAdmins();
 }
 async function refreshIngameAdmins() {
@@ -1695,6 +1700,7 @@ async function refreshIngameAdmins() {
   b.title = r.admins.map(a => `${a.name} ${a.steam}: ${a.perms.join(', ')}`).join('\n');
   if (document.activeElement !== $('daOwners')) $('daOwners').value = r.owners.join(' ');
 }
+$('btnDaKeys').onclick = (e) => run(async () => { await ipc.invoke('drpadmin:installClientKeys'); toast('Key copied into the server keys folder'); refreshBridgeState(); }, e.target);
 $('btnDaOwners').onclick = (e) => run(async () => { const r = await ipc.invoke('drpadmin:setOwners', $('daOwners').value); toast(r.error ? 'Saved, but admins.json could not be written: ' + r.error : 'Owner Steam ids saved'); refreshIngameAdmins(); }, e.target);
 // one line per DRP_Admin event: who did what to whom
 function daWho(w) { return !w ? '—' : w.name ? esc(w.name) : `<span class="muted">${esc(w.cls || '?')}</span>`; }
