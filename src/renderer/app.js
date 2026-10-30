@@ -1565,6 +1565,31 @@ function accountSection(r) {
       ${shared.length ? `<div><span class="muted">Shares an IP with</span><br>${shared.map(([g, x]) => `<b>${esc(x.name)}</b>${x.steamId ? ' <span class="mono muted">' + esc(x.steamId) + '</span>' : ''} <span class="muted">(${x.ips.map(esc).join(', ')})</span>`).join('<br>')}<div class="muted">Same household or carrier NAT can also cause this. Treat it as a lead, not proof.</div></div>` : ''}
     </div>`;
 }
+// The player's history from every module (profile.js): deaths, kills, tickets, refunds, admin actions, dupe alerts.
+let pdHistTab = 'deaths';
+async function pdHistory(r) {
+  const box = $('pdbDetail').querySelector('#pdHistory'); if (!box) return;
+  let h; try { h = await ipc.invoke('players:history', r.key); } catch (e) { box.innerHTML = `<div class="muted">History unavailable: ${esc(e.message)}</div>`; return; }
+  if (pdbSelected !== r.key) return;
+  const c = h.counts;
+  const tabs = [['deaths', `Deaths ${c.deaths}`], ['kills', `Kills ${c.kills}`], ['tickets', `Tickets ${c.tickets}${c.openTickets ? ` (${c.openTickets} open)` : ''}`], ['refunds', `Refunds ${c.refunds}`], ['actions', `Admin actions ${c.actions}`], ['dupes', `Dupe alerts ${c.dupes}`]];
+  const death = d => `<td>${fmtDate(d.ts)}</td><td>#${d.id}</td><td>${esc(d.causeText || d.cause || '')}${d.killer ? ` · ${esc(d.killer.name)}` : ''}${d.weapon ? ` · ${esc(d.weapon)}` : ''}${d.distance ? ` · ${Math.round(d.distance)} m` : ''}</td>`;
+  const body = {
+    deaths: () => h.deaths.map(d => `<tr>${death(d)}<td>${d.refunds ? '<span class="badge ok">refunded</span>' : ''}</td></tr>`),
+    kills: () => h.kills.map(d => `<tr><td>${fmtDate(d.ts)}</td><td>#${d.id}</td><td>${esc(d.name)}${d.weapon ? ` · ${esc(d.weapon)}` : ''}${d.distance ? ` · ${Math.round(d.distance)} m` : ''}</td><td></td></tr>`),
+    tickets: () => h.tickets.map(t => `<tr><td>${fmtDate(t.createdAt)}</td><td>#${esc(t.id)}</td><td>${esc(t.subject)} <span class="muted">(${esc(t.source)})</span></td><td><span class="badge ${t.status === 'open' ? 'warn' : ''}">${esc(t.status)}</span></td></tr>`),
+    refunds: () => h.refunds.map(f => `<tr><td>${fmtDate(f.ts)}</td><td>#${f.deathId}</td><td>gear refunded${f.refunds > 1 ? ` ×${f.refunds}` : ''}</td><td></td></tr>`),
+    actions: () => h.actions.map(a => `<tr><td>${fmtDate(a.ts)}</td><td>${esc(a.who)}</td><td><b>${esc(a.action)}</b> ${esc(a.details)}</td><td class="muted">${esc(a.source)}</td></tr>`),
+    dupes: () => h.dupes.map(d => `<tr><td>${fmtDate(d.ts)}</td><td>#${d.id}</td><td>${esc(d.cls)} · ${d.who.map(esc).join(' and ')}</td><td class="muted">${esc(d.source)}</td></tr>`),
+  };
+  const draw = () => {
+    const rows = body[pdHistTab]();
+    box.innerHTML = `<div class="card-title mt">History</div><div class="tabs">${tabs.map(([k, l]) => `<button class="tab pdh-tab ${k === pdHistTab ? 'active' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+      <div class="table-wrap" style="max-height:240px"><table class="table"><tbody>${rows.join('') || '<tr><td class="muted">Nothing recorded.</td></tr>'}</tbody></table></div>`;
+    box.querySelectorAll('.pdh-tab').forEach(b => b.onclick = () => { pdHistTab = b.dataset.k; draw(); });
+  };
+  draw();
+}
 function renderPdbDetail(r) {
   const box = $('pdbDetail');
   if (!r) { box.innerHTML = '<div class="empty">Select a player to see their history.</div>'; return; }
@@ -1602,6 +1627,7 @@ function renderPdbDetail(r) {
     </div>
     <label class="field">Notes <textarea id="pdNotes" class="input" rows="3">${esc(r.note || '')}</textarea></label>
     <div class="row gap"><button class="btn small primary" id="pdSaveNote">Save note</button></div>
+    <div id="pdHistory"></div>
     <div class="card-title mt">Recent sessions</div>
     <div class="table-wrap" style="max-height:220px"><table class="table"><thead><tr><th>Start</th><th>End</th><th>Length</th></tr></thead><tbody>${sessions.map(s => `<tr><td>${fmtDate(s.start)}</td><td>${fmtDate(s.end)}</td><td>${fmtPlaytime((s.end - s.start) / 1000)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No completed sessions.</td></tr>'}</tbody></table></div>`;
   box.querySelectorAll('.pd-heal').forEach(b => b.onclick = (e) => run(async () => { const why = await askWhy(`Heal ${r.name} (${b.textContent.trim().toLowerCase()})`); if (why === null) return; const res = await ipc.invoke('deathlog:heal', r.key, b.dataset.what, why); toast(res.status === 'done' ? `${r.name} healed (${b.textContent.trim().toLowerCase()})` : res.status === 'offline' ? `${r.name} is not in game right now` : 'The server did not answer. Is the bridge script installed (Death log page) and the server running?', res.status !== 'done'); }, e.target));
@@ -1613,6 +1639,7 @@ function renderPdbDetail(r) {
   const sp = box.querySelector('#pdSteam'); if (sp) sp.onclick = () => ipc.invoke('shell:openExternal', `https://steamcommunity.com/profiles/${r.steamId}`);
   box.querySelector('#pdSaveNote').onclick = (e) => run(async () => { await ipc.invoke('players:setNote', r.key, box.querySelector('#pdNotes').value); toast('Note saved'); refreshPdb(); }, e.target);
   pdWatch(r);
+  pdHistory(r);
   box.querySelector('#pdRemove').onclick = (e) => run(async () => { const ok = await showModal(`Delete record for ${r.name}?`, '', [{ label: 'Delete', value: true, primary: true }, { label: 'Cancel', value: false }]); if (!ok) return; await ipc.invoke('players:remove', r.key); pdbSelected = null; refreshPdb(); });
 }
 $('pdbTable').addEventListener('click', e => { const tr = e.target.closest('tr'); if (!tr || !tr.dataset.key) return; pdbSelected = tr.dataset.key; refreshPdb(); });
